@@ -1,0 +1,16 @@
+{
+    "display_name": "酒馆数据库生图",
+    "version": "0.1.0",
+    "author": "",
+    "loading_order": 100,
+    "requires": [],
+    "optional": [],
+    "dependencies": [],
+    "js": "index.js",
+    "css": "style.css",
+    "generate_interceptor": "NaiDbGen_StripSlots",
+    "hooks": {
+        "activate": "activate",
+        "disable": "dispose"
+    }
+}
