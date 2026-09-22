@@ -3,7 +3,8 @@
  * 归属：W2-G。
  *
  * 四态：idle（未生图）/ generating（生图中）/ done（已出图）/ error（失败）。
- * Abort 不计作失败（见 isAbortFailure / shouldTreatAsError）。
+ * Abort / SLOT_ALREADY_RENDERED 不计作失败红错。
+ * D43：非 Result（含 undefined）→ invalid，调用方不得清视觉表。
  */
 
 import { t } from '../i18n/zh-CN.js';
@@ -30,7 +31,6 @@ import { t } from '../i18n/zh-CN.js';
  */
 
 /**
- * 从 SlotRecord 取最新图片条目（不依赖 domain，避免 UI→domain 直连）。
  * @param {{ images?: Array<{ imageRef?: string }> }|null|undefined} record
  * @returns {{ imageRef: string }|null}
  */
@@ -46,12 +46,26 @@ export function latestImageEntry(record) {
 }
 
 /**
- * 记录是否已有可展示图片（持久层「已出图」）。
  * @param {{ images?: unknown[] }|null|undefined} record
  * @returns {boolean}
  */
 export function recordHasImage(record) {
     return latestImageEntry(record) != null;
+}
+
+/**
+ * @param {unknown} err
+ * @returns {string}
+ */
+function errorCode(err) {
+    if (err == null || typeof err !== 'object') {
+        return '';
+    }
+    const rec = /** @type {Record<string, unknown>} */ (err);
+    if (rec.error != null && rec.error !== err && typeof rec.ok === 'boolean') {
+        return errorCode(rec.error);
+    }
+    return rec.code != null ? String(rec.code) : '';
 }
 
 /**
@@ -64,8 +78,7 @@ export function isAbortFailure(err) {
         return false;
     }
     if (typeof err === 'object') {
-        const rec = /** @type {Record<string, unknown>} */ (err);
-        const code = rec.code != null ? String(rec.code) : '';
+        const code = errorCode(err);
         if (
             code === 'UPSTREAM_ABORTED'
             || code === 'NAI_ABORTED'
@@ -73,11 +86,11 @@ export function isAbortFailure(err) {
         ) {
             return true;
         }
+        const rec = /** @type {Record<string, unknown>} */ (err);
         const name = rec.name != null ? String(rec.name) : '';
         if (name === 'AbortError') {
             return true;
         }
-        // Result.Err 形态：{ ok:false, error }
         if (rec.error != null && rec.error !== err) {
             return isAbortFailure(rec.error);
         }
@@ -86,16 +99,30 @@ export function isAbortFailure(err) {
 }
 
 /**
- * 是否应进入 error 态（Abort → false）。
+ * 应用层闸门拒重出（D35）：正常工作，不弹红错。
+ * @param {unknown} err
+ * @returns {boolean}
+ */
+export function isAlreadyRenderedFailure(err) {
+    return errorCode(err) === 'SLOT_ALREADY_RENDERED';
+}
+
+/**
+ * 是否应进入 error 态（Abort / 已出图拒重出 → false）。
  * @param {unknown} err
  * @returns {boolean}
  */
 export function shouldTreatAsError(err) {
-    return err != null && !isAbortFailure(err);
+    if (err == null) {
+        return false;
+    }
+    if (isAbortFailure(err) || isAlreadyRenderedFailure(err)) {
+        return false;
+    }
+    return true;
 }
 
 /**
- * 面向用户的错误文案（已保证中文时原样取 message）。
  * @param {unknown} err
  * @returns {string}
  */
@@ -140,7 +167,6 @@ export function slotErrorTraceId(err, fallbackTraceId) {
 }
 
 /**
- * 状态修饰类（挂在 .nd-slot 上）。
  * @param {SlotUiState} state
  * @returns {string}
  */
@@ -159,7 +185,6 @@ export function slotStateClass(state) {
 }
 
 /**
- * 按钮文案。
  * @param {SlotUiState} state
  * @returns {string}
  */
@@ -178,8 +203,6 @@ export function slotButtonLabel(state) {
 }
 
 /**
- * 从持久记录 + 运行时快照推导 UI 视图。
- * 重挂载时：runtime 无 generating/error → 以 record.images 为准恢复 done/idle。
  * @param {{ images?: unknown[] }|null|undefined} record
  * @param {SlotRuntimeSnapshot|null|undefined} runtime
  * @returns {SlotUiView}
@@ -217,30 +240,40 @@ export function deriveSlotUiView(record, runtime) {
 }
 
 /**
- * 解析 Result / thenable 结算后的 UI 意图。
- * @param {unknown} settled 同步 Result、或 await 后的值、或抛出的 err
- * @returns {{ kind: 'ok' } | { kind: 'abort' } | { kind: 'error', error: unknown }}
+ * @param {unknown} value
+ * @returns {boolean}
+ */
+export function isResultShape(value) {
+    return value != null
+        && typeof value === 'object'
+        && typeof /** @type {{ ok?: unknown }} */ (value).ok === 'boolean';
+}
+
+/**
+ * 解析 onGenerateClick 结算（D43：必须是 Result）。
+ * @param {unknown} settled
+ * @returns {
+ *   | { kind: 'ok' }
+ *   | { kind: 'abort' }
+ *   | { kind: 'already' }
+ *   | { kind: 'error', error: unknown }
+ *   | { kind: 'invalid' }
+ * }
  */
 export function classifyGenerateSettlement(settled) {
-    if (settled == null) {
+    // D43：undefined / void / 非 Result → invalid，调用方不得清表
+    if (!isResultShape(settled)) {
+        return { kind: 'invalid' };
+    }
+    const result = /** @type {{ ok: boolean, error?: unknown }} */ (settled);
+    if (result.ok) {
         return { kind: 'ok' };
     }
-    if (typeof settled === 'object' && typeof /** @type {{ ok?: unknown }} */ (settled).ok === 'boolean') {
-        const result = /** @type {{ ok: boolean, error?: unknown }} */ (settled);
-        if (result.ok) {
-            return { kind: 'ok' };
-        }
-        if (isAbortFailure(result.error)) {
-            return { kind: 'abort' };
-        }
-        return { kind: 'error', error: result.error ?? settled };
-    }
-    if (isAbortFailure(settled)) {
+    if (isAbortFailure(result.error)) {
         return { kind: 'abort' };
     }
-    // 非 Result 的真值：若像 Error 则当失败，否则视为 ok（void 回调）
-    if (settled instanceof Error) {
-        return { kind: 'error', error: settled };
+    if (isAlreadyRenderedFailure(result.error)) {
+        return { kind: 'already' };
     }
-    return { kind: 'ok' };
+    return { kind: 'error', error: result.error ?? settled };
 }

@@ -45,10 +45,12 @@ const log = createLogger('application/tag-recall');
  */
 
 /**
- * 裁决 D31：召回结果。注入只用 matched；unmatched 必须交给上层（toast / 面板）。
+ * 裁决 D31：召回结果。注入只用 matched；unmatched 必须交给上层。
  * @typedef {object} TagRecallResult
  * @property {TagEntry[]} matched
  * @property {string[]} unmatched
+ * @property {boolean} llmCalled
+ *   裁决 D41：是否实际调用了 llm.complete（供 generateSlots 计数，禁止改写 port）
  */
 
 /**
@@ -105,7 +107,7 @@ export function createTagRecallService(deps) {
 
             // 无候选：不调用 LLM
             if (candidateKeys.length === 0) {
-                return Ok({ matched: [], unmatched: [] });
+                return Ok({ matched: [], unmatched: [], llmCalled: false });
             }
 
             if (!settings.recallLlmConfigId) {
@@ -176,7 +178,14 @@ export function createTagRecallService(deps) {
                 traceId,
             });
             if (!llmR.ok) {
-                return attachTraceId(llmR, traceId);
+                const err = attachTraceId(llmR, traceId);
+                if (err.error) {
+                    err.error.context = {
+                        ...(err.error.context ?? {}),
+                        llmCalled: true,
+                    };
+                }
+                return err;
             }
 
             const recalledKeys = extractRecalledKeyList(llmR.value.json, llmR.value.text);
@@ -198,12 +207,12 @@ export function createTagRecallService(deps) {
                         message: '标签召回 LLM 回文为空',
                         hint: '请检查召回预设与模型是否按约定返回 key 列表',
                         traceId: traceId ?? null,
-                        context: { rawText: llmR.value.text },
+                        context: { rawText: llmR.value.text, llmCalled: true },
                     }));
                 }
             }
 
-            return Ok({ matched, unmatched });
+            return Ok({ matched, unmatched, llmCalled: true });
         },
     };
 }

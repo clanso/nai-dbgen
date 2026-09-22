@@ -208,18 +208,78 @@ export function prepareImportCommit(raw, expectedKind) {
  * @returns {{ ok: true } | { ok: false, error: string }}
  */
 export function assertImportKind(data, expectedKind) {
-    if (!data || typeof data !== 'object' || Array.isArray(data)) {
-        // 裸数组：允许，由仓储侧再校验；UI 只拦 kind 错配
-        return { ok: true };
+    // D49：裸数组一律拒绝，强制信封
+    if (Array.isArray(data)) {
+        return {
+            ok: false,
+            error: '导入必须是带 kind 的信封对象，不接受裸数组',
+        };
+    }
+    if (!data || typeof data !== 'object') {
+        return { ok: false, error: '导入数据无效' };
     }
     const kind = /** @type {{ kind?: unknown }} */ (data).kind;
-    if (kind != null && String(kind) !== expectedKind) {
+    if (kind == null || kind === '') {
+        return { ok: false, error: '导入信封缺少 kind 字段' };
+    }
+    if (String(kind) !== expectedKind) {
         return {
             ok: false,
             error: `导入类型不匹配：期望 ${expectedKind}，实际 ${String(kind)}`,
         };
     }
     return { ok: true };
+}
+
+/**
+ * D45：表单字段叠到原实体上；未展示字段原样保留。
+ * @param {object|null|undefined} original
+ * @param {Record<string, unknown>} formFields
+ * @returns {Record<string, unknown>}
+ */
+export function applyFormFields(original, formFields) {
+    const base = original && typeof original === 'object' && !Array.isArray(original)
+        ? { ...original }
+        : {};
+    const patch = formFields && typeof formFields === 'object' ? formFields : {};
+    return { ...base, ...patch };
+}
+
+/**
+ * 预设 prompt 段：只覆盖表单编辑的键，保留 injection_* 等未展示字段。
+ * @param {object|null|undefined} original
+ * @param {object} formFields
+ * @returns {object}
+ */
+export function mergePresetPrompt(original, formFields) {
+    return applyFormFields(original, {
+        identifier: formFields.identifier,
+        name: formFields.name,
+        role: formFields.role,
+        content: formFields.content,
+        enabled: formFields.enabled,
+    });
+}
+
+/**
+ * 筛选/排序后按 id 取删除目标（禁止用可见列表下标当库下标）。
+ * @param {object[]} allItems
+ * @param {string[]} selectedIds
+ * @returns {string[]}
+ */
+export function resolveDeleteIdsByIdentity(allItems, selectedIds) {
+    const want = new Set((selectedIds || []).map((id) => String(id)));
+    const known = new Set(
+        (allItems || [])
+            .filter((item) => item && item.id != null)
+            .map((item) => String(item.id)),
+    );
+    /** @type {string[]} */
+    const out = [];
+    for (const id of want) {
+        if (known.has(id)) out.push(id);
+    }
+    return out;
 }
 
 /**

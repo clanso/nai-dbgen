@@ -7,6 +7,7 @@
 import { createButton, createField, createSelect } from '../../common/controls.js';
 import { createLlmApiConfig, createNaiApiConfig } from '../../../domain/model/api-config.js';
 import { mountLibraryView } from '../library-view.js';
+import { applyFormFields } from '../_lib/library-logic.js';
 import {
     el,
     setText,
@@ -262,15 +263,14 @@ export function mountApiConfigPanel(root, deps) {
                 return null;
             }
             const entity = item
-                ? {
-                    ...item,
+                ? applyFormFields(item, {
                     name,
                     baseUrl,
                     apiKey: keyField.getValue(),
                     model,
                     transport: transport.getValue() === 'direct' ? 'direct' : 'st-backend',
                     updatedAt: ids.now(),
-                }
+                })
                 : createLlmApiConfig(
                     {
                         name,
@@ -348,15 +348,14 @@ export function mountApiConfigPanel(root, deps) {
                 return null;
             }
             const entity = item
-                ? {
-                    ...item,
+                ? applyFormFields(item, {
                     name,
                     baseUrl,
                     apiKey: keyField.getValue(),
                     transport: transport.getValue() === 'st-cors-proxy' ? 'st-cors-proxy' : 'direct',
                     decoder: decoder.getValue(),
                     updatedAt: ids.now(),
-                }
+                })
                 : createNaiApiConfig(
                     {
                         name,

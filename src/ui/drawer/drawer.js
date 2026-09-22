@@ -34,8 +34,8 @@ export function mountDrawer(root, deps) {
         throw new Error('mountDrawer: loadSettings/saveSettings required');
     }
 
-    const shell = el('div', 'nd-drawer');
-    shell.id = 'nai-dbgen-root';
+    const shell = el('div', 'nd-drawer nd-root');
+    shell.id = 'nai-dbgen-drawer';
 
     const title = el('h3', 'nd-drawer__title');
     setText(title, '数据库生图');

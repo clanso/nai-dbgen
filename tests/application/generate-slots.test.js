@@ -5,6 +5,7 @@ import { ARTIST_PREVIEW_SIZE } from '../../src/domain/model/nai-params.js';
 import { stripSlotTokens } from '../../src/domain/slot/slot-token.js';
 import { createContextCollector } from '../../src/application/context-collector.js';
 import { createWorldInfoResolver } from '../../src/application/worldinfo-resolver.js';
+import { APP_EVENTS } from '../../src/application/_helpers.js';
 import {
     buildPipeline,
     createFakeHost,
@@ -305,12 +306,17 @@ describe('auto-trigger idempotency', () => {
         p.patchSettings({ autoWriteSlots: false, autoRenderSlots: true });
         p.autoTrigger.start();
 
-        // 证明 execute 未被包装：引用应仍是原始函数形状（可直接调用）
+        const rendered = new Promise((resolve, reject) => {
+            const t = setTimeout(() => reject(new Error('timeout')), 2000);
+            p.bus.on(APP_EVENTS.SLOT_RENDERED, (payload) => {
+                clearTimeout(t);
+                resolve(payload);
+            });
+        });
         const executeRef = p.generateSlots.execute;
         const r = await executeRef(2);
         assert.equal(isOk(r), true);
-        await new Promise((resolve) => setTimeout(resolve, 40));
-
+        await rendered;
         assert.ok(p.naiCalls.length >= 1, 'auto-render via bus after manual generate');
         const rec = await p.slotRepo.get(2, 1);
         assert.ok(rec.ok && latestHasImage(rec.value));
@@ -321,28 +327,35 @@ describe('auto-trigger idempotency', () => {
         p.patchSettings({ autoWriteSlots: false, autoRenderSlots: true });
         p.autoTrigger.start();
 
+        const rendered = new Promise((resolve, reject) => {
+            const t = setTimeout(() => reject(new Error('timeout')), 2000);
+            p.bus.on(APP_EVENTS.SLOT_RENDERED, (payload) => {
+                clearTimeout(t);
+                resolve(payload);
+            });
+        });
         const gen = await p.generateSlots.execute(2);
         assert.equal(isOk(gen), true);
-        await new Promise((resolve) => setTimeout(resolve, 40));
+        await rendered;
         const naiAfterFirst = p.naiCalls.length;
         assert.ok(naiAfterFirst >= 1);
 
         const slotBefore = await p.slotRepo.get(2, 1);
         assert.ok(slotBefore.ok && latestHasImage(slotBefore.value));
 
-        // 重复发同一事件，不得再计费
-        p.bus.emit('slots:written', {
+        p.bus.emit(APP_EVENTS.SLOTS_WRITTEN, {
             messageId: 2,
             records: [slotBefore.value],
             traceId: 'dup',
             unmatchedKeys: [],
         });
-        await new Promise((resolve) => setTimeout(resolve, 40));
+        await new Promise((resolve) => setImmediate(resolve));
+        await new Promise((resolve) => setImmediate(resolve));
         assert.equal(p.naiCalls.length, naiAfterFirst, 'duplicate slots:written must not re-bill');
 
-        // settled 仅 autoRender 路径同样跳过已生图
         p.host.emitSettled(2);
-        await new Promise((resolve) => setTimeout(resolve, 40));
+        await new Promise((resolve) => setImmediate(resolve));
+        await new Promise((resolve) => setImmediate(resolve));
         assert.equal(p.naiCalls.length, naiAfterFirst, 'settled must not re-bill rendered slots');
     });
 
@@ -350,8 +363,15 @@ describe('auto-trigger idempotency', () => {
         const p = buildPipeline();
         p.patchSettings({ autoWriteSlots: true, autoRenderSlots: false });
         p.autoTrigger.start();
+        const written = new Promise((resolve, reject) => {
+            const t = setTimeout(() => reject(new Error('timeout')), 2000);
+            p.bus.on(APP_EVENTS.SLOTS_WRITTEN, (payload) => {
+                clearTimeout(t);
+                resolve(payload);
+            });
+        });
         p.host.emitSettled(2);
-        await new Promise((r) => setTimeout(r, 50));
+        await written;
         const slots = await p.slotRepo.getByMessage(2);
         assert.equal(isOk(slots) && slots.value.length >= 1, true);
         assert.equal(p.naiCalls.length, 0);
@@ -359,8 +379,15 @@ describe('auto-trigger idempotency', () => {
         const p2 = buildPipeline();
         p2.patchSettings({ autoWriteSlots: true, autoRenderSlots: true });
         p2.autoTrigger.start();
+        const rendered2 = new Promise((resolve, reject) => {
+            const t = setTimeout(() => reject(new Error('timeout')), 2000);
+            p2.bus.on(APP_EVENTS.SLOT_RENDERED, (payload) => {
+                clearTimeout(t);
+                resolve(payload);
+            });
+        });
         p2.host.emitSettled(2);
-        await new Promise((r) => setTimeout(r, 80));
+        await rendered2;
         assert.ok(p2.naiCalls.length >= 1);
         const rec = await p2.slotRepo.get(2, 1);
         assert.ok(rec.ok && latestHasImage(rec.value));

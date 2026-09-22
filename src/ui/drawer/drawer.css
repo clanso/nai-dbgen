@@ -1,25 +1,61 @@
-/* L5 UI · 抽屉样式。归属：W2-H。全部挂 #nai-dbgen-root */
+/* L5 UI · 抽屉样式。归属：W2-H。
+ * D48：抽屉用 #nai-dbgen-drawer + .nd-root，不与管理台 #nai-dbgen-root 抢 id。
+ * 令牌变量在此作用域自带一份，等 W1-E 把 components 选择器扩到 .nd-root 后可收敛。
+ */
 
-#nai-dbgen-root.nd-drawer,
-#nai-dbgen-root .nd-drawer {
+#nai-dbgen-drawer.nd-root,
+#nai-dbgen-drawer {
+    --nd-text: var(--SmartThemeBodyColor, #4b3040);
+    --nd-surface: var(--SmartThemeBlurTintColor, #fffdfd);
+    --nd-surface-2: var(--SmartThemeBotMesBlurTintColor, #fff0f6);
+    --nd-line: var(--SmartThemeBorderColor, rgba(123, 70, 96, 0.21));
+    --nd-muted: var(--SmartThemeEmColor, #7f5f70);
+    --nd-shadow-c: var(--SmartThemeShadowColor, rgba(123, 70, 96, 0.16));
+    --nd-accent: #c13d75;
+    --nd-accent-deep: #aa2f65;
+    --nd-accent-soft: #f47eae;
+    --nd-danger: #d94f72;
+    --nd-radius: 18px;
+    --nd-control-radius: 10px;
+    --nd-h-micro: 28px;
+    --nd-h-icon: 32px;
+    --nd-h: 36px;
+    --nd-h-primary: 40px;
+    --nd-soft: var(--SmartThemeEmColor, #735466);
+    --nd-line-strong: color-mix(in srgb, var(--nd-line) 70%, var(--nd-text));
+    --nd-on-accent: #ffffff;
+    --nd-shadow: 0 22px 60px var(--nd-shadow-c);
+    --nd-accent-wash: color-mix(in srgb, var(--nd-accent-soft) 18%, var(--nd-surface));
+    --nd-input-bg: var(--nd-surface);
+    --nd-serif: Georgia, "Songti SC", "Noto Serif SC", serif;
+    font-size: var(--mainFontSize, 15px);
+    font-family: Aptos, "Microsoft YaHei UI", "PingFang SC", system-ui, sans-serif;
+    color: var(--nd-text);
+    box-sizing: border-box;
     display: grid;
     gap: 12px;
     padding: 8px 0 12px;
 }
 
-#nai-dbgen-root .nd-drawer__title {
+#nai-dbgen-drawer *,
+#nai-dbgen-drawer *::before,
+#nai-dbgen-drawer *::after {
+    box-sizing: inherit;
+}
+
+#nai-dbgen-drawer .nd-drawer__title {
     margin: 0;
     font-family: var(--nd-serif);
     font-size: 1.05em;
     color: var(--nd-text);
 }
 
-#nai-dbgen-root .nd-drawer__pickers {
+#nai-dbgen-drawer .nd-drawer__pickers {
     display: grid;
     gap: 10px;
 }
 
-#nai-dbgen-root .nd-drawer__picker {
+#nai-dbgen-drawer .nd-drawer__picker {
     display: grid;
     gap: 4px;
 }

@@ -101,6 +101,42 @@ export function idNow(deps) {
 }
 
 /**
+ * D50：关窗 / 从 DOM 卸下时立即取消。
+ * @param {Element} element
+ * @param {() => void} onDismiss
+ * @returns {() => void}
+ */
+export function watchModalDismiss(element, onDismiss) {
+    /** @type {(() => void)[]} */
+    const cleanups = [];
+
+    const dlg = typeof element.closest === 'function'
+        ? element.closest('dialog')
+        : null;
+    if (dlg instanceof HTMLDialogElement) {
+        const onClose = () => onDismiss();
+        dlg.addEventListener('close', onClose);
+        dlg.addEventListener('cancel', onClose);
+        cleanups.push(() => {
+            dlg.removeEventListener('close', onClose);
+            dlg.removeEventListener('cancel', onClose);
+        });
+    }
+
+    if (typeof MutationObserver === 'function') {
+        const obs = new MutationObserver(() => {
+            if (!element.isConnected) onDismiss();
+        });
+        obs.observe(document.documentElement, { childList: true, subtree: true });
+        cleanups.push(() => obs.disconnect());
+    }
+
+    return () => {
+        for (const fn of cleanups) fn();
+    };
+}
+
+/**
  * 删除二次确认。
  * @param {object} deps
  * @param {object} [deps.host]
@@ -139,20 +175,19 @@ export async function confirmDanger(deps, message) {
 
     /** @type {{ destroy: () => void }|null} */
     let modal = null;
+    /** @type {(() => void)|null} */
+    let unwatch = null;
     try {
         modal = await openModal(
             { host },
             { title: '确认删除', element: body },
         );
-        const result = await Promise.race([
-            done,
-            new Promise((resolve) => {
-                // 若宿主关掉弹窗且未点按钮，视为取消
-                setTimeout(() => resolve(false), 120000);
-            }),
-        ]);
+        // D50：关窗立即 settle(false)，不用长超时
+        unwatch = watchModalDismiss(body, () => settle(false));
+        const result = await done;
         return Boolean(result);
     } finally {
+        unwatch?.();
         modal?.destroy();
     }
 }

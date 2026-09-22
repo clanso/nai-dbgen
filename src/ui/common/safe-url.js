@@ -1,9 +1,13 @@
 /**
- * L5 UI · 不可信 URL 门禁（裁决 D24）。
+ * L5 UI · 不可信 URL 门禁（裁决 D24 / D51）。
  *
- * 凡写 img.src（以及将来的 srcset / background-image）必须过 safeImageUrl。
- * 只允许 http: / https: / data:image/* / blob:；其余返回 null，调用方退化为占位。
+ * 凡写 img.src（以及将来的 srcset / background-image / href）必须过 safeImageUrl。
+ * 只允许 http: / https: / blob: / data:image/(png|jpeg|jpg|webp|gif)；
+ * data:image/svg+xml 拒绝（可内嵌脚本；白名单按最危险用途划，见 D51）。
  */
+
+/** @type {RegExp} */
+const RASTER_DATA_IMAGE = /^image\/(png|jpe?g|webp|gif)(;|,|$)/i;
 
 /**
  * @param {unknown} url
@@ -35,10 +39,9 @@ export function safeImageUrl(url) {
         return raw;
     }
     if (protocol === 'data:') {
-        // data:image/png;base64,…  / data:image/svg+xml,…
-        // 用 trim 后原文判定，避免 URL 解析对 data 体的改写差异
+        // 用 trim 后原文判定 MIME，避免 URL 解析对 data 体的改写差异
         const afterScheme = raw.slice(raw.indexOf(':') + 1).trim().toLowerCase();
-        if (afterScheme.startsWith('image/')) {
+        if (RASTER_DATA_IMAGE.test(afterScheme)) {
             return raw;
         }
         return null;

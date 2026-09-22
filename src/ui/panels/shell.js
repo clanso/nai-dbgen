@@ -39,8 +39,12 @@ const TABS = [
  */
 export async function openPanelShell(deps, initialTab) {
     const shell = document.createElement('div');
-    shell.className = 'nd-shell';
-    shell.id = 'nai-dbgen-root';
+    shell.className = 'nd-shell nd-root';
+    // D48：抽屉用 #nai-dbgen-drawer；管理台内容挂到唯一的 #nai-dbgen-root
+    const root = document.createElement('div');
+    root.id = 'nai-dbgen-root';
+    root.className = 'nd-root';
+    root.appendChild(shell);
 
     const tabBar = document.createElement('div');
     tabBar.className = 'nd-shell__tabs';
@@ -97,7 +101,7 @@ export async function openPanelShell(deps, initialTab) {
         { host: deps?.host },
         {
             title: '数据库生图 · 管理台',
-            element: shell,
+            element: root,
             wide: true,
             large: true,
             allowVerticalScrolling: true,

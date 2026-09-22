@@ -1,12 +1,18 @@
 /**
  * L4 应用层 · 两个自动开关：自动写 slot / 自动出图（需求 4.12）。
- * 归属：W2-F 用例代理实现。
- * 裁决 D32：注入 bus，订阅 `slots:written`；禁止包装 generateSlots.execute。
+ * 归属：W2-F。
+ *
+ * 裁决：
+ * - D32：注入 bus，订阅 slots:written
+ * - D35：出图闸门在 renderSlot 内；本层不再维护 rendering Set
+ * - D36：写入锁键带 chatId
+ * - D38：已有 slot 记录则跳过（含回翻 swipe）；不重跑 LLM
+ * - D39：读失败 warn + 跳过，绝不出图
  */
 
 import { createLogger } from '../infra/logger.js';
-import { latestSlotImage } from '../domain/model/slot.js';
 import { APP_EVENTS } from './_helpers.js';
+import { writeGateKey } from './_gate-key.js';
 
 const log = createLogger('application/auto-trigger');
 
@@ -22,11 +28,9 @@ const log = createLogger('application/auto-trigger');
  * @property {import('../ports/repository.port.js').SlotRepository} slotRepo
  * @property {() => PluginSettings} loadSettings
  * @property {ReturnType<import('../infra/event-bus.js').createEventBus>} bus
- *   裁决 D32：订阅 slots:written，覆盖「只开自动出图 + 手点生图」
  */
 
 /**
- * 订阅 onAiMessageSettled 与 slots:written；按开关触发写 slot / 对尚未生图编号出图。
  * @param {AutoTriggerDeps} deps
  * @returns {{ start: () => void, stop: () => void }}
  */
@@ -36,20 +40,54 @@ export function createAutoTriggerService(deps) {
     /** @type {(() => void)|null} */
     let unsubSlotsWritten = null;
 
-    /** @type {Set<number>} 正在写 slot 的楼，防重复计费 */
+    /** @type {Set<string>} `chatId:messageId` 正在写 slot（仅防并发） */
     const writing = new Set();
-    /** @type {Set<string>} `${messageId}:${slotId}` 正在出图 */
-    const rendering = new Set();
 
     /**
      * @param {number} messageId
+     * @returns {Promise<void>}
      */
     async function writeSlots(messageId) {
-        if (writing.has(messageId)) {
+        const chatId = deps.host.getCurrentChatId();
+        const key = writeGateKey(chatId, messageId);
+        if (writing.has(key)) {
             return;
         }
-        writing.add(messageId);
+
+        // D38 + D39：先查是否已有记录
+        const existing = await deps.slotRepo.getByMessage(messageId);
+        if (!existing.ok) {
+            log.warn('autoWriteSlots: getByMessage failed; skip', {
+                messageId,
+                chatId,
+                code: existing.error?.code,
+            });
+            return;
+        }
+        if (existing.value.length > 0) {
+            // 已有记录（含回翻到已存在 swipe）→ 零计费跳过
+            return;
+        }
+
+        writing.add(key);
         try {
+            // 二次确认（并发窗口）
+            const again = await deps.slotRepo.getByMessage(messageId);
+            if (!again.ok) {
+                log.warn('autoWriteSlots: re-check failed; skip', {
+                    messageId,
+                    code: again.error?.code,
+                });
+                return;
+            }
+            if (again.value.length > 0) {
+                return;
+            }
+            if (deps.host.getCurrentChatId() !== chatId) {
+                log.warn('autoWriteSlots: chat changed; skip', { messageId, chatId });
+                return;
+            }
+
             const r = await deps.generateSlots.execute(messageId);
             if (!r.ok) {
                 log.warn('autoWriteSlots failed', {
@@ -57,49 +95,49 @@ export function createAutoTriggerService(deps) {
                     code: r.error?.code,
                 });
             }
-            // 自动出图由 slots:written 事件驱动，不在此处直接 render
         } finally {
-            writing.delete(messageId);
+            writing.delete(key);
         }
     }
 
     /**
-     * 只出尚未生图的编号；已有 images 的跳过（需求 4.12）。
+     * 只出尚未生图的编号。闸门与「已有图」判断全在 renderSlot（D35）。
      * @param {number} messageId
+     * @returns {Promise<void>}
      */
     async function renderPending(messageId) {
         const listR = await deps.slotRepo.getByMessage(messageId);
         if (!listR.ok) {
-            log.warn('autoRenderSlots: getByMessage failed', {
+            // D39
+            log.warn('autoRenderSlots: getByMessage failed; skip', {
                 messageId,
                 code: listR.error?.code,
             });
             return;
         }
         for (const record of listR.value) {
-            if (latestSlotImage(record)) {
+            // 读单条再确认：Err → 跳过（D39）；已有图由 renderSlot 拒紹
+            const again = await deps.slotRepo.get(messageId, record.slotId);
+            if (!again.ok) {
+                log.warn('autoRenderSlots: get failed; skip slot', {
+                    messageId,
+                    slotId: record.slotId,
+                    code: again.error?.code,
+                });
                 continue;
             }
-            const key = `${messageId}:${record.slotId}`;
-            if (rendering.has(key)) {
+            if (!again.value) {
                 continue;
             }
-            rendering.add(key);
-            try {
-                const again = await deps.slotRepo.get(messageId, record.slotId);
-                if (again.ok && again.value && latestSlotImage(again.value)) {
-                    continue;
-                }
-                const r = await deps.renderSlot.execute(messageId, record.slotId);
-                if (!r.ok) {
-                    log.warn('autoRenderSlots failed', {
-                        messageId,
-                        slotId: record.slotId,
-                        code: r.error?.code,
-                    });
-                }
-            } finally {
-                rendering.delete(key);
+            const r = await deps.renderSlot.execute(messageId, record.slotId);
+            if (!r.ok
+                && r.error?.code !== 'SLOT_ALREADY_RENDERED'
+                && r.error?.code !== 'CHAT_CHANGED') {
+                log.warn('autoRenderSlots failed', {
+                    messageId,
+                    slotId: record.slotId,
+                    code: r.error?.code,
+                });
             }
         }
     }
@@ -132,10 +170,8 @@ export function createAutoTriggerService(deps) {
                 void (async () => {
                     const settings = deps.loadSettings();
                     if (settings.autoWriteSlots) {
-                        // 写 slot → emit slots:written → 若开了 autoRender 则出图
                         await writeSlots(messageId);
                     } else if (settings.autoRenderSlots) {
-                        // 仅自动出图：对本楼已有、尚未生图的 slot 出图
                         await renderPending(messageId);
                     }
                 })();

@@ -6,6 +6,7 @@
 import { createButton, createField, createSelect, createCheckbox } from '../../common/controls.js';
 import { createPreset, importFromSillyTavernPreset } from '../../../domain/model/preset.js';
 import { mountLibraryView } from '../library-view.js';
+import { applyFormFields, mergePresetPrompt } from '../_lib/library-logic.js';
 import {
     el,
     setText,
@@ -117,22 +118,25 @@ export function mountPresetPanel(root, deps) {
             ],
         });
 
-        /** @type {{ identifier: string, name: string, role: string, content: string, enabled: boolean }[]} */
+        // D45：整段对象保留；表单只改展示字段，injection_* 等原样带回
+        /** @type {object[]} */
         let prompts = Array.isArray(item?.prompts)
-            ? item.prompts.map((p) => ({
-                identifier: String(p.identifier ?? ''),
-                name: String(p.name ?? ''),
-                role: p.role === 'user' || p.role === 'assistant' ? p.role : 'system',
-                content: String(p.content ?? ''),
-                enabled: p.enabled !== false,
-            }))
+            ? item.prompts.map((p) => ({ ...p }))
             : [{
                 identifier: 'main',
                 name: '主提示',
                 role: 'system',
                 content: '',
                 enabled: true,
+                injection_position: 0,
+                injection_depth: 0,
+                injection_order: 100,
             }];
+
+        /** @type {object[]} */
+        let promptOrder = Array.isArray(item?.prompt_order)
+            ? item.prompt_order.map((o) => ({ ...o }))
+            : [];
 
         const promptsHost = el('div', 'nd-preset-prompts');
         /** @type {{ name: ReturnType<typeof createField>, content: ReturnType<typeof labeledTextarea>, enabled: ReturnType<typeof createCheckbox>, role: ReturnType<typeof createSelect> }[]} */
@@ -146,18 +150,29 @@ export function mountPresetPanel(root, deps) {
             promptControls = [];
             prompts.forEach((p, index) => {
                 const block = el('div', 'nd-preset-prompt');
-                const name = createField({ label: '段名', value: p.name });
+                const name = createField({
+                    label: '段名',
+                    value: p.name != null ? String(p.name) : '',
+                });
+                const roleVal = p.role === 'user' || p.role === 'assistant' ? p.role : 'system';
                 const role = createSelect({
                     label: 'role',
-                    value: p.role,
+                    value: roleVal,
                     options: [
                         { value: 'system', label: 'system' },
                         { value: 'user', label: 'user' },
                         { value: 'assistant', label: 'assistant' },
                     ],
                 });
-                const enabled = createCheckbox({ label: '启用', checked: p.enabled !== false });
-                const content = labeledTextarea('内容', p.content, 6);
+                const enabled = createCheckbox({
+                    label: '启用',
+                    checked: p.enabled !== false,
+                });
+                const content = labeledTextarea(
+                    '内容',
+                    p.content != null ? String(p.content) : '',
+                    6,
+                );
                 promptControls.push({ name, content, enabled, role });
                 block.append(name.el, role.el, enabled.el, content.el);
                 block.appendChild(createButton({
@@ -172,6 +187,9 @@ export function mountPresetPanel(root, deps) {
                                 role: 'system',
                                 content: '',
                                 enabled: true,
+                                injection_position: 0,
+                                injection_depth: 0,
+                                injection_order: 100,
                             }];
                         }
                         paintPrompts();
@@ -191,6 +209,9 @@ export function mountPresetPanel(root, deps) {
                             role: 'system',
                             content: '',
                             enabled: true,
+                            injection_position: 0,
+                            injection_depth: 0,
+                            injection_order: 100 + prompts.length,
                         },
                     ];
                     paintPrompts();
@@ -199,16 +220,29 @@ export function mountPresetPanel(root, deps) {
         }
 
         function readPrompts() {
-            return promptControls.map((c, i) => ({
+            return promptControls.map((c, i) => mergePresetPrompt(prompts[i], {
                 identifier: prompts[i]?.identifier || ids.id('pp'),
                 name: c.name.getValue(),
                 role: c.role.getValue(),
                 content: c.content.getValue(),
                 enabled: c.enabled.getValue(),
-                injection_position: 0,
-                injection_depth: 0,
-                injection_order: 100 + i,
             }));
+        }
+
+        /**
+         * @param {object[]} promptList
+         * @returns {object[]}
+         */
+        function mergePromptOrder(promptList) {
+            return promptList.map((p, i) => {
+                const prev = promptOrder.find((o) => String(o.identifier) === String(p.identifier))
+                    || promptOrder[i]
+                    || null;
+                return applyFormFields(prev, {
+                    identifier: p.identifier,
+                    enabled: p.enabled !== false,
+                });
+            });
         }
         paintPrompts();
 
@@ -237,13 +271,10 @@ export function mountPresetPanel(root, deps) {
                         }
                         nameField.setValue(imported.value.name);
                         kindSelect.setValue(imported.value.kind);
-                        prompts = imported.value.prompts.map((p) => ({
-                            identifier: p.identifier,
-                            name: p.name,
-                            role: p.role,
-                            content: p.content,
-                            enabled: p.enabled,
-                        }));
+                        prompts = imported.value.prompts.map((p) => ({ ...p }));
+                        promptOrder = Array.isArray(imported.value.prompt_order)
+                            ? imported.value.prompt_order.map((o) => ({ ...o }))
+                            : [];
                         paintPrompts();
                         toast(host, 'success', '已解析酒馆预设');
                     } catch (e) {
@@ -288,20 +319,19 @@ export function mountPresetPanel(root, deps) {
             }
             const kind = kindSelect.getValue() === 'recall' ? 'recall' : 'imagegen';
             const promptList = readPrompts();
+            const orderList = mergePromptOrder(promptList);
+            promptOrder = orderList;
+            prompts = promptList;
             const entity = item
-                ? {
-                    ...item,
+                ? applyFormFields(item, {
                     name,
                     kind,
                     prompts: promptList,
-                    prompt_order: promptList.map((p) => ({
-                        identifier: p.identifier,
-                        enabled: p.enabled,
-                    })),
+                    prompt_order: orderList,
                     updatedAt: ids.now(),
-                }
+                })
                 : createPreset(
-                    { name, kind, prompts: promptList },
+                    { name, kind, prompts: promptList, prompt_order: orderList },
                     { id: ids.id('pr'), now: ids.now() },
                 );
             return awaitRepo(host, repo.put(entity), '保存失败');

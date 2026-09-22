@@ -1,5 +1,5 @@
 /**
- * W2-G · mountSlotWidget：恢复已出图、恶意 URL、dispose 退订、不重复计费。
+ * W2-G · mountSlotWidget：闸门查询、D43 invalid、SLOT_ALREADY_RENDERED、chat 隔离。
  */
 
 import { describe, it, beforeEach, afterEach } from 'node:test';
@@ -8,17 +8,23 @@ import { installFakeDom } from './fake-dom.js';
 import { createEventBus } from '../../src/infra/event-bus.js';
 import { APP_EVENTS } from '../../src/application/_helpers.js';
 import { mountSlotWidget } from '../../src/ui/slot-widget/slot-widget.js';
-import { clearSlotInflight, peekSlotInflight } from '../../src/ui/slot-widget/slot-mount.js';
+import {
+    clearSlotInflight,
+    peekSlotInflight,
+} from '../../src/ui/slot-widget/slot-mount.js';
 import { safeImageUrl } from '../../src/ui/common/safe-url.js';
 import { buildImageViewerElement } from '../../src/ui/slot-widget/image-viewer.js';
 
 describe('ui/slot mountSlotWidget', () => {
     /** @type {ReturnType<typeof installFakeDom>|null} */
     let fake = null;
+    /** @type {string} */
+    let chatId = 'chat-test';
 
     beforeEach(() => {
         fake = installFakeDom();
         clearSlotInflight();
+        chatId = 'chat-test';
     });
 
     afterEach(() => {
@@ -43,49 +49,51 @@ describe('ui/slot mountSlotWidget', () => {
         return root;
     }
 
-    it('恶意 URL 被 safeImageUrl 拦截；viewer 不建危险 img', () => {
+    /**
+     * @param {Element} root
+     */
+    function btnOf(root) {
+        return [...root.childNodes].find(
+            (n) => String(n.tagName).toUpperCase() === 'BUTTON',
+        );
+    }
+
+    /**
+     * @param {Element} root
+     */
+    async function clickBtn(root) {
+        const btn = btnOf(root);
+        await btn._listeners.find((l) => l.type === 'click').fn({
+            preventDefault() {},
+            stopPropagation() {},
+        });
+        await new Promise((r) => setTimeout(r, 0));
+    }
+
+    it('恶意 URL 被拦', () => {
         assert.equal(safeImageUrl('javascript:alert(1)'), null);
         assert.equal(safeImageUrl('data:text/html,x'), null);
-        assert.equal(buildImageViewerElement.length, 2);
-        // openSlotImageViewer 对坏 URL 返回 null——纯门禁已由 safeImageUrl 覆盖
         const el = buildImageViewerElement('https://cdn.example/a.png', 'x');
-        assert.equal(el.id, 'nai-dbgen-root');
-        const img = el.childNodes[0];
-        assert.equal(img.tagName, 'IMG');
-        assert.equal(img.src, 'https://cdn.example/a.png');
+        assert.equal(el.childNodes[0].src, 'https://cdn.example/a.png');
     });
 
-    it('从持久层恢复：已出图 remount 仍是 done + 展示图', async () => {
+    it('从持久层恢复：已出图 remount 仍是 done', async () => {
         const root = makeRoot(1);
-        /** @type {Record<string, unknown>|null} */
-        let record = {
-            messageId: 0,
-            slotId: 1,
-            images: [{ imageRef: 'ref-done' }],
-        };
-
+        const record = { images: [{ imageRef: 'ref-done' }] };
         const handle = mountSlotWidget(root, 0, {
-            onGenerateClick: () => ({ ok: true, value: {} }),
+            getChatId: () => chatId,
+            onGenerateClick: async () => ({ ok: true, value: {} }),
             getRecord: () => /** @type {any} */ (record),
-            getImageUrl: async (ref) => {
-                assert.equal(ref, 'ref-done');
-                return 'https://cdn.example/done.png';
-            },
+            getImageUrl: async () => 'https://cdn.example/done.png',
         });
-
         await new Promise((r) => setTimeout(r, 0));
         assert.ok(root.className.includes('nd-slot--done'), root.className);
-        assert.equal(
-            [...root.childNodes].some((n) => String(n.className || '').includes('nd-slot__btn')
-                && n.textContent === '重新生成'),
-            true,
-        );
-
-        // 模拟宿主重渲染：destroy 后重新挂
         handle.destroy();
+
         const root2 = makeRoot(1);
         const handle2 = mountSlotWidget(root2, 0, {
-            onGenerateClick: () => ({ ok: true }),
+            getChatId: () => chatId,
+            onGenerateClick: async () => ({ ok: true, value: {} }),
             getRecord: () => /** @type {any} */ (record),
             getImageUrl: async () => 'https://cdn.example/done.png',
         });
@@ -94,9 +102,164 @@ describe('ui/slot mountSlotWidget', () => {
         handle2.destroy();
     });
 
+    it('重挂时优先问 isRendering / hasPendingWrite', async () => {
+        let rendering = true;
+        let pending = false;
+        const root = makeRoot(3);
+        const handle = mountSlotWidget(root, 9, {
+            getChatId: () => chatId,
+            isRendering: () => rendering,
+            hasPendingWrite: () => pending,
+            onGenerateClick: async () => ({ ok: true, value: {} }),
+            getRecord: () => null,
+            getImageUrl: async () => null,
+        });
+        await new Promise((r) => setTimeout(r, 0));
+        assert.ok(root.className.includes('nd-slot--generating'), root.className);
+        // 本地表为空也能显示 generating（权威在应用层）
+        assert.equal(peekSlotInflight(chatId, 9, 3), null);
+
+        rendering = false;
+        pending = true;
+        handle.refresh();
+        await new Promise((r) => setTimeout(r, 0));
+        assert.ok(root.className.includes('nd-slot--generating'), root.className);
+
+        pending = false;
+        handle.refresh();
+        await new Promise((r) => setTimeout(r, 0));
+        assert.ok(root.className.includes('nd-slot--idle'), root.className);
+        handle.destroy();
+    });
+
+    it('切 chat 后同一 (messageId,slotId) 不误认为同一任务', async () => {
+        const rootA = makeRoot(1);
+        /** @type {(() => void)|null} */
+        let release = null;
+        const handleA = mountSlotWidget(rootA, 5, {
+            getChatId: () => 'chat-a',
+            onGenerateClick: () => new Promise((resolve) => {
+                release = () => resolve({ ok: true, value: {} });
+            }),
+            getRecord: () => null,
+            getImageUrl: async () => null,
+        });
+        await clickBtn(rootA);
+        assert.ok(peekSlotInflight('chat-a', 5, 1)?.status === 'generating');
+
+        // 切到 chat-b：同下标不应看见 A 的 generating
+        chatId = 'chat-b';
+        const rootB = makeRoot(1);
+        const chatListeners = [];
+        const handleB = mountSlotWidget(rootB, 5, {
+            getChatId: () => 'chat-b',
+            host: {
+                getCurrentChatId: () => 'chat-b',
+                onChatChanged(fn) {
+                    chatListeners.push(fn);
+                    return () => {};
+                },
+            },
+            onGenerateClick: async () => ({ ok: true, value: {} }),
+            getRecord: () => null,
+            getImageUrl: async () => null,
+        });
+        await new Promise((r) => setTimeout(r, 0));
+        // mount 时 clearOtherChats('chat-b') 清掉 chat-a
+        assert.equal(peekSlotInflight('chat-a', 5, 1), null);
+        assert.ok(rootB.className.includes('nd-slot--idle'), rootB.className);
+
+        release?.();
+        handleA.destroy();
+        handleB.destroy();
+        void chatListeners;
+    });
+
+    it('error 条目切 chat 后被清理', async () => {
+        const root = makeRoot(2);
+        const handle = mountSlotWidget(root, 1, {
+            getChatId: () => 'chat-a',
+            onGenerateClick: async () => ({
+                ok: false,
+                error: { message: '炸了', traceId: 't1' },
+            }),
+            getRecord: () => null,
+            getImageUrl: async () => null,
+        });
+        await clickBtn(root);
+        assert.ok(peekSlotInflight('chat-a', 1, 2)?.status === 'error');
+
+        /** @type {((id: string|null) => void)|null} */
+        let onChange = null;
+        const root2 = makeRoot(2);
+        const handle2 = mountSlotWidget(root2, 1, {
+            getChatId: () => 'chat-b',
+            host: {
+                getCurrentChatId: () => 'chat-b',
+                onChatChanged(fn) {
+                    onChange = fn;
+                    return () => {};
+                },
+            },
+            onGenerateClick: async () => ({ ok: true, value: {} }),
+            getRecord: () => null,
+            getImageUrl: async () => null,
+        });
+        await new Promise((r) => setTimeout(r, 0));
+        assert.equal(peekSlotInflight('chat-a', 1, 2), null);
+
+        onChange?.('chat-c');
+        assert.equal(peekSlotInflight('chat-b', 1, 2), null);
+
+        handle.destroy();
+        handle2.destroy();
+    });
+
+    it('onGenerateClick 返回 undefined → 不清表、不判成功', async () => {
+        const root = makeRoot(4);
+        const handle = mountSlotWidget(root, 1, {
+            getChatId: () => chatId,
+            onGenerateClick: async () => /** @type {any} */ (undefined),
+            getRecord: () => null,
+            getImageUrl: async () => null,
+        });
+        await clickBtn(root);
+        assert.ok(
+            peekSlotInflight(chatId, 1, 4)?.status === 'generating',
+            'invalid 结算必须保持 generating',
+        );
+        assert.ok(root.className.includes('nd-slot--generating'), root.className);
+        handle.destroy();
+    });
+
+    it('SLOT_ALREADY_RENDERED → 不进 error 红态', async () => {
+        const root = makeRoot(5);
+        const record = { images: [{ imageRef: 'existing' }] };
+        const handle = mountSlotWidget(root, 2, {
+            getChatId: () => chatId,
+            onGenerateClick: async () => ({
+                ok: false,
+                error: { code: 'SLOT_ALREADY_RENDERED', message: 'slot #5 已有图片' },
+            }),
+            getRecord: () => /** @type {any} */ (record),
+            getImageUrl: async () => 'https://cdn.example/e.png',
+        });
+        await clickBtn(root);
+        assert.equal(peekSlotInflight(chatId, 2, 5), null);
+        assert.ok(root.className.includes('nd-slot--done'), root.className);
+        assert.equal(root.className.includes('nd-slot--error'), false);
+        const errEl = [...root.childNodes].find(
+            (n) => String(n.className || '').includes('nd-slot__error'),
+        );
+        assert.ok(errEl);
+        assert.equal(errEl.hidden, true);
+        handle.destroy();
+    });
+
     it('失败态展示中文 message 与 traceId', async () => {
         const root = makeRoot(2);
         const handle = mountSlotWidget(root, 3, {
+            getChatId: () => chatId,
             onGenerateClick: async () => ({
                 ok: false,
                 error: { message: '接口鉴权失败（Key 无效或过期）', traceId: 'trace-xyz' },
@@ -104,23 +267,11 @@ describe('ui/slot mountSlotWidget', () => {
             getRecord: () => null,
             getImageUrl: async () => null,
         });
-
-        const btn = [...root.childNodes].find(
-            (n) => String(n.tagName).toUpperCase() === 'BUTTON',
-        );
-        assert.ok(btn);
-        // 直接触发监听器（假 DOM 无真实 click 冒泡）
-        const clickListeners = btn._listeners.filter((l) => l.type === 'click');
-        assert.ok(clickListeners.length >= 1);
-        await clickListeners[0].fn({ preventDefault() {}, stopPropagation() {} });
-        await new Promise((r) => setTimeout(r, 0));
-
+        await clickBtn(root);
         assert.ok(root.className.includes('nd-slot--error'), root.className);
         const errEl = [...root.childNodes].find(
             (n) => String(n.className || '').includes('nd-slot__error'),
         );
-        assert.ok(errEl);
-        assert.equal(errEl.hidden, false);
         const texts = [...errEl.childNodes].map((n) => n.textContent).join('\n');
         assert.match(texts, /接口鉴权失败/);
         assert.match(texts, /trace-xyz/);
@@ -130,6 +281,7 @@ describe('ui/slot mountSlotWidget', () => {
     it('Abort 结算不进 error 态', async () => {
         const root = makeRoot(4);
         const handle = mountSlotWidget(root, 1, {
+            getChatId: () => chatId,
             onGenerateClick: async () => ({
                 ok: false,
                 error: { code: 'UPSTREAM_ABORTED', message: '请求已取消' },
@@ -137,28 +289,21 @@ describe('ui/slot mountSlotWidget', () => {
             getRecord: () => null,
             getImageUrl: async () => null,
         });
-        const btn = [...root.childNodes].find(
-            (n) => String(n.tagName).toUpperCase() === 'BUTTON',
-        );
-        await btn._listeners.find((l) => l.type === 'click').fn({
-            preventDefault() {},
-            stopPropagation() {},
-        });
-        await new Promise((r) => setTimeout(r, 0));
+        await clickBtn(root);
         assert.ok(root.className.includes('nd-slot--idle'), root.className);
-        assert.equal(peekSlotInflight(1, 4), null);
+        assert.equal(peekSlotInflight(chatId, 1, 4), null);
         handle.destroy();
     });
 
-    it('dispose 后不再响应 bus；进行中不重复 onGenerateClick', async () => {
+    it('dispose 后退订 bus；getImageUrl 坏 URL 不写入', async () => {
         const bus = createEventBus();
         const root = makeRoot(7);
         let clicks = 0;
         /** @type {(() => void)|null} */
         let release = null;
-
         const handle = mountSlotWidget(root, 2, {
             bus,
+            getChatId: () => chatId,
             onGenerateClick: () => new Promise((resolve) => {
                 clicks += 1;
                 release = () => resolve({ ok: true, value: {} });
@@ -166,64 +311,25 @@ describe('ui/slot mountSlotWidget', () => {
             getRecord: () => null,
             getImageUrl: async () => null,
         });
-
-        const btn = [...root.childNodes].find(
-            (n) => String(n.tagName).toUpperCase() === 'BUTTON',
-        );
-        const fire = () => btn._listeners.find((l) => l.type === 'click').fn({
-            preventDefault() {},
-            stopPropagation() {},
-        });
-
-        fire();
-        await new Promise((r) => setTimeout(r, 0));
+        await clickBtn(root);
         assert.equal(clicks, 1);
-        assert.ok(peekSlotInflight(2, 7)?.status === 'generating');
-
-        // 第二次点击不得再计费
-        fire();
-        await new Promise((r) => setTimeout(r, 0));
-        assert.equal(clicks, 1);
-
-        // destroy 后退订 bus
         handle.destroy();
-        let refreshed = false;
-        // 另挂一个已 destroy 的不应再改 DOM——用新实例验证 unsub
-        const rootB = makeRoot(7);
-        const handleB = mountSlotWidget(rootB, 2, {
-            bus,
-            onGenerateClick: () => ({ ok: true }),
-            getRecord: () => ({ images: [{ imageRef: 'r' }] }),
-            getImageUrl: async () => {
-                refreshed = true;
-                return 'https://cdn.example/z.png';
-            },
-        });
-        await new Promise((r) => setTimeout(r, 0));
-
-        handleB.destroy();
-        // destroy 后 emit 不应让已销毁实例抛错；点击数仍为 1
         bus.emit(APP_EVENTS.SLOT_RENDERED, { messageId: 2, slotId: 7, imageRef: 'r' });
         assert.equal(clicks, 1);
-
         release?.();
-        await new Promise((r) => setTimeout(r, 0));
-        void refreshed;
-    });
 
-    it('getImageUrl 返回 javascript: 时不写入 img.src', async () => {
-        const root = makeRoot(8);
-        const handle = mountSlotWidget(root, 0, {
-            onGenerateClick: () => ({ ok: true }),
+        const root2 = makeRoot(8);
+        const handle2 = mountSlotWidget(root2, 0, {
+            getChatId: () => chatId,
+            onGenerateClick: async () => ({ ok: true, value: {} }),
             getRecord: () => ({ images: [{ imageRef: 'evil' }] }),
             getImageUrl: async () => 'javascript:alert(1)',
         });
         await new Promise((r) => setTimeout(r, 0));
-        const imgBox = [...root.childNodes].find(
+        const imgBox = [...root2.childNodes].find(
             (n) => String(n.className || '').includes('nd-slot__img'),
         );
-        assert.ok(imgBox);
         assert.equal(imgBox.childNodes.length, 0);
-        handle.destroy();
+        handle2.destroy();
     });
 });

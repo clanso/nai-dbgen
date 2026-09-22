@@ -9,7 +9,7 @@ import { createButton, createField, createToggle, createInlineError } from '../.
 import { mountNestedList } from '../../common/nested-list.js';
 import { createStore } from '../../common/store.js';
 import { createTagLibrary, createTagEntry } from '../../../domain/model/tag.js';
-import { filterNestedLibrary } from '../_lib/library-logic.js';
+import { filterNestedLibrary, applyFormFields } from '../_lib/library-logic.js';
 import {
     el,
     setText,
@@ -154,7 +154,10 @@ export function mountTagPanel(root, deps) {
     }
 
     async function toggleLibrary(lib, enabled) {
-        const next = { ...lib, active: Boolean(enabled), updatedAt: ids.now() };
+        const next = applyFormFields(lib, {
+            active: Boolean(enabled),
+            updatedAt: ids.now(),
+        });
         if (await awaitRepo(host, repo.putLibrary(next), '保存失败')) await refresh();
     }
 
@@ -197,7 +200,11 @@ export function mountTagPanel(root, deps) {
                         return;
                     }
                     const entity = lib
-                        ? { ...lib, name, active: activeToggle.getValue(), updatedAt: ids.now() }
+                        ? applyFormFields(lib, {
+                            name,
+                            active: activeToggle.getValue(),
+                            updatedAt: ids.now(),
+                        })
                         : createTagLibrary(
                             { name, active: activeToggle.getValue() },
                             { id: ids.id('tl'), now: ids.now() },
@@ -236,12 +243,11 @@ export function mountTagPanel(root, deps) {
                         return;
                     }
                     const entity = entry
-                        ? {
-                            ...entry,
+                        ? applyFormFields(entry, {
                             key,
                             value: valueField.getValue(),
                             updatedAt: ids.now(),
-                        }
+                        })
                         : createTagEntry(
                             { libraryId, key, value: valueField.getValue() },
                             { id: ids.id('te'), now: ids.now() },

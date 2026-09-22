@@ -9,7 +9,7 @@ import { paintSafeCover } from '../../common/safe-url.js';
 import { createArtist } from '../../../domain/model/artist.js';
 import { ARTIST_PREVIEW_SIZE } from '../../../domain/model/nai-params.js';
 import { mountLibraryView } from '../library-view.js';
-import { buildArtistPreviewRequest, gateCoverUrl } from '../_lib/library-logic.js';
+import { buildArtistPreviewRequest, gateCoverUrl, applyFormFields } from '../_lib/library-logic.js';
 import {
     el,
     setText,
@@ -181,13 +181,11 @@ export function mountArtistPanel(root, deps) {
                 const draft = await persistDraft();
                 if (!draft) return;
 
-                // D9：用正在编辑的那一条；对照传入 activeArtistId 但 build 不用它
-                const before = { ...settings.load() };
+                // D9 / D46：只用编辑中的那条；完全不读不写 activeArtistId
                 const req = buildArtistPreviewRequest(draft, {
                     promptText: promptField.getValue(),
                     negativeText: negPreview.getValue(),
                     saveAsPreview: true,
-                    activeArtistId: before.activeArtistId,
                 });
 
                 const result = await previewSvc.preview({
@@ -196,14 +194,6 @@ export function mountArtistPanel(root, deps) {
                     negativeText: req.negativeText,
                     saveAsPreview: req.saveAsPreview,
                 });
-
-                const after = settings.load();
-                if (after.activeArtistId !== before.activeArtistId) {
-                    // 防御：若有人误改激活态，立刻写回
-                    settings.patch({ activeArtistId: before.activeArtistId });
-                    err.setMessage('预览不应改动当前激活画师串，已回滚');
-                    return;
-                }
 
                 if (!result?.ok) {
                     err.setMessage(result?.error?.message || '预览失败');
@@ -228,13 +218,12 @@ export function mountArtistPanel(root, deps) {
                 return null;
             }
             const entity = item
-                ? {
-                    ...item,
+                ? applyFormFields(item, {
                     name,
                     positive: positive.getValue(),
                     negative: negative.getValue(),
                     updatedAt: ids.now(),
-                }
+                })
                 : createArtist(
                     {
                         name,

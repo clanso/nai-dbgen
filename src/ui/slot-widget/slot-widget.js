@@ -3,47 +3,65 @@
  * 归属：W2-G 控件代理实现。W0 仅冻结签名。
  * 每个挂载函数须返回 { destroy }。
  *
- * 消毒：骨架过 DOMPurify（class→custom-*）；本模块用 createElement 建子节点，类名无前缀。
+ * 裁决：
+ * - D35：本地视觉表只管外观；busy 优先问 isRendering / hasPendingWrite
+ * - D36：视觉键带 chatId；切聊天清其它条目
+ * - D40：类名常量来自 ./constants.js，不反向 import adapters
+ * - D43：onGenerateClick 必须返回 Promise<Result>；非 Result 不清视觉表
+ *
  * XSS：禁用 innerHTML；img.src 一律 safeImageUrl。
+ * blob URL：由 getImageUrl 提供方（ImageRepository / W3）负责 create/revoke；本控件不自建 ObjectURL。
  */
 
 import { APP_EVENTS } from '../../application/_helpers.js';
+import { safeImageUrl } from '../common/safe-url.js';
 import {
     ensureSlotUnprefixedClasses,
+    hasClassToken,
     SLOT_BTN_CLASS,
     SLOT_IMG_CLASS,
     SLOT_ROOT_CLASS,
-} from '../../adapters/host/slot-mount.observer.js';
-import { safeImageUrl } from '../common/safe-url.js';
+} from './constants.js';
 import {
     classifyGenerateSettlement,
     deriveSlotUiView,
     latestImageEntry,
+    recordHasImage,
     slotErrorTraceId,
 } from './slot-states.js';
 import {
     attachSlotInflightPromise,
     beginSlotInflight,
+    clearSlotInflightOtherChats,
     peekSlotInflight,
     resolveSlotInflightAbort,
     resolveSlotInflightError,
     resolveSlotInflightOk,
-    slotRuntimeSnapshot,
+    resolveVisualRuntime,
     watchSlotInflight,
 } from './slot-mount.js';
 import { openSlotImageViewer } from './image-viewer.js';
 
 /**
  * @typedef {object} SlotWidgetDeps
- * @property {(messageId: number, slotId: number, opts?: { signal?: AbortSignal }) => (void|Promise<unknown>|{ ok: boolean, error?: unknown, value?: unknown })} onGenerateClick
+ * @property {(
+ *   messageId: number,
+ *   slotId: number,
+ *   opts?: { signal?: AbortSignal, force?: boolean }
+ * ) => Promise<{ ok: boolean, error?: unknown, value?: unknown }>} onGenerateClick
+ *   D43：必须返回 Promise<Result>
  * @property {(messageId: number, slotId: number) => import('../../domain/model/slot.js').SlotRecord|null} getRecord
  * @property {(imageRef: string) => Promise<string|null>} getImageUrl
+ * @property {() => (string|null)} [getChatId]
+ * @property {(messageId: number, slotId: number) => boolean} [isRendering]
+ *   D35：应用层闸门查询
+ * @property {(messageId: number, slotId: number) => boolean} [hasPendingWrite]
+ *   D35 / D42
  * @property {{ on: (type: string, fn: (payload: unknown) => void) => (() => void) }} [bus]
  * @property {import('../../ports/host.port.js').HostPort} [host]
  */
 
 /**
- * 深度优先找后代（兼容假 DOM：无可靠 querySelector）。
  * @param {Element} root
  * @param {(el: Element) => boolean} pred
  * @returns {Element|null}
@@ -82,15 +100,6 @@ function findDescendant(root, pred) {
 }
 
 /**
- * @param {string} className
- * @returns {boolean}
- */
-function classIncludes(el, token) {
-    const cls = String(/** @type {{ className?: unknown }} */ (el).className || '');
-    return cls.split(/\s+/).includes(token) || cls.includes(token);
-}
-
-/**
  * @param {Element} rootEl
  * @returns {{ btn: HTMLButtonElement, imgBox: HTMLElement, statusEl: HTMLElement, errEl: HTMLElement }}
  */
@@ -103,7 +112,7 @@ function ensureChrome(rootEl) {
         if (tag === 'BUTTON') {
             return true;
         }
-        return classIncludes(el, SLOT_BTN_CLASS) || classIncludes(el, 'nai-slot-btn');
+        return hasClassToken(el, SLOT_BTN_CLASS) || hasClassToken(el, 'nai-slot-btn');
     }));
     if (!btn) {
         btn = /** @type {HTMLButtonElement} */ (document.createElement('button'));
@@ -117,9 +126,9 @@ function ensureChrome(rootEl) {
     }
 
     let imgBox = /** @type {HTMLElement|null} */ (findDescendant(rootEl, (el) => (
-        classIncludes(el, SLOT_IMG_CLASS)
-        || classIncludes(el, 'nai-slot-img')
-        || classIncludes(el, 'custom-nai-slot-img')
+        hasClassToken(el, SLOT_IMG_CLASS)
+        || hasClassToken(el, 'nai-slot-img')
+        || hasClassToken(el, 'custom-nai-slot-img')
     )));
     if (!imgBox) {
         imgBox = document.createElement('div');
@@ -128,7 +137,7 @@ function ensureChrome(rootEl) {
     imgBox.classList.add(SLOT_IMG_CLASS);
 
     let statusEl = /** @type {HTMLElement|null} */ (findDescendant(rootEl, (el) => (
-        classIncludes(el, 'nd-slot__status')
+        hasClassToken(el, 'nd-slot__status')
     )));
     if (!statusEl) {
         statusEl = document.createElement('div');
@@ -138,7 +147,7 @@ function ensureChrome(rootEl) {
     }
 
     let errEl = /** @type {HTMLElement|null} */ (findDescendant(rootEl, (el) => (
-        classIncludes(el, 'nd-slot__error')
+        hasClassToken(el, 'nd-slot__error')
     )));
     if (!errEl) {
         errEl = document.createElement('div');
@@ -149,23 +158,6 @@ function ensureChrome(rootEl) {
     }
 
     return { btn, imgBox, statusEl, errEl };
-}
-
-/**
- * 撤销本控件自己 createObjectURL 出来的地址（不得动 getImageUrl 返回的外源 blob）。
- * @param {string[]} ownedObjectUrls
- */
-function revokeOwnedObjectUrls(ownedObjectUrls) {
-    while (ownedObjectUrls.length) {
-        const old = ownedObjectUrls.pop();
-        if (old && typeof URL !== 'undefined' && typeof URL.revokeObjectURL === 'function') {
-            try {
-                URL.revokeObjectURL(old);
-            } catch {
-                // ignore
-            }
-        }
-    }
 }
 
 /**
@@ -213,16 +205,49 @@ export function mountSlotWidget(rootEl, messageId, deps) {
     const { btn, imgBox, statusEl, errEl } = ensureChrome(rootEl);
 
     let destroyed = false;
-    /** @type {string[]} */
-    const ownedObjectUrls = [];
     /** @type {string|null} */
     let currentImageUrl = null;
     /** @type {(() => void)|null} */
     let unwatchInflight = null;
     /** @type {(() => void)|null} */
     let unsubBus = null;
+    /** @type {(() => void)|null} */
+    let unsubChat = null;
     /** @type {number} */
     let paintGeneration = 0;
+
+    /**
+     * @returns {string|null}
+     */
+    function resolveChatId() {
+        if (typeof deps.getChatId === 'function') {
+            const id = deps.getChatId();
+            return id == null || id === '' ? null : String(id);
+        }
+        if (deps.host && typeof deps.host.getCurrentChatId === 'function') {
+            const id = deps.host.getCurrentChatId();
+            return id == null || id === '' ? null : String(id);
+        }
+        return null;
+    }
+
+    /**
+     * @returns {boolean}
+     */
+    function appIsRendering() {
+        return typeof deps.isRendering === 'function'
+            ? Boolean(deps.isRendering(messageId, slotId))
+            : false;
+    }
+
+    /**
+     * @returns {boolean}
+     */
+    function appHasPendingWrite() {
+        return typeof deps.hasPendingWrite === 'function'
+            ? Boolean(deps.hasPendingWrite(messageId, slotId))
+            : false;
+    }
 
     /**
      * @param {string} stateClass
@@ -261,8 +286,15 @@ export function mountSlotWidget(rootEl, messageId, deps) {
             return;
         }
         const gen = ++paintGeneration;
+        const chatId = resolveChatId();
         const record = deps.getRecord(messageId, slotId);
-        const runtime = slotRuntimeSnapshot(messageId, slotId);
+        const runtime = resolveVisualRuntime({
+            chatId,
+            messageId,
+            slotId,
+            appRendering: appIsRendering(),
+            appPendingWrite: appHasPendingWrite(),
+        });
         const view = deriveSlotUiView(record, runtime);
 
         applyStateClasses(view.stateClass);
@@ -272,7 +304,9 @@ export function mountSlotWidget(rootEl, messageId, deps) {
             btn.setAttribute('aria-busy', view.busy ? 'true' : 'false');
         }
 
-        statusEl.textContent = view.busy ? '生图中…' : '';
+        statusEl.textContent = view.busy
+            ? (appHasPendingWrite() && !appIsRendering() ? '写入中…' : '生图中…')
+            : '';
 
         if (view.showError) {
             errEl.hidden = false;
@@ -321,11 +355,12 @@ export function mountSlotWidget(rootEl, messageId, deps) {
             unwatchInflight();
             unwatchInflight = null;
         }
-        const entry = peekSlotInflight(messageId, slotId);
+        const chatId = resolveChatId();
+        const entry = peekSlotInflight(chatId, messageId, slotId);
         if (!entry) {
             return;
         }
-        unwatchInflight = watchSlotInflight(messageId, slotId, () => {
+        unwatchInflight = watchSlotInflight(chatId, messageId, slotId, () => {
             if (!destroyed) {
                 void paintFromStore();
             }
@@ -339,26 +374,27 @@ export function mountSlotWidget(rootEl, messageId, deps) {
         if (destroyed) {
             return;
         }
-        const existing = peekSlotInflight(messageId, slotId);
-        if (existing && existing.status === 'generating') {
-            bindInflightWatch();
-            await paintFromStore();
-            return;
-        }
+        const chatId = resolveChatId();
 
-        const { entry, created } = beginSlotInflight(messageId, slotId);
+        // 视觉：若本地已在 generating，只刷新；仍允许再次 onGenerateClick
+        // （D35：应用层共享 Promise，不会双份扣费）
+        const { entry, created } = beginSlotInflight(chatId, messageId, slotId);
         bindInflightWatch();
         await paintFromStore();
 
-        if (!created) {
+        // 本地已有进行中视觉且应用层也 busy → 不必再调（减少噪音）；否则仍调闸门
+        if (!created && (appIsRendering() || appHasPendingWrite())) {
             return;
         }
 
+        const record = deps.getRecord(messageId, slotId);
+        const force = recordHasImage(record);
         const signal = entry.controller ? entry.controller.signal : undefined;
+
         const work = Promise.resolve().then(() => (
-            deps.onGenerateClick(messageId, slotId, { signal })
+            deps.onGenerateClick(messageId, slotId, { signal, force })
         ));
-        attachSlotInflightPromise(messageId, slotId, work);
+        attachSlotInflightPromise(chatId, messageId, slotId, work);
 
         let settled;
         try {
@@ -367,15 +403,20 @@ export function mountSlotWidget(rootEl, messageId, deps) {
             settled = err;
         }
 
+        // 切聊天后本键可能已清；用发起时的 chatId 结算
         const kind = classifyGenerateSettlement(settled);
-        if (kind.kind === 'ok') {
-            resolveSlotInflightOk(messageId, slotId);
+        if (kind.kind === 'ok' || kind.kind === 'already') {
+            // already = SLOT_ALREADY_RENDERED：闸门正常，不弹红
+            resolveSlotInflightOk(chatId, messageId, slotId);
         } else if (kind.kind === 'abort') {
-            resolveSlotInflightAbort(messageId, slotId);
+            resolveSlotInflightAbort(chatId, messageId, slotId);
+        } else if (kind.kind === 'invalid') {
+            // D43：非 Result → 不清表，保持 generating，避免再点再发
+            return;
         } else {
             const err = kind.error;
             const traceId = slotErrorTraceId(err, null);
-            resolveSlotInflightError(messageId, slotId, err, traceId || null);
+            resolveSlotInflightError(chatId, messageId, slotId, err, traceId || null);
         }
 
         if (!destroyed) {
@@ -406,16 +447,32 @@ export function mountSlotWidget(rootEl, messageId, deps) {
             if (destroyed || !payload || typeof payload !== 'object') {
                 return;
             }
-            const p = /** @type {{ messageId?: unknown, slotId?: unknown }} */ (payload);
+            const p = /** @type {{ messageId?: unknown, slotId?: unknown, chatId?: unknown }} */ (payload);
             if (Number(p.messageId) !== Number(messageId) || Number(p.slotId) !== Number(slotId)) {
                 return;
             }
-            resolveSlotInflightOk(messageId, slotId);
+            const chatId = resolveChatId();
+            if (p.chatId != null && chatId != null && String(p.chatId) !== String(chatId)) {
+                return;
+            }
+            resolveSlotInflightOk(chatId, messageId, slotId);
             void paintFromStore();
         });
     }
 
-    if (peekSlotInflight(messageId, slotId)) {
+    if (deps.host && typeof deps.host.onChatChanged === 'function') {
+        unsubChat = deps.host.onChatChanged((nextChatId) => {
+            clearSlotInflightOtherChats(nextChatId);
+            if (!destroyed) {
+                void paintFromStore();
+            }
+        });
+    }
+
+    // 挂载时先按当前 chat 清掉其它聊天残留（D36）
+    clearSlotInflightOtherChats(resolveChatId());
+
+    if (peekSlotInflight(resolveChatId(), messageId, slotId) || appIsRendering() || appHasPendingWrite()) {
         bindInflightWatch();
     }
 
@@ -438,13 +495,16 @@ export function mountSlotWidget(rootEl, messageId, deps) {
                 unsubBus();
                 unsubBus = null;
             }
+            if (unsubChat) {
+                unsubChat();
+                unsubChat = null;
+            }
             if (unwatchInflight) {
                 unwatchInflight();
                 unwatchInflight = null;
             }
-            revokeOwnedObjectUrls(ownedObjectUrls);
             currentImageUrl = null;
-            // 不 abort、不清 inflight：宿主重渲染不得取消计费中请求
+            // 不清应用层闸门；不清本 chat 视觉 generating（remount 可附着）
         },
     };
 }

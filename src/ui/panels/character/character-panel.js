@@ -12,7 +12,7 @@ import {
     createCharacterGroup,
     normalizeKeywords,
 } from '../../../domain/model/character.js';
-import { filterNestedLibrary } from '../_lib/library-logic.js';
+import { filterNestedLibrary, applyFormFields } from '../_lib/library-logic.js';
 import {
     el,
     setText,
@@ -154,11 +154,10 @@ export function mountCharacterPanel(root, deps) {
     }
 
     async function toggleGroup(group, enabled) {
-        const next = {
-            ...group,
+        const next = applyFormFields(group, {
             active: Boolean(enabled),
             updatedAt: ids.now(),
-        };
+        });
         const saved = await awaitRepo(host, repo.putGroup(next), '保存组失败');
         if (saved) await refresh();
     }
@@ -204,12 +203,11 @@ export function mountCharacterPanel(root, deps) {
                     return;
                 }
                 const entity = group
-                    ? {
-                        ...group,
+                    ? applyFormFields(group, {
                         name,
                         active: activeToggle.getValue(),
                         updatedAt: ids.now(),
-                    }
+                    })
                     : createCharacterGroup(
                         { name, active: activeToggle.getValue() },
                         { id: ids.id('cg'), now: ids.now() },
@@ -242,9 +240,9 @@ export function mountCharacterPanel(root, deps) {
                 : '',
         });
         const dna = labeledTextarea('固定特征（DNA）', character?.fixedFeatures ?? '', 5);
-        /** @type {{ name: string, prompt: string }[]} */
+        /** @type {object[]} */
         let varFeatures = Array.isArray(character?.variableFeatures)
-            ? character.variableFeatures.map((v) => ({ name: String(v.name ?? ''), prompt: String(v.prompt ?? '') }))
+            ? character.variableFeatures.map((v) => ({ ...v }))
             : [];
 
         const varHost = el('div', 'nd-var-features');
@@ -260,9 +258,13 @@ export function mountCharacterPanel(root, deps) {
                 const row = el('div', 'nd-var-feature');
                 const n = createField({
                     label: '条目名',
-                    value: feat.name,
+                    value: feat.name != null ? String(feat.name) : '',
                 });
-                const p = labeledTextarea('提示词', feat.prompt, 2);
+                const p = labeledTextarea(
+                    '提示词',
+                    feat.prompt != null ? String(feat.prompt) : '',
+                    2,
+                );
                 varControls.push({ name: n, prompt: p });
                 row.append(n.el, p.el);
                 row.appendChild(createButton({
@@ -286,7 +288,7 @@ export function mountCharacterPanel(root, deps) {
         }
 
         function readVars() {
-            return varControls.map((c) => ({
+            return varControls.map((c, i) => applyFormFields(varFeatures[i] || {}, {
                 name: c.name.getValue(),
                 prompt: c.prompt.getValue(),
             }));
@@ -330,21 +332,20 @@ export function mountCharacterPanel(root, deps) {
                     /** @type {object|null} */
                     let matchOverrides = null;
                     if (useOverride.getValue()) {
-                        matchOverrides = {
+                        matchOverrides = applyFormFields(character?.matchOverrides || {}, {
                             caseSensitive: overrideCase.getValue(),
                             matchWholeWords: overrideWhole.getValue(),
-                        };
+                        });
                     }
                     const entity = character
-                        ? {
-                            ...character,
+                        ? applyFormFields(character, {
                             name,
                             keywords: normalizeKeywords(kwField.getValue()),
                             fixedFeatures: dna.getValue(),
                             variableFeatures: varFeatures,
                             matchOverrides,
                             updatedAt: ids.now(),
-                        }
+                        })
                         : createCharacter(
                             {
                                 groupId,

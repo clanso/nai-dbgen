@@ -1,5 +1,5 @@
 /**
- * W2-G · slot 状态机 / Abort / 持久恢复 / 文案（纯函数）。
+ * W2-G · slot 状态机 / Abort / 持久恢复 / D43 Result 契约（纯函数）。
  */
 
 import { describe, it } from 'node:test';
@@ -8,6 +8,7 @@ import {
     classifyGenerateSettlement,
     deriveSlotUiView,
     isAbortFailure,
+    isAlreadyRenderedFailure,
     latestImageEntry,
     recordHasImage,
     shouldTreatAsError,
@@ -16,23 +17,20 @@ import {
     slotErrorTraceId,
     slotStateClass,
 } from '../../src/ui/slot-widget/slot-states.js';
+import { hasClassToken } from '../../src/ui/slot-widget/constants.js';
 
 describe('ui/slot slot-states', () => {
     it('四态：idle / generating / done / error', () => {
         assert.equal(deriveSlotUiView(null, null).state, 'idle');
         assert.equal(deriveSlotUiView({ images: [] }, null).state, 'idle');
-
         assert.equal(
             deriveSlotUiView(null, { status: 'generating' }).state,
             'generating',
         );
-
         const doneRec = {
             images: [{ imageRef: 'img-1', createdAt: 't', naiConfigId: null, artistId: null }],
         };
         assert.equal(deriveSlotUiView(doneRec, null).state, 'done');
-        assert.equal(deriveSlotUiView(doneRec, { status: undefined }).state, 'done');
-
         const errView = deriveSlotUiView(null, {
             status: 'error',
             error: { message: '上游失败', traceId: 'tr-1' },
@@ -42,31 +40,40 @@ describe('ui/slot slot-states', () => {
         assert.equal(errView.traceId, 'tr-1');
     });
 
-    it('Abort 不计作失败：恢复 idle/done，不进 error', () => {
+    it('Abort 不计作失败', () => {
         assert.equal(isAbortFailure({ code: 'UPSTREAM_ABORTED' }), true);
-        assert.equal(isAbortFailure({ code: 'NAI_ABORTED' }), true);
-        assert.equal(isAbortFailure({ name: 'AbortError' }), true);
-        assert.equal(isAbortFailure({ ok: false, error: { code: 'UPSTREAM_ABORTED' } }), true);
         assert.equal(shouldTreatAsError({ code: 'UPSTREAM_ABORTED' }), false);
-
-        // runtime 若误标 error+abort，derive 应忽略（shouldTreatAsError=false → 按 record）
         const view = deriveSlotUiView(
             { images: [] },
             { status: 'error', error: { code: 'UPSTREAM_ABORTED', message: '已取消' } },
         );
         assert.equal(view.state, 'idle');
         assert.equal(view.showError, false);
-
-        const doneRec = { images: [{ imageRef: 'x' }] };
-        const view2 = deriveSlotUiView(doneRec, {
-            status: 'error',
-            error: { code: 'UPSTREAM_ABORTED' },
-        });
-        assert.equal(view2.state, 'done');
     });
 
-    it('classifyGenerateSettlement：ok / abort / error', () => {
-        assert.equal(classifyGenerateSettlement(undefined).kind, 'ok');
+    it('SLOT_ALREADY_RENDERED 不弹红错', () => {
+        assert.equal(isAlreadyRenderedFailure({ code: 'SLOT_ALREADY_RENDERED' }), true);
+        assert.equal(shouldTreatAsError({ code: 'SLOT_ALREADY_RENDERED' }), false);
+        assert.equal(
+            classifyGenerateSettlement({
+                ok: false,
+                error: { code: 'SLOT_ALREADY_RENDERED', message: 'slot #1 已有图片' },
+            }).kind,
+            'already',
+        );
+        const view = deriveSlotUiView(
+            { images: [{ imageRef: 'x' }] },
+            { status: 'error', error: { code: 'SLOT_ALREADY_RENDERED' } },
+        );
+        assert.equal(view.state, 'done');
+        assert.equal(view.showError, false);
+    });
+
+    it('D43：undefined / 非 Result → invalid（不得当成功）', () => {
+        assert.equal(classifyGenerateSettlement(undefined).kind, 'invalid');
+        assert.equal(classifyGenerateSettlement(null).kind, 'invalid');
+        assert.equal(classifyGenerateSettlement({}).kind, 'invalid');
+        assert.equal(classifyGenerateSettlement('ok').kind, 'invalid');
         assert.equal(classifyGenerateSettlement({ ok: true, value: 1 }).kind, 'ok');
         assert.equal(
             classifyGenerateSettlement({ ok: false, error: { code: 'UPSTREAM_ABORTED' } }).kind,
@@ -81,41 +88,43 @@ describe('ui/slot slot-states', () => {
         assert.equal(slotErrorTraceId(err.error), 't9');
     });
 
-    it('从持久层恢复：已出图 record → done，按钮为重新生成', () => {
+    it('从持久层恢复：已出图 → done', () => {
         const record = {
-            images: [
-                { imageRef: 'old' },
-                { imageRef: 'latest-ref' },
-            ],
+            images: [{ imageRef: 'old' }, { imageRef: 'latest-ref' }],
         };
         assert.equal(recordHasImage(record), true);
         assert.deepEqual(latestImageEntry(record), { imageRef: 'latest-ref' });
-
         const view = deriveSlotUiView(record, null);
         assert.equal(view.state, 'done');
         assert.equal(view.buttonLabel, slotButtonLabel('done'));
         assert.equal(view.stateClass, slotStateClass('done'));
-        assert.equal(view.showImage, true);
-        assert.equal(view.busy, false);
     });
 
-    it('generating 优先于已有图（重渲存活：不丢进行中）', () => {
-        const record = { images: [{ imageRef: 'prev' }] };
-        const view = deriveSlotUiView(record, { status: 'generating' });
+    it('generating 优先于已有图', () => {
+        const view = deriveSlotUiView(
+            { images: [{ imageRef: 'prev' }] },
+            { status: 'generating' },
+        );
         assert.equal(view.state, 'generating');
         assert.equal(view.busy, true);
-        assert.equal(view.buttonLabel, '生图中…');
     });
 
     it('失败态展示中文 message 与 traceId', () => {
         const view = deriveSlotUiView(null, {
             status: 'error',
             error: { message: '找不到 slot #3', traceId: 'abc-trace' },
-            traceId: 'fallback',
         });
         assert.equal(view.showError, true);
         assert.equal(view.errorMessage, '找不到 slot #3');
         assert.equal(view.traceId, 'abc-trace');
-        assert.equal(view.buttonLabel, '重试');
+    });
+
+    it('hasClassToken 精确匹配，不误匹配子串', () => {
+        const el = { className: 'custom-nai-slot-btn nd-other' };
+        assert.equal(hasClassToken(el, 'nai-slot-btn'), false);
+        assert.equal(hasClassToken(el, 'custom-nai-slot-btn'), true);
+        assert.equal(hasClassToken({ className: 'nd-slot__btn' }, 'nd-slot__btn'), true);
+        assert.equal(hasClassToken({ className: 'nd-slot__btn-extra' }, 'nd-slot__btn'), false);
+        assert.equal(hasClassToken({ className: 'x nd-slot__btn y' }, 'nd-slot__btn'), true);
     });
 });

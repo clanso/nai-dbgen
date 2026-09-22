@@ -4,7 +4,7 @@ import { safeImageUrl, paintSafeCover, coverInitial } from '../../src/ui/common/
 import { installFakeDom } from './fake-dom.js';
 
 describe('ui/common/safeImageUrl (D24)', () => {
-    it('allows http / https / blob / data:image', () => {
+    it('allows http / https / blob / raster data:image', () => {
         assert.equal(
             safeImageUrl('https://example.com/a.png'),
             'https://example.com/a.png',
@@ -18,7 +18,18 @@ describe('ui/common/safeImageUrl (D24)', () => {
             'blob:https://example.com/uuid-1',
         );
         assert.ok(safeImageUrl('data:image/png;base64,aaaa'));
-        assert.ok(safeImageUrl('data:image/svg+xml,<svg></svg>'));
+        assert.ok(safeImageUrl('data:image/jpeg;base64,aaaa'));
+        assert.ok(safeImageUrl('data:image/webp;base64,aaaa'));
+        assert.ok(safeImageUrl('data:image/gif;base64,aaaa'));
+    });
+
+    it('rejects data:image/svg+xml (D51)', () => {
+        assert.equal(safeImageUrl('data:image/svg+xml,<svg></svg>'), null);
+        assert.equal(safeImageUrl('DATA:IMAGE/SVG+XML,<svg></svg>'), null);
+        assert.equal(
+            safeImageUrl('data:image/svg+xml;base64,PHN2Zy8+'),
+            null,
+        );
     });
 
     it('rejects javascript: (incl. case / whitespace bypass)', () => {

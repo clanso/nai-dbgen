@@ -6,7 +6,7 @@
 import { createStyleCard, createLibraryToolbar } from '../common/library-chrome.js';
 import { createEmptyState } from '../common/controls.js';
 import { createStore } from '../common/store.js';
-import { filterSortItems } from './_lib/library-logic.js';
+import { filterSortItems, resolveDeleteIdsByIdentity } from './_lib/library-logic.js';
 import { el, setText } from './_lib/panel-kit.js';
 
 /**
@@ -136,7 +136,14 @@ export function mountLibraryView(root, deps, opts) {
                             label: '删除',
                             action: 'delete',
                             variant: 'danger',
-                            onClick: () => deps.onDelete([String(item.id)]),
+                            onClick: () => {
+                                // 按实体 id 删除，避免筛选/排序后的可见下标错位
+                                const ids = resolveDeleteIdsByIdentity(
+                                    store.get().items,
+                                    [String(item.id)],
+                                );
+                                if (ids.length) deps.onDelete(ids);
+                            },
                         }
                         : null,
                 ].filter(Boolean),

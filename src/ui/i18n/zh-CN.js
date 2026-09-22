@@ -37,6 +37,8 @@ export const zhCN = Object.freeze({
     'import.overwrite': '覆盖已有',
     'import.rename': '另存为新副本',
     'import.commit': '导入已勾选',
+    'import.overwriteConfirm': '将覆盖已有 {count} 条相关记录，此操作不可撤销。确定继续？',
+    'import.overwriteCancelled': '已取消覆盖导入',
     'import.exportTitle': '导出当前库',
     'import.exportHint': '导出为 JSON 信封，可再导入到本插件。',
     'import.exportButton': '导出 JSON',

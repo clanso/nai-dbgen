@@ -3,10 +3,27 @@
  * 归属：W1-E 组件代理实现。W0 仅冻结签名。
  *
  * 只做 UI：JSON 解析与预览勾选；真正导入/导出交给 deps（W1-D 存储层）。
+ *
+ * ## 勾选语义（裁决 D44）
+ * 预览表只列**叶子**（扁平 items / characters / entries，或嵌套组内角色、库内条目）。
+ * 「导入已勾选」必须按勾选过滤后再交给 importJson——假勾选会在 overwrite 下覆盖用户本想保住的条目。
+ *
+ * 两层结构：
+ * - 取消勾选某叶子 = 不导入该叶子。
+ * - 过滤后若某父（组/库）下已无任何已勾选叶子，该父从载荷中省略（不写空组）。
+ * - 本 UI **无独立父勾选列**；「取消父节点」= 取消其下全部叶子勾选。
+ * - 扁平信封 `{ groups, characters }` / `{ libraries, entries }`：父按叶子的 groupId/libraryId 引用保留。
  */
 
 import { t } from '../i18n/zh-CN.js';
 import { createButton } from './controls.js';
+import { safeImageUrl } from './safe-url.js';
+
+/** @type {readonly string[]} */
+const FLAT_LEAF_KEYS = Object.freeze([
+    'items', 'entries', 'characters', 'tags',
+    'artists', 'presets', 'configs', 'rows',
+]);
 
 /**
  * @param {unknown} data
@@ -20,11 +37,7 @@ export function extractPreviewRows(data) {
     if (typeof data !== 'object') return [];
 
     const obj = /** @type {Record<string, unknown>} */ (data);
-    const keys = [
-        'items', 'entries', 'characters', 'tags',
-        'artists', 'presets', 'configs', 'rows',
-    ];
-    for (const key of keys) {
+    for (const key of FLAT_LEAF_KEYS) {
         if (Array.isArray(obj[key])) {
             return /** @type {object[]} */ (obj[key]).filter((item) => item && typeof item === 'object');
         }
@@ -78,6 +91,135 @@ export function extractPreviewRows(data) {
 }
 
 /**
+ * 按与 extractPreviewRows 同序的勾选数组过滤载荷。
+ * 无任何勾选 → 返回 null（调用方不得把空包丢给 importJson）。
+ *
+ * @param {object|object[]} data
+ * @param {boolean[]} checked
+ * @returns {object|object[]|null}
+ */
+export function filterImportPayload(data, checked) {
+    const flags = Array.isArray(checked) ? checked : [];
+    if (!flags.some(Boolean)) {
+        return null;
+    }
+
+    if (Array.isArray(data)) {
+        const kept = data.filter((item, i) => item && typeof item === 'object' && flags[i]);
+        return kept.length ? kept : null;
+    }
+    if (data == null || typeof data !== 'object') {
+        return null;
+    }
+
+    const obj = /** @type {Record<string, unknown>} */ (data);
+
+    for (const key of FLAT_LEAF_KEYS) {
+        if (!Array.isArray(obj[key])) continue;
+        const leaves = /** @type {object[]} */ (obj[key]);
+        const keptLeaves = leaves.filter((item, i) => item && typeof item === 'object' && flags[i]);
+        if (!keptLeaves.length) return null;
+
+        /** @type {Record<string, unknown>} */
+        const next = { ...obj, [key]: keptLeaves };
+
+        // 扁平两层：characters ↔ groups / entries ↔ libraries
+        if (key === 'characters' && Array.isArray(obj.groups)) {
+            const parentIds = new Set(
+                keptLeaves
+                    .map((c) => (c && /** @type {any} */ (c).groupId != null
+                        ? String(/** @type {any} */ (c).groupId)
+                        : ''))
+                    .filter(Boolean),
+            );
+            next.groups = /** @type {object[]} */ (obj.groups).filter(
+                (g) => g && typeof g === 'object' && parentIds.has(String(/** @type {any} */ (g).id ?? '')),
+            );
+        }
+        if (key === 'entries' && Array.isArray(obj.libraries)) {
+            const parentIds = new Set(
+                keptLeaves
+                    .map((e) => (e && /** @type {any} */ (e).libraryId != null
+                        ? String(/** @type {any} */ (e).libraryId)
+                        : ''))
+                    .filter(Boolean),
+            );
+            next.libraries = /** @type {object[]} */ (obj.libraries).filter(
+                (l) => l && typeof l === 'object' && parentIds.has(String(/** @type {any} */ (l).id ?? '')),
+            );
+        }
+        return next;
+    }
+
+    if (Array.isArray(obj.groups)) {
+        let idx = 0;
+        /** @type {object[]} */
+        const newGroups = [];
+        for (const group of obj.groups) {
+            if (!group || typeof group !== 'object') continue;
+            const g = /** @type {Record<string, unknown>} */ (group);
+            if (Array.isArray(g.characters)) {
+                /** @type {object[]} */
+                const kept = [];
+                for (const ch of g.characters) {
+                    if (!ch || typeof ch !== 'object') {
+                        idx += 1;
+                        continue;
+                    }
+                    if (flags[idx]) kept.push(ch);
+                    idx += 1;
+                }
+                if (kept.length) {
+                    newGroups.push({ ...g, characters: kept });
+                }
+            } else if (flags[idx]) {
+                newGroups.push(group);
+                idx += 1;
+            } else {
+                idx += 1;
+            }
+        }
+        if (!newGroups.length) return null;
+        return { ...obj, groups: newGroups };
+    }
+
+    if (Array.isArray(obj.libraries)) {
+        let idx = 0;
+        /** @type {object[]} */
+        const newLibs = [];
+        for (const lib of obj.libraries) {
+            if (!lib || typeof lib !== 'object') continue;
+            const l = /** @type {Record<string, unknown>} */ (lib);
+            if (Array.isArray(l.entries)) {
+                /** @type {object[]} */
+                const kept = [];
+                for (const entry of l.entries) {
+                    if (!entry || typeof entry !== 'object') {
+                        idx += 1;
+                        continue;
+                    }
+                    if (flags[idx]) kept.push(entry);
+                    idx += 1;
+                }
+                if (kept.length) {
+                    newLibs.push({ ...l, entries: kept });
+                }
+            } else if (flags[idx]) {
+                newLibs.push(lib);
+                idx += 1;
+            } else {
+                idx += 1;
+            }
+        }
+        if (!newLibs.length) return null;
+        return { ...obj, libraries: newLibs };
+    }
+
+    // 单根对象：仅当 flags[0]
+    return flags[0] ? obj : null;
+}
+
+/**
  * @param {object} item
  * @returns {{ name: string, id: string, kind: string }}
  */
@@ -102,8 +244,6 @@ function rowMeta(item) {
     return { name, id, kind };
 }
 
-import { safeImageUrl } from './safe-url.js';
-
 /**
  * @param {object} data
  * @param {string} filename
@@ -112,7 +252,6 @@ function downloadJson(data, filename) {
     const text = JSON.stringify(data, null, 2);
     const blob = new Blob([text], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
-    // createObjectURL → blob:；仍过白名单，避免将来改实现时漏检
     const safe = safeImageUrl(url);
     if (!safe) {
         URL.revokeObjectURL(url);
@@ -126,6 +265,17 @@ function downloadJson(data, filename) {
     a.click();
     a.remove();
     URL.revokeObjectURL(url);
+}
+
+/**
+ * @returns {boolean}
+ */
+function confirmOverwrite(count) {
+    const message = t('import.overwriteConfirm', { count });
+    if (typeof globalThis.confirm === 'function') {
+        return Boolean(globalThis.confirm(message));
+    }
+    return false;
 }
 
 /**
@@ -228,8 +378,8 @@ export function mountImportExport(root, deps) {
     const strategyTitle = document.createElement('span');
     strategyTitle.className = 'nd-field__label';
     strategyTitle.textContent = t('import.duplicateStrategy');
-    const strategy = document.createElement('select');
-    strategy.className = 'nd-select';
+    const strategySelect = document.createElement('select');
+    strategySelect.className = 'nd-select';
     for (const [value, key] of [
         ['skip', 'import.skip'],
         ['overwrite', 'import.overwrite'],
@@ -238,14 +388,16 @@ export function mountImportExport(root, deps) {
         const opt = document.createElement('option');
         opt.value = value;
         opt.textContent = t(key);
-        strategy.appendChild(opt);
+        strategySelect.appendChild(opt);
     }
-    strategyLabel.append(strategyTitle, strategy);
+    strategyLabel.append(strategyTitle, strategySelect);
 
     const commitBtn = createButton({
         label: t('import.commit'),
         variant: 'primary',
-        onClick: () => commitImport(),
+        onClick: () => {
+            void commitImport();
+        },
     });
 
     toolbar.append(toolbarCopy, strategyLabel, commitBtn);
@@ -360,13 +512,23 @@ export function mountImportExport(root, deps) {
         if (!importJson || !pendingData) return;
         setError('');
         try {
-            // 存储层按整包 + strategy 处理；UI 勾选仅作预览确认信号。
-            // 若全部取消勾选，则不调用导入。
-            if (!previewRows.some((row) => row.checked)) {
+            const checked = previewRows.map((row) => Boolean(row.checked));
+            const filtered = filterImportPayload(pendingData, checked);
+            if (filtered == null) {
                 setError(t('import.empty'));
                 return;
             }
-            await importJson(pendingData, strategy.value || 'skip');
+
+            const mode = strategySelect.value || 'skip';
+            if (mode === 'overwrite') {
+                const count = checked.filter(Boolean).length;
+                if (!confirmOverwrite(count)) {
+                    setError(t('import.overwriteCancelled'));
+                    return;
+                }
+            }
+
+            await importJson(filtered, mode);
             setError('');
             summary.textContent = t('import.done');
         } catch (err) {

@@ -128,14 +128,22 @@ export function createFakeHost(opts = {}) {
 
     /** @type {Array<(id: number) => void>} */
     const settledListeners = [];
+    /** @type {Array<(chatId: string|null) => void>} */
+    const chatListeners = [];
     /** @type {import('../../src/ports/host.port.js').HostMessage[][]} */
     const resolveWorldInfoCalls = [];
+    let chatId = opts.chatId ?? 'chat-1';
 
-    return {
+    const host = {
         resolveWorldInfoCalls,
         settledListeners,
         byId,
-        getCurrentChatId: () => 'chat-1',
+        get chatId() { return chatId; },
+        setChatId(next) {
+            chatId = next;
+            for (const fn of chatListeners) fn(chatId);
+        },
+        getCurrentChatId: () => chatId,
         getMessages: () => [...byId.values()],
         getRecentAiMessages: (n) => aiMessages.slice(0, n).map((m) => ({ ...m })),
         getMessage: (id) => {
@@ -143,6 +151,9 @@ export function createFakeHost(opts = {}) {
             return m ? { ...m } : null;
         },
         replaceMessageText: async (id, text) => {
+            if (opts.replaceFail) {
+                return Err(hostError({ code: 'REPLACE_FAIL', message: 'replace failed' }));
+            }
             const m = byId.get(id);
             if (!m) {
                 return Err(hostError({ code: 'NO_MSG', message: 'no message' }));
@@ -166,7 +177,13 @@ export function createFakeHost(opts = {}) {
             }
             return Ok(opts.worldInfoText ?? 'WORLD_INFO_TEXT');
         },
-        onChatChanged: () => () => {},
+        onChatChanged: (fn) => {
+            chatListeners.push(fn);
+            return () => {
+                const i = chatListeners.indexOf(fn);
+                if (i >= 0) chatListeners.splice(i, 1);
+            };
+        },
         onAiMessageSettled: (fn) => {
             settledListeners.push(fn);
             return () => {
@@ -181,11 +198,11 @@ export function createFakeHost(opts = {}) {
         registerSlashCommand: () => {},
         toast: () => {},
         dispose: () => {},
-        /** 测试触发 */
         emitSettled(messageId) {
             for (const fn of settledListeners) fn(messageId);
         },
     };
+    return host;
 }
 
 export function createMemoryRepo(initial = []) {
@@ -248,22 +265,42 @@ export function createFakeSlotRepo() {
     /** @type {Map<string, any>} */
     const map = new Map();
     const key = (m, s) => `${m}:${s}`;
-    return {
+    /** @type {any} */
+    const repo = {
+        failGet: false,
+        failGetByMessage: false,
+        failPut: false,
+        failRecordImageOnce: false,
         getByMessage: async (messageId) => {
+            if (repo.failGetByMessage) {
+                return Err(hostError({ code: 'GET_BY_MSG_FAIL', message: 'getByMessage failed' }));
+            }
             const out = [];
             for (const [k, v] of map) {
                 if (k.startsWith(`${messageId}:`)) out.push(v);
             }
             return Ok(out);
         },
-        get: async (messageId, slotId) => Ok(map.get(key(messageId, slotId)) ?? null),
+        get: async (messageId, slotId) => {
+            if (repo.failGet) {
+                return Err(hostError({ code: 'GET_FAIL', message: 'get failed' }));
+            }
+            return Ok(map.get(key(messageId, slotId)) ?? null);
+        },
         put: async (messageId, records) => {
+            if (repo.failPut) {
+                return Err(hostError({ code: 'PUT_FAIL', message: 'put failed' }));
+            }
             for (const r of records) {
                 map.set(key(messageId, r.slotId), r);
             }
             return Ok(undefined);
         },
         recordImage: async (messageId, slotId, imageRef, meta = {}) => {
+            if (repo.failRecordImageOnce) {
+                repo.failRecordImageOnce = false;
+                return Err(hostError({ code: 'RECORD_FAIL', message: 'recordImage failed' }));
+            }
             const prev = map.get(key(messageId, slotId));
             if (!prev) {
                 return Err(hostError({ code: 'NO_SLOT', message: 'no slot' }));
@@ -286,6 +323,7 @@ export function createFakeSlotRepo() {
         onChanged: () => () => {},
         _map: map,
     };
+    return repo;
 }
 
 export function createFakeImageRepo() {
@@ -434,7 +472,7 @@ export function buildPipeline(overrides = {}) {
         newTraceId,
     });
     const renderSlot = createRenderSlotUseCase({
-        imageGen, slotRepo, imageRepo, bus, nowIso, newTraceId,
+        imageGen, slotRepo, imageRepo, host, bus, nowIso, newTraceId,
     });
     const artistPreview = createArtistPreviewService({
         imageGen, artistRepo, imageRepo,
