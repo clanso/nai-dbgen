@@ -115,6 +115,116 @@ export function domainError(init) {
 }
 
 /**
+ * 按 HTTP 状态构造 UpstreamError（裁决 D11 / 架构 §10）。
+ * 策略唯一定义点，W1-C 不得另发明一套。
+ *
+ * | 状态 | retryable | 语义 |
+ * | --- | --- | --- |
+ * | 401 / 403 | false | 鉴权失败，应停用该配置 |
+ * | 429 | true | 限流；尊重 Retry-After（秒）写入 context.retryAfterSec |
+ * | 408 / 5xx | true | 超时或上游故障，退避重试 |
+ * | 其它 4xx | false | 请求不被接受 |
+ *
+ * 用户中断（AbortError）请直接调本函数时传 status=0 且 init.cause 为 AbortError，
+ * 或使用 abort 专用路径：本函数在 cause 为 AbortError 时强制 retryable=false。
+ *
+ * @param {number} status HTTP 状态码；用户中断可用 0
+ * @param {AppErrorInit} [init] 可覆盖 code/message/hint/traceId/context/cause
+ * @returns {AppError}
+ */
+export function upstreamFromHttpStatus(status, init = {}) {
+    const cause = init.cause ?? null;
+    const isAbort = isAbortCause(cause);
+    if (isAbort) {
+        return upstreamError({
+            code: init.code ?? 'UPSTREAM_ABORTED',
+            message: init.message ?? '请求已取消',
+            hint: init.hint ?? null,
+            retryable: false,
+            cause,
+            traceId: init.traceId ?? null,
+            context: { status, disableConfig: false, ...(init.context ?? {}) },
+        });
+    }
+
+    const codeNum = Number(status);
+    /** @type {boolean} */
+    let retryable = false;
+    /** @type {boolean} */
+    let disableConfig = false;
+    /** @type {string} */
+    let code = `UPSTREAM_${codeNum || 'UNKNOWN'}`;
+    /** @type {string} */
+    let message = `上游返回错误（HTTP ${codeNum}）`;
+    /** @type {string|null} */
+    let hint = '请稍后重试，或检查接口配置';
+
+    if (codeNum === 401 || codeNum === 403) {
+        retryable = false;
+        disableConfig = true;
+        code = codeNum === 401 ? 'NAI_401' : 'NAI_403';
+        message = codeNum === 401 ? '接口鉴权失败（Key 无效或过期）' : '接口拒绝访问（权限不足）';
+        hint = '请检查 API Key，该配置将被停用';
+    } else if (codeNum === 429) {
+        retryable = true;
+        code = 'NAI_429';
+        message = '上游限流，请稍后再试';
+        hint = '将自动退避重试；若持续失败请降低并发';
+    } else if (codeNum === 408 || (codeNum >= 500 && codeNum <= 599)) {
+        retryable = true;
+        code = codeNum === 408 ? 'UPSTREAM_408' : `UPSTREAM_${codeNum}`;
+        message = codeNum === 408 ? '上游请求超时' : `上游服务异常（HTTP ${codeNum}）`;
+        hint = '将自动退避重试';
+    } else if (codeNum >= 400 && codeNum < 500) {
+        retryable = false;
+        code = `UPSTREAM_${codeNum}`;
+        message = `请求不被上游接受（HTTP ${codeNum}）`;
+        hint = '请检查请求参数或接口地址';
+    }
+
+    /** @type {Record<string, unknown>} */
+    const context = {
+        status: codeNum,
+        disableConfig,
+        ...(init.context ?? {}),
+    };
+    if (codeNum === 429 && context.retryAfterSec == null) {
+        const fromInit = init.context && /** @type {any} */ (init.context).retryAfterSec;
+        if (fromInit != null) {
+            context.retryAfterSec = Number(fromInit);
+        }
+    }
+
+    return upstreamError({
+        code: init.code ?? code,
+        message: init.message ?? message,
+        hint: init.hint !== undefined ? init.hint : hint,
+        retryable: init.retryable !== undefined ? init.retryable : retryable,
+        cause,
+        traceId: init.traceId ?? null,
+        context,
+    });
+}
+
+/**
+ * @param {unknown} cause
+ * @returns {boolean}
+ */
+function isAbortCause(cause) {
+    if (cause == null) {
+        return false;
+    }
+    if (typeof cause === 'object') {
+        const name = /** @type {{ name?: string, code?: string }} */ (cause).name;
+        const code = /** @type {{ code?: string }} */ (cause).code;
+        if (name === 'AbortError' || code === 'ABORT_ERR') {
+            return true;
+        }
+    }
+    return false;
+}
+
+/**
  * 给 toast 用的用户可见文案（中文 + 可选 hint）。
  * @param {unknown} err
  * @returns {string}

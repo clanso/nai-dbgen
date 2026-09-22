@@ -4,12 +4,16 @@
  */
 
 /**
+ * @typedef {import('../domain/model/plugin-settings.js').PluginSettings} PluginSettings
+ */
+
+/**
  * @typedef {object} AutoTriggerDeps
  * @property {import('../ports/host.port.js').HostPort} host
  * @property {ReturnType<import('./generate-slots.usecase.js').createGenerateSlotsUseCase>} generateSlots
  * @property {ReturnType<import('./render-slot.usecase.js').createRenderSlotUseCase>} renderSlot
  * @property {import('../ports/repository.port.js').SlotRepository} slotRepo
- * @property {() => object} loadSettings
+ * @property {() => PluginSettings} loadSettings
  */
 
 /**

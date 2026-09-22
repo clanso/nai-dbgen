@@ -4,9 +4,13 @@
  */
 
 /**
+ * @typedef {import('../domain/model/plugin-settings.js').PluginSettings} PluginSettings
+ */
+
+/**
  * @typedef {object} DrawerDeps
- * @property {() => object} loadSettings
- * @property {(patch: object) => void} saveSettings
+ * @property {() => PluginSettings} loadSettings
+ * @property {(settings: PluginSettings) => void} saveSettings
  * @property {() => void} openManagementShell
  * @property {object} repos
  */

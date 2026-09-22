@@ -20,7 +20,7 @@
  * @property {NaiParams} params 4.13 默认；可被 overrides 覆盖
  * @property {Record<string, unknown>} [paramOverrides] 按次覆盖 + 多传原生字段
  * @property {boolean} replaceCharacterKeywords 必填，无默认
- * @property {ArtistString|null} artist 当前激活画师串；可 null
+ * @property {ArtistString|null} artist 已由调用方按 ImageGenRequest 三态解析后的画师串；null=不拼
  * @property {CharacterGroup[]} [groups] 替换开关为开时需要
  * @property {Character[]} [characters]
  * @property {ActivationGlobals} [matchGlobals]

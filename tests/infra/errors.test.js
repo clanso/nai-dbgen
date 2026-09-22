@@ -9,6 +9,7 @@ import {
     upstreamError,
     contractError,
     domainError,
+    upstreamFromHttpStatus,
     toUserMessage,
     toLogRecord,
     HostError,
@@ -86,5 +87,38 @@ describe('errors', () => {
         assert.equal(json.code, 'H');
         assert.equal(json.category, ERROR_CATEGORY.HOST);
         assert.equal(json.context.k, 1);
+    });
+
+    it('upstreamFromHttpStatus: 401/403 disable config, not retryable', () => {
+        const e401 = upstreamFromHttpStatus(401);
+        assert.equal(e401.category, ERROR_CATEGORY.UPSTREAM);
+        assert.equal(e401.retryable, false);
+        assert.equal(e401.context.disableConfig, true);
+        assert.equal(e401.code, 'NAI_401');
+        const e403 = upstreamFromHttpStatus(403);
+        assert.equal(e403.retryable, false);
+        assert.equal(e403.context.disableConfig, true);
+    });
+
+    it('upstreamFromHttpStatus: 429 retryable', () => {
+        const e = upstreamFromHttpStatus(429, { context: { retryAfterSec: 12 } });
+        assert.equal(e.retryable, true);
+        assert.equal(e.code, 'NAI_429');
+        assert.equal(e.context.retryAfterSec, 12);
+        assert.equal(e.context.disableConfig, false);
+    });
+
+    it('upstreamFromHttpStatus: 408/5xx retryable', () => {
+        assert.equal(upstreamFromHttpStatus(408).retryable, true);
+        assert.equal(upstreamFromHttpStatus(502).retryable, true);
+        assert.equal(upstreamFromHttpStatus(500).context.disableConfig, false);
+    });
+
+    it('upstreamFromHttpStatus: AbortError never retryable', () => {
+        const abort = new Error('aborted');
+        abort.name = 'AbortError';
+        const e = upstreamFromHttpStatus(0, { cause: abort });
+        assert.equal(e.retryable, false);
+        assert.equal(e.code, 'UPSTREAM_ABORTED');
     });
 });

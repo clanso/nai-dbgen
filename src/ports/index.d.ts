@@ -3,7 +3,7 @@
  * 具体契约定义以各 `*.port.js` 的 JSDoc `@typedef` 与 `src/domain/model/*.js` 为准；
  * 本文件供 IDE / tsc 引用，避免在应用层重复定义。
  *
- * 归属：W0 契约冻结。
+ * 归属：W0 契约冻结（含裁决 D6–D13）。
  */
 
 import type { AppError } from '../infra/errors.js';
@@ -15,6 +15,54 @@ export type Result<T, E = AppError> =
     | { ok: false; error: E };
 
 export type Unsubscribe = () => void;
+
+/* ── Plugin settings ────────────────────────────────── */
+
+export interface MatchDefaults {
+    caseSensitive: boolean;
+    matchWholeWords: boolean;
+}
+
+export interface NaiParams {
+    schemaVersion: number;
+    model: string;
+    width: number;
+    height: number;
+    steps: number;
+    scale: number;
+    sampler: string;
+    noise_schedule: string;
+    seed: number;
+    seedRandom: boolean;
+    n_samples: number;
+    image_format: 'png' | 'webp';
+    qualityToggle: boolean;
+    tag_hint_qt: boolean;
+    ucPreset: number;
+    tag_hint_uc_preset: boolean;
+    cfg_rescale: number;
+    skip_cfg_above_sigma: number | null;
+    sm: boolean;
+    sm_dyn: boolean;
+    straight_alpha: boolean;
+    tag_hint_transparent_background: boolean;
+    qualityStrategy: 'field' | 'caption';
+}
+
+export interface PluginSettings {
+    schemaVersion: number;
+    activeArtistId: string | null;
+    activeNaiConfigId: string | null;
+    recallLlmConfigId: string | null;
+    promptGenLlmConfigId: string | null;
+    activeImagegenPresetId: string | null;
+    activeRecallPresetId: string | null;
+    contextWindowSize: number;
+    autoWriteSlots: boolean;
+    autoRenderSlots: boolean;
+    matchDefaults: MatchDefaults;
+    naiParams: NaiParams;
+}
 
 /* ── Host ───────────────────────────────────────────── */
 
@@ -29,6 +77,11 @@ export interface HostMessage {
     extra?: Record<string, unknown>;
 }
 
+export interface ResolveWorldInfoArgs {
+    contextWindow: HostMessage[];
+    messageId?: number;
+}
+
 export interface HostPort {
     getCurrentChatId(): ChatId | null;
     getMessages(): HostMessage[];
@@ -41,11 +94,11 @@ export interface HostPort {
     ensureSlotRegexInstalled(): Promise<Result<void>>;
     onMessageDomReady(fn: (messageEl: Element, messageId: number) => void): Unsubscribe;
     registerOutboundTransform(fn: (mes: string, msgMeta: object) => string): Unsubscribe;
-    resolveWorldInfo(messageId: number): Promise<Result<string>>;
+    resolveWorldInfo(args: ResolveWorldInfoArgs): Promise<Result<string>>;
     onChatChanged(fn: (chatId: ChatId | null) => void): Unsubscribe;
     onAiMessageSettled(fn: (messageId: number) => void): Unsubscribe;
-    loadSettings(): object;
-    saveSettings(settings: object): void;
+    loadSettings(): PluginSettings;
+    saveSettings(settings: PluginSettings): void;
     mountSettingsPanel(element: Element): void;
     openModal(opts: { title: string; element: Element; wide?: boolean }): Promise<void>;
     registerSlashCommand(spec: object): void;
@@ -137,6 +190,82 @@ export interface Repository<T> {
     onChanged(fn: (change: { type: string; id?: string }) => void): Unsubscribe;
 }
 
+export interface CharacterGroup {
+    schemaVersion: number;
+    id: string;
+    name: string;
+    active: boolean;
+    order: number;
+    createdAt: string;
+    updatedAt: string;
+}
+
+export interface Character {
+    schemaVersion: number;
+    id: string;
+    groupId: string;
+    name: string;
+    keywords: string[];
+    fixedFeatures: string;
+    variableFeatures: Array<{ name: string; prompt: string }>;
+    matchOverrides: { caseSensitive?: boolean; matchWholeWords?: boolean } | null;
+    createdAt: string;
+    updatedAt: string;
+}
+
+export interface CharacterRepository {
+    listGroups(): Promise<Result<CharacterGroup[]>>;
+    getGroup(id: string): Promise<Result<CharacterGroup | null>>;
+    putGroup(group: CharacterGroup): Promise<Result<CharacterGroup>>;
+    removeGroup(id: string): Promise<Result<void>>;
+    listByGroup(groupId: string): Promise<Result<Character[]>>;
+    get(id: string): Promise<Result<Character | null>>;
+    put(character: Character): Promise<Result<Character>>;
+    remove(id: string): Promise<Result<void>>;
+    exportJson(): Promise<Result<object>>;
+    importJson(
+        data: object,
+        opts?: { strategy?: 'skip' | 'overwrite' | 'rename' },
+    ): Promise<Result<{ imported: number; skipped: number; errors: string[] }>>;
+    onChanged(fn: (change: { type: string; id?: string; groupId?: string }) => void): Unsubscribe;
+}
+
+export interface TagLibrary {
+    schemaVersion: number;
+    id: string;
+    name: string;
+    active: boolean;
+    createdAt: string;
+    updatedAt: string;
+}
+
+export interface TagEntry {
+    schemaVersion: number;
+    id: string;
+    libraryId: string;
+    key: string;
+    value: string;
+    createdAt: string;
+    updatedAt: string;
+}
+
+export interface TagRepository {
+    listLibraries(): Promise<Result<TagLibrary[]>>;
+    getLibrary(id: string): Promise<Result<TagLibrary | null>>;
+    putLibrary(library: TagLibrary): Promise<Result<TagLibrary>>;
+    removeLibrary(id: string): Promise<Result<void>>;
+    listEntries(libraryId?: string): Promise<Result<TagEntry[]>>;
+    get(id: string): Promise<Result<TagEntry | null>>;
+    put(entry: TagEntry): Promise<Result<TagEntry>>;
+    remove(id: string): Promise<Result<void>>;
+    exportJson(): Promise<Result<object>>;
+    importJson(
+        data: object,
+        opts?: { strategy?: 'skip' | 'overwrite' | 'rename' },
+    ): Promise<Result<{ imported: number; skipped: number; errors: string[] }>>;
+    onChanged(fn: (change: { type: string; id?: string; libraryId?: string }) => void): Unsubscribe;
+}
+
 export type ImageRef = string;
 
 export interface SlotImageEntry {
@@ -160,6 +289,7 @@ export interface SlotRecord {
     traceId?: string | null;
 }
 
+/** 权威在 message.extra；IDB 仅索引。见裁决 D12。 */
 export interface SlotRepository {
     getByMessage(messageId: number): Promise<Result<SlotRecord[]>>;
     get(messageId: number, slotId: number): Promise<Result<SlotRecord | null>>;
@@ -183,10 +313,25 @@ export interface ImageRepository {
 
 /* ── External 4.14 API ──────────────────────────────── */
 
+export interface ArtistString {
+    schemaVersion: number;
+    id: string;
+    name: string;
+    positive: string;
+    negative: string;
+    previewImageRef: ImageRef | null;
+    createdAt: string;
+    updatedAt: string;
+}
+
+/**
+ * artist 三态：undefined=当前激活；null=不拼；对象=覆盖（D9）。
+ */
 export interface ExternalGenerateRequest {
     caption: object;
     params?: Record<string, unknown>;
     replaceCharacterKeywords: boolean;
+    artist?: ArtistString | null;
     signal?: AbortSignal;
 }
 

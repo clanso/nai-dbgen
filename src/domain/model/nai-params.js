@@ -30,11 +30,12 @@ export const FIXED_STRUCTURE = Object.freeze({
 
 /**
  * 画师串预览全库写死尺寸（需求 4.2 / 4.13：不读用户宽高）。
- * 像素值从现有桌面项目常用预览尺寸取，W0 冻结为常量。
+ * 裁决 D2/D10：832×1216（桌面项目 lab.js 竖图标准分辨率）。
+ * W2-F 必须 import 本常量，禁止魔法数。
  */
 export const ARTIST_PREVIEW_SIZE = Object.freeze({
-    width: 512,
-    height: 768,
+    width: 832,
+    height: 1216,
 });
 
 /**

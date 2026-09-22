@@ -4,12 +4,16 @@
  */
 
 /**
+ * @typedef {import('../domain/model/plugin-settings.js').PluginSettings} PluginSettings
+ */
+
+/**
  * @typedef {object} TagRecallDeps
  * @property {import('../ports/llm.port.js').LlmPort} llm
- * @property {import('../ports/repository.port.js').Repository<any>} tagRepo
+ * @property {import('../ports/repository.port.js').TagRepository} tagRepo
  * @property {import('../ports/repository.port.js').Repository<import('../domain/model/preset.js').Preset>} presetRepo
  * @property {import('../ports/repository.port.js').Repository<import('../domain/model/api-config.js').LlmApiConfig>} llmConfigRepo
- * @property {() => object} loadSettings
+ * @property {() => PluginSettings} loadSettings
  * @property {(template: string) => string} runHostMacros
  */
 

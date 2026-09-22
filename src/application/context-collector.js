@@ -4,9 +4,13 @@
  */
 
 /**
+ * @typedef {import('../domain/model/plugin-settings.js').PluginSettings} PluginSettings
+ */
+
+/**
  * @typedef {object} ContextCollectorDeps
  * @property {import('../ports/host.port.js').HostPort} host
- * @property {() => object} loadSettings 读 contextWindowSize（默认 5）
+ * @property {() => PluginSettings} loadSettings 读 contextWindowSize（默认 5）
  */
 
 /**

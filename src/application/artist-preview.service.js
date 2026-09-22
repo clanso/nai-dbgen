@@ -1,6 +1,8 @@
 /**
  * L4 应用层 · 画师串手填预览生图（需求 4.2）。
  * 用正在编辑的那一条串 + 手填提示词；预览尺寸用 ARTIST_PREVIEW_SIZE；不写楼。
+ * 调用 ImageGenService.generate 时必须传 artist=正在编辑的 ArtistString（裁决 D9），
+ * 不得临时改动 PluginSettings.activeArtistId。
  * 归属：W2-F 用例代理实现。W0 仅冻结签名。
  */
 

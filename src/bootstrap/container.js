@@ -4,11 +4,23 @@
  */
 
 /**
+ * @typedef {object} AppRepos
+ * @property {import('../ports/repository.port.js').CharacterRepository} character
+ * @property {import('../ports/repository.port.js').TagRepository} tag
+ * @property {import('../ports/repository.port.js').Repository<import('../domain/model/artist.js').ArtistString>} artist
+ * @property {import('../ports/repository.port.js').Repository<import('../domain/model/preset.js').Preset>} preset
+ * @property {import('../ports/repository.port.js').SlotRepository} slot
+ * @property {import('../ports/repository.port.js').Repository<import('../domain/model/api-config.js').LlmApiConfig>} llmConfig
+ * @property {import('../ports/repository.port.js').Repository<import('../domain/model/api-config.js').NaiApiConfig>} naiConfig
+ * @property {import('../ports/repository.port.js').ImageRepository} image
+ */
+
+/**
  * @typedef {object} AppContainer
  * @property {import('../ports/host.port.js').HostPort} host
  * @property {import('../ports/image-gen.port.js').ImageGenPort} imageGen
  * @property {import('../ports/llm.port.js').LlmPort} llm
- * @property {object} repos
+ * @property {AppRepos} repos
  * @property {object} services
  * @property {object} useCases
  * @property {ReturnType<import('../infra/event-bus.js').createEventBus>} bus
@@ -17,6 +29,7 @@
 
 /**
  * 创建并装配全部依赖。不得在模块顶层自动执行。
+ * 须分别调用 createLlmConfigRepo 与 createNaiConfigRepo（裁决 D7），禁止单一 api-config 仓库。
  * @param {object} [opts]
  * @returns {Promise<AppContainer>}
  */
