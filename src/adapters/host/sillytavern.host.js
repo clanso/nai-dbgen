@@ -25,6 +25,9 @@ import {
 /** extension_settings / message.extra 命名空间（裁决 D8 / D12） */
 export const PLUGIN_NS = 'nai-dbgen';
 
+/** 设置抽屉 DOM id（dispose 必须移除，裁决 D28） */
+export const SETTINGS_DRAWER_ID = 'nai-dbgen-settings-drawer';
+
 /**
  * @typedef {object} SillyTavernHostDeps
  * @property {() => any} getContext 通常 () => SillyTavern.getContext()
@@ -139,6 +142,12 @@ export function createSillyTavernHost(deps) {
     /** @type {ReturnType<typeof setTimeout>|null} */
     let domReadyDebounce = null;
     let lifecycleBound = false;
+
+    /**
+     * 已注册斜杠命令名（宿主无卸载 API，裁决 D28：幂等覆盖注册）。
+     * @type {Set<string>}
+     */
+    const registeredSlashNames = new Set();
 
     /**
      * @returns {void}
@@ -557,10 +566,10 @@ export function createSillyTavernHost(deps) {
             if (!hostEl) {
                 return;
             }
-            let drawer = hostEl.querySelector('#nai-dbgen-settings-drawer');
+            let drawer = hostEl.querySelector(`#${SETTINGS_DRAWER_ID}`);
             if (!drawer) {
                 drawer = document.createElement('div');
-                drawer.id = 'nai-dbgen-settings-drawer';
+                drawer.id = SETTINGS_DRAWER_ID;
                 drawer.className = 'inline-drawer';
                 hostEl.appendChild(drawer);
             }
@@ -571,7 +580,6 @@ export function createSillyTavernHost(deps) {
             const ctx = safeContext();
             const title = opts?.title ? String(opts.title) : '';
             const element = opts?.element;
-            const wide = opts?.wide !== false;
 
             if (!ctx) {
                 return;
@@ -594,11 +602,18 @@ export function createSillyTavernHost(deps) {
                 content = element;
             }
 
-            const popupOpts = {
-                wide,
-                large: true,
-                allowVerticalScrolling: true,
-            };
+            // 裁决 D20：透传调用方选项，不得写死 large/scrolling
+            /** @type {Record<string, unknown>} */
+            const popupOpts = {};
+            if (opts && Object.prototype.hasOwnProperty.call(opts, 'wide')) {
+                popupOpts.wide = opts.wide;
+            }
+            if (opts && Object.prototype.hasOwnProperty.call(opts, 'large')) {
+                popupOpts.large = opts.large;
+            }
+            if (opts && Object.prototype.hasOwnProperty.call(opts, 'allowVerticalScrolling')) {
+                popupOpts.allowVerticalScrolling = opts.allowVerticalScrolling;
+            }
 
             try {
                 if (typeof ctx.callGenericPopup === 'function' && ctx.POPUP_TYPE) {
@@ -625,8 +640,24 @@ export function createSillyTavernHost(deps) {
                 if (!ctx?.SlashCommandParser || !ctx?.SlashCommand) {
                     return;
                 }
-                if (spec && typeof spec === 'object' && typeof ctx.SlashCommand.fromProps === 'function') {
-                    ctx.SlashCommandParser.addCommandObject(ctx.SlashCommand.fromProps(spec));
+                if (!spec || typeof spec !== 'object' || typeof ctx.SlashCommand.fromProps !== 'function') {
+                    return;
+                }
+                const name = typeof spec.name === 'string' ? spec.name : '';
+                if (!name) {
+                    return;
+                }
+                // 宿主无卸载 API（SlashCommandParser 仅有 addCommandObject，同名覆盖）。
+                // 幂等：同名再注册走覆盖，不累积多份回调表项之外的副作用。
+                const command = ctx.SlashCommand.fromProps(spec);
+                ctx.SlashCommandParser.addCommandObject(command);
+                registeredSlashNames.add(name);
+                if (Array.isArray(spec.aliases)) {
+                    for (const alias of spec.aliases) {
+                        if (typeof alias === 'string' && alias) {
+                            registeredSlashNames.add(alias);
+                        }
+                    }
                 }
             } catch {
                 // ignore
@@ -661,16 +692,13 @@ export function createSillyTavernHost(deps) {
                 // ignore
             }
         },
-    };
 
-    /**
-     * 供 bootstrap dispose 调用：卸事件、观察器、全局拦截器。
-     * 非 HostPort 契约方法，挂在返回对象上以便装配层清理。
-     * @returns {void}
-     */
-    Object.defineProperty(host, 'dispose', {
-        enumerable: false,
-        value() {
+        /**
+         * 干净卸载（裁决 D18 / D28）：事件、观察器、全局拦截器、设置抽屉 DOM。
+         * 斜杠命令宿主无正式卸载 API，仅清本地登记；再 enable 时同名覆盖注册。
+         * @returns {void}
+         */
+        dispose() {
             const ctx = safeContext();
             const es = ctx?.eventSource;
             if (es && typeof es.removeListener === 'function') {
@@ -687,6 +715,7 @@ export function createSillyTavernHost(deps) {
             chatChangedListeners.clear();
             aiSettledListeners.clear();
             outboundTransforms.clear();
+            registeredSlashNames.clear();
             if (domReadyDebounce != null) {
                 clearTimeout(domReadyDebounce);
                 domReadyDebounce = null;
@@ -697,8 +726,22 @@ export function createSillyTavernHost(deps) {
             }
             unregisterGenerateInterceptorGlobal();
             lifecycleBound = false;
+
+            // 裁决 D28：移除设置抽屉，避免 disable/enable 残留重复 DOM
+            try {
+                if (typeof document !== 'undefined') {
+                    const drawer = document.getElementById(SETTINGS_DRAWER_ID);
+                    if (drawer && typeof drawer.remove === 'function') {
+                        drawer.remove();
+                    } else if (drawer?.parentNode) {
+                        drawer.parentNode.removeChild(drawer);
+                    }
+                }
+            } catch {
+                // ignore
+            }
         },
-    });
+    };
 
     return host;
 }

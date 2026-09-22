@@ -2,9 +2,14 @@
  * L2 适配器 · IndexedDB 封装 + schema 迁移。
  * 归属：W1-D 存储代理实现。W0 仅冻结签名。
  *
- * 重要：IndexedDB 事务在 await 任意非本事务 IDBRequest 的 Promise 后会自动提交。
- * 因此所有读写必须在同一同步调度内发出全部 IDBRequest，再统一 await 事务完成；
- * 禁止在事务回调里 `await` 网络 / 其它 store 的独立 Promise。
+ * **错误约定（裁决 D16）**：本层**不**返回 `Result`。`openIdb` 与 `IdbClient`
+ * 方法以 Promise reject / 同步 throw 抛出 `AppError`（见 `mapIdbError`）；
+ * 仓库层统一 `catchToResult` 包成 `Result`。理由：IDB 事务边界与 Result
+ * 值传递不匹配，强行包装会让事务语义更难看清。
+ *
+ * **事务陷阱**：IndexedDB 事务在 await 任意非本事务 IDBRequest 的 Promise 后会
+ * 自动提交。所有读写必须在同一同步调度内发出全部 IDBRequest，再统一 await
+ * 事务完成；禁止在事务回调里 `await` 网络 / 其它 store 的独立 Promise。
  */
 
 import { hostError } from '../../infra/errors.js';
@@ -171,17 +176,13 @@ function txDone(tx) {
 }
 
 /**
+ * 打开插件 IndexedDB（裁决 D16 / D17）。
+ *
  * @param {object} [opts]
  * @param {string} [opts.dbName='nai-dbgen']
  * @param {number} [opts.version]
  * @param {IDBFactory} [opts.indexedDB] 可注入，便于测试
- * @returns {Promise<{
- *   get: (store: string, key: string) => Promise<any>,
- *   put: (store: string, value: any, key?: string) => Promise<void>,
- *   delete: (store: string, key: string) => Promise<void>,
- *   getAll: (store: string) => Promise<any[]>,
- *   close: () => void,
- * }>}
+ * @returns {Promise<import('../../ports/repository.port.js').IdbClient>}
  */
 export function openIdb(opts) {
     const dbName = opts?.dbName || IDB_NAME;
@@ -242,6 +243,7 @@ export function openIdb(opts) {
 
 /**
  * @param {IDBDatabase} db
+ * @returns {import('../../ports/repository.port.js').IdbClient}
  */
 function createClient(db) {
     /**
@@ -321,7 +323,7 @@ function createClient(db) {
         },
 
         /**
-         * 按索引取全部（冻结 API 之外的扩展，供标签库按库筛选用）。
+         * 按索引取全部（裁决 D17）。
          * @param {string} store
          * @param {string} indexName
          * @param {IDBValidKey|IDBKeyRange} [query]
@@ -335,22 +337,23 @@ function createClient(db) {
         },
 
         /**
-         * 多 store 只读/读写：runner 必须同步发出全部 request。
-         * @param {string[]} storeNames
+         * 多 store 事务（裁决 D17）。runner 必须同步发出全部 request。
+         * @param {string|string[]} storeNames
          * @param {IDBTransactionMode} mode
          * @param {(stores: Record<string, IDBObjectStore>, tx: IDBTransaction) => void} runner
          * @returns {Promise<void>}
          */
         async runTransaction(storeNames, mode, runner) {
+            const names = Array.isArray(storeNames) ? storeNames : [storeNames];
             let tx;
             try {
-                tx = db.transaction(storeNames, mode);
+                tx = db.transaction(names, mode);
             } catch (err) {
                 throw mapIdbError(err);
             }
             /** @type {Record<string, IDBObjectStore>} */
             const stores = {};
-            for (const name of storeNames) {
+            for (const name of names) {
                 stores[name] = tx.objectStore(name);
             }
             try {

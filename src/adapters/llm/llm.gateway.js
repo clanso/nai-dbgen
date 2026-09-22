@@ -16,9 +16,7 @@ const BASE_BACKOFF_MS = 2000;
 const MAX_BACKOFF_MS = 60000;
 
 /**
- * @typedef {object} LlmGatewayDeps
- * @property {Record<string, { complete: Function }>} transports
- * @property {(text: string) => import('../../infra/result.js').Ok<any>|import('../../infra/result.js').Err<import('../../infra/errors.js').AppError>} extractJson
+ * @typedef {import('../../ports/llm.port.js').LlmGatewayDeps} LlmGatewayDeps
  */
 
 /**
@@ -77,8 +75,7 @@ export function createLlmGateway(deps) {
 
                 const result = await transport.complete(req);
                 if (isErr(result)) {
-                    const err = result.error;
-                    err.traceId = err.traceId ?? traceId;
+                    const err = stampTrace(result.error, traceId);
                     if (!err.retryable || attempt === maxAttempts - 1) {
                         return Err(err);
                     }
@@ -101,9 +98,7 @@ export function createLlmGateway(deps) {
                     if (isOk(extracted)) {
                         json = extracted.value;
                     } else {
-                        const err = extracted.error;
-                        err.traceId = err.traceId ?? traceId;
-                        // 确保原始回文可观测
+                        const err = stampTrace(extracted.error, traceId);
                         if (!err.context) {
                             err.context = {};
                         }
@@ -127,7 +122,7 @@ export function createLlmGateway(deps) {
                 return Ok(out);
             }
 
-            return Err(lastError ?? transportError({
+            return Err(stampTrace(lastError, traceId) ?? transportError({
                 code: 'LLM_COMPLETE_FAILED',
                 message: 'LLM 调用失败',
                 traceId,
@@ -203,6 +198,20 @@ export function createLlmGateway(deps) {
             };
         },
     };
+}
+
+/**
+ * 确保 AppError.traceId 不为空（裁决 D14 / 架构 §10）。
+ * @template {import('../../infra/errors.js').AppError} E
+ * @param {E|null|undefined} err
+ * @param {string|null} traceId
+ * @returns {E|null|undefined}
+ */
+function stampTrace(err, traceId) {
+    if (err && traceId && !err.traceId) {
+        err.traceId = traceId;
+    }
+    return err;
 }
 
 /**

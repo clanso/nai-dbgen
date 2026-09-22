@@ -172,8 +172,17 @@ export function createTagRepo(deps) {
 
         async exportJson() {
             return catchToResult(async () => {
-                const libraries = await db.getAll(LIBS);
-                const entries = await db.getAll(ENTRIES);
+                // 与 list 路径一致：只导出通过校验的实体
+                const libraries = (await db.getAll(LIBS))
+                    .map((r) => validateTagLibrary(r))
+                    .filter((r) => r.ok)
+                    .map((r) => r.value)
+                    .sort((a, b) => a.name.localeCompare(b.name));
+                const entries = (await db.getAll(ENTRIES))
+                    .map((r) => validateTagEntry(r))
+                    .filter((r) => r.ok)
+                    .map((r) => r.value)
+                    .sort((a, b) => a.key.localeCompare(b.key));
                 return buildExportEnvelope({
                     kind: 'tag',
                     schemaVersion: TAG_SCHEMA_VERSION,

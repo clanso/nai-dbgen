@@ -333,4 +333,131 @@ describe('createLlmGateway', () => {
         assert.equal(result.value.text, 'done');
         assert.equal(calls, 2);
     });
+
+    it('D26: st-backend keeps Chinese message; English only in cause/preview', async () => {
+        let calls = 0;
+        const getContext = () => ({
+            ChatCompletionService: {
+                createRequestData: (d) => d,
+                async sendRequest() {
+                    calls += 1;
+                    throw new Error('Got response status 503');
+                },
+            },
+        });
+        const gw = createLlmGateway({
+            transports: {
+                'st-backend': createStBackendLlmTransport({ getContext }),
+            },
+            extractJson,
+            maxAttempts: 1,
+            sleep: async () => {},
+        });
+        const result = await gw.complete({
+            messages: [{ role: 'user', content: 'x' }],
+            config: llmConfig({ transport: 'st-backend' }),
+            traceId: 't-d26',
+        });
+        assert.equal(isErr(result), true);
+        assert.equal(result.error.code, 'UPSTREAM_503');
+        assert.match(result.error.message, /上游服务异常|HTTP 503/);
+        assert.equal(/Got response status/i.test(result.error.message), false);
+        assert.equal(result.error.context.preview, 'Got response status 503');
+        assert.equal(result.error.traceId, 't-d26');
+        assert.equal(calls, 1);
+    });
+
+    it('D27: Response not OK without status is non-retryable', async () => {
+        let calls = 0;
+        const getContext = () => ({
+            ChatCompletionService: {
+                createRequestData: (d) => d,
+                async sendRequest() {
+                    calls += 1;
+                    throw new Error('Response not OK');
+                },
+            },
+        });
+        const gw = createLlmGateway({
+            transports: {
+                'st-backend': createStBackendLlmTransport({ getContext }),
+            },
+            extractJson,
+            maxAttempts: 3,
+            sleep: async () => {},
+        });
+        const result = await gw.complete({
+            messages: [{ role: 'user', content: 'x' }],
+            config: llmConfig({ transport: 'st-backend' }),
+            traceId: 't-d27',
+        });
+        assert.equal(isErr(result), true);
+        assert.equal(result.error.retryable, false);
+        assert.equal(result.error.code, 'LLM_ST_BACKEND_FAILED');
+        assert.equal(result.error.message, '经酒馆 ChatCompletionService 调用失败');
+        assert.equal(/Response not OK/.test(result.error.message), false);
+        assert.equal(result.error.context.preview, 'Response not OK');
+        assert.equal(result.error.traceId, 't-d27');
+        assert.equal(calls, 1, 'must not speculative-retry');
+    });
+
+    it('D14: traceId propagates on NAI 401 / decode fail / abort', async () => {
+        const tid = 'trace-nai-1';
+        const gw401 = createNaiGateway({
+            transports: {
+                direct: createDirectTransport({
+                    fetch: async () => new Response('no', { status: 401 }),
+                }),
+            },
+            decoders: {
+                'json-base64': { decode: decodeJsonBase64 },
+                zip: { decode: decodeZip },
+            },
+        });
+        const r401 = await gw401.generate(
+            { input: 'a', model: 'm', parameters: {} },
+            { config: naiConfig(), traceId: tid },
+        );
+        assert.equal(isErr(r401), true);
+        assert.equal(r401.error.traceId, tid);
+
+        const gwDecode = createNaiGateway({
+            transports: {
+                direct: createDirectTransport({
+                    fetch: async () => new Response('not-json-or-zip', { status: 201 }),
+                }),
+            },
+            decoders: {
+                'json-base64': { decode: decodeJsonBase64 },
+                zip: { decode: decodeZip },
+            },
+        });
+        const rDec = await gwDecode.generate(
+            { input: 'a', model: 'm', parameters: {} },
+            { config: naiConfig({ decoder: 'json' }), traceId: tid },
+        );
+        assert.equal(isErr(rDec), true);
+        assert.equal(rDec.error.traceId, tid);
+
+        const ac = new AbortController();
+        ac.abort();
+        const gwAbort = createNaiGateway({
+            transports: {
+                direct: createDirectTransport({
+                    fetch: async () => new Response('{}', { status: 200 }),
+                }),
+            },
+            decoders: {
+                'json-base64': { decode: decodeJsonBase64 },
+                zip: { decode: decodeZip },
+            },
+        });
+        const rAbort = await gwAbort.generate(
+            { input: 'a', model: 'm', parameters: {} },
+            { config: naiConfig(), signal: ac.signal, traceId: tid },
+        );
+        assert.equal(isErr(rAbort), true);
+        assert.equal(rAbort.error.traceId, tid);
+        assert.equal(rAbort.error.code, 'UPSTREAM_ABORTED');
+    });
 });

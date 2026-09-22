@@ -29,11 +29,14 @@ export function createDirectLlmTransport(deps = {}) {
          */
         async complete(req) {
             const config = req?.config;
+            const traceId = req?.traceId ?? null;
+
             if (!config || !String(config.baseUrl || '').trim()) {
                 return Err(configError({
                     code: 'LLM_CONFIG_URL',
                     message: 'LLM 接口地址为空',
                     hint: '请在 LLM API 库填写 baseUrl',
+                    traceId,
                 }));
             }
             if (!String(config.apiKey || '').trim()) {
@@ -41,6 +44,7 @@ export function createDirectLlmTransport(deps = {}) {
                     code: 'LLM_CONFIG_KEY',
                     message: 'LLM API Key 为空',
                     hint: '请在 LLM API 库填写 Key',
+                    traceId,
                 }));
             }
             if (!String(config.model || '').trim()) {
@@ -48,12 +52,14 @@ export function createDirectLlmTransport(deps = {}) {
                     code: 'LLM_CONFIG_MODEL',
                     message: 'LLM 模型名为空',
                     hint: '请在 LLM API 库填写模型名',
+                    traceId,
                 }));
             }
             if (!Array.isArray(req.messages) || req.messages.length === 0) {
                 return Err(configError({
                     code: 'LLM_MESSAGES_EMPTY',
                     message: '没有可发送的聊天消息',
+                    traceId,
                 }));
             }
             if (typeof fetchImpl !== 'function') {
@@ -61,6 +67,7 @@ export function createDirectLlmTransport(deps = {}) {
                     code: 'LLM_FETCH_UNAVAILABLE',
                     message: '当前环境无法发起网络请求',
                     retryable: false,
+                    traceId,
                 }));
             }
 
@@ -68,10 +75,12 @@ export function createDirectLlmTransport(deps = {}) {
             try {
                 url = normalizeChatCompletionsUrl(config.baseUrl);
             } catch (cause) {
+                // normalize 抛出的已是中文说明
                 return Err(configError({
                     code: 'LLM_CONFIG_URL_INVALID',
                     message: cause instanceof Error ? cause.message : 'API 地址格式不正确',
                     cause,
+                    traceId,
                 }));
             }
 
@@ -108,10 +117,10 @@ export function createDirectLlmTransport(deps = {}) {
                     const retryAfterSec = parseRetryAfterHeader(response.headers);
                     return Err(upstreamFromHttpStatus(response.status, {
                         cause: null,
+                        traceId,
                         context: {
                             transport: 'direct',
                             ...(retryAfterSec != null ? { retryAfterSec } : {}),
-                            // 不把响应体全文塞进错误（可能含敏感回显）；只留短预览
                             preview: textBody.slice(0, 300),
                         },
                     }));
@@ -125,15 +134,27 @@ export function createDirectLlmTransport(deps = {}) {
                         code: 'LLM_RESPONSE_NOT_JSON',
                         message: 'LLM 直连响应不是 JSON',
                         cause,
+                        traceId,
                         context: { rawText: textBody },
                     }));
                 }
 
                 if (json && typeof json === 'object' && json.error) {
-                    const msg = json.error?.message || 'LLM 返回 error 字段';
-                    return Err(upstreamFromHttpStatus(response.status || 502, {
-                        message: String(msg),
-                        context: { transport: 'direct' },
+                    const preview = String(json.error?.message || 'LLM 返回 error 字段').slice(0, 300);
+                    const status = Number(response.status);
+                    if (Number.isFinite(status) && status >= 400) {
+                        return Err(upstreamFromHttpStatus(status, {
+                            cause: null,
+                            traceId,
+                            context: { transport: 'direct', preview },
+                        }));
+                    }
+                    return Err(contractError({
+                        code: 'LLM_UPSTREAM_ERROR_FIELD',
+                        message: 'LLM 返回了错误内容',
+                        hint: '请检查模型名、额度或中转配置',
+                        traceId,
+                        context: { transport: 'direct', preview },
                     }));
                 }
 
@@ -143,7 +164,10 @@ export function createDirectLlmTransport(deps = {}) {
                 });
             } catch (cause) {
                 if (isAbortError(cause) || req.signal?.aborted) {
-                    return Err(upstreamFromHttpStatus(0, { cause: toAbort(cause) }));
+                    return Err(upstreamFromHttpStatus(0, {
+                        cause: toAbort(cause),
+                        traceId,
+                    }));
                 }
                 return Err(transportError({
                     code: 'LLM_DIRECT_FAILED',
@@ -151,6 +175,7 @@ export function createDirectLlmTransport(deps = {}) {
                     hint: '建议改用 st-backend 传输（经酒馆服务端，无 CORS 问题）',
                     retryable: true,
                     cause,
+                    traceId,
                     context: { transport: 'direct' },
                 }));
             }

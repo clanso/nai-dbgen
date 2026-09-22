@@ -102,6 +102,8 @@ function rowMeta(item) {
     return { name, id, kind };
 }
 
+import { safeImageUrl } from './safe-url.js';
+
 /**
  * @param {object} data
  * @param {string} filename
@@ -110,8 +112,14 @@ function downloadJson(data, filename) {
     const text = JSON.stringify(data, null, 2);
     const blob = new Blob([text], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
+    // createObjectURL → blob:；仍过白名单，避免将来改实现时漏检
+    const safe = safeImageUrl(url);
+    if (!safe) {
+        URL.revokeObjectURL(url);
+        throw new Error('export download url rejected');
+    }
     const a = document.createElement('a');
-    a.href = url;
+    a.href = safe;
     a.download = filename;
     a.rel = 'noopener';
     document.body.appendChild(a);

@@ -1,72 +1,33 @@
 /**
- * L2 适配器 · extension_settings['nai-dbgen'] 小配置读写（基线 §9，裁决 D8）。
+ * L2 适配器 · extension_settings['nai-dbgen'] 小配置读写（基线 §9，裁决 D8 / D15）。
  * 形状固定为 PluginSettings；键名不得自创。
  * 归属：W1-D 存储代理实现。W0 仅冻结签名。
  *
- * 注：冻结 deps 为 getContext（与 HostPort.loadSettings/saveSettings 同源字段）。
- * Host 适配器当前自行实现了一份；本 store 供装配层复用，键名严格走 D8 表。
+ * 裁决 D15：deps 只吃 `host`；load/save 一律经 HostPort，禁止直接碰 extension_settings。
+ * 本 store 只做 migrate / merge / 单键 get/set。
  */
 
 import {
-    PLUGIN_SETTINGS_SCHEMA_VERSION,
     defaultPluginSettings,
     mergePluginSettings,
     migratePluginSettings,
     normalizePluginSettings,
     validatePluginSettings,
+    PLUGIN_SETTINGS_SCHEMA_VERSION,
 } from '../../domain/model/plugin-settings.js';
 
 /**
  * @typedef {import('../../domain/model/plugin-settings.js').PluginSettings} PluginSettings
  */
 
-/** 与 Host 适配器 PLUGIN_NS 一致 */
-export const SETTINGS_NS = 'nai-dbgen';
-
 /**
- * @param {object} deps
- * @param {() => any} deps.getContext
- * @returns {{
- *   load: () => PluginSettings,
- *   save: (settings: PluginSettings) => void,
- *   get: <K extends keyof PluginSettings>(key: K, fallback?: PluginSettings[K]) => PluginSettings[K],
- *   set: <K extends keyof PluginSettings>(key: K, value: PluginSettings[K]) => void,
- * }}
+ * @param {import('../../ports/repository.port.js').SettingsStoreDeps} deps
+ * @returns {import('../../ports/repository.port.js').SettingsStore}
  */
 export function createSettingsStore(deps) {
-    const getContext = deps?.getContext;
-    if (typeof getContext !== 'function') {
-        throw new Error('createSettingsStore requires deps.getContext');
-    }
-
-    /**
-     * @returns {Record<string, unknown>|null}
-     */
-    function extensionBucket() {
-        try {
-            const ctx = getContext();
-            const settings = ctx?.extensionSettings;
-            if (!settings || typeof settings !== 'object') {
-                return null;
-            }
-            return settings;
-        } catch {
-            return null;
-        }
-    }
-
-    /**
-     * @returns {void}
-     */
-    function debounceSave() {
-        try {
-            const ctx = getContext();
-            if (typeof ctx?.saveSettingsDebounced === 'function') {
-                ctx.saveSettingsDebounced();
-            }
-        } catch {
-            // ignore
-        }
+    const host = deps?.host;
+    if (!host || typeof host.loadSettings !== 'function' || typeof host.saveSettings !== 'function') {
+        throw new Error('createSettingsStore requires deps.host with loadSettings/saveSettings');
     }
 
     const store = {
@@ -75,8 +36,7 @@ export function createSettingsStore(deps) {
          */
         load() {
             try {
-                const bucket = extensionBucket();
-                const raw = bucket?.[SETTINGS_NS];
+                const raw = host.loadSettings();
                 if (!raw || typeof raw !== 'object') {
                     return defaultPluginSettings();
                 }
@@ -98,42 +58,37 @@ export function createSettingsStore(deps) {
          * @param {PluginSettings} settings
          */
         save(settings) {
-            const bucket = extensionBucket();
-            if (!bucket) {
-                return;
-            }
-            // mergePluginSettings 丢弃未知键
             const merged = mergePluginSettings(defaultPluginSettings(), settings);
             const validated = validatePluginSettings(merged);
-            bucket[SETTINGS_NS] = validated.ok ? validated.value : normalizePluginSettings(merged);
-            debounceSave();
+            host.saveSettings(validated.ok ? validated.value : normalizePluginSettings(merged));
         },
 
         /**
-         * @template {keyof PluginSettings} K
-         * @param {K} key
-         * @param {PluginSettings[K]} [fallback]
-         * @returns {PluginSettings[K]}
+         * @param {string} key
+         * @param {any} [fallback]
+         * @returns {any}
          */
         get(key, fallback) {
             const current = store.load();
             if (Object.prototype.hasOwnProperty.call(current, key)) {
-                return current[key];
+                return /** @type {any} */ (current)[key];
             }
             if (arguments.length >= 2) {
-                return /** @type {PluginSettings[K]} */ (fallback);
+                return fallback;
             }
-            return defaultPluginSettings()[key];
+            return /** @type {any} */ (defaultPluginSettings())[key];
         },
 
         /**
-         * @template {keyof PluginSettings} K
-         * @param {K} key
-         * @param {PluginSettings[K]} value
+         * @param {string} key
+         * @param {any} value
          */
         set(key, value) {
             const current = store.load();
-            const next = mergePluginSettings(current, /** @type {Partial<PluginSettings>} */ ({ [key]: value }));
+            const next = mergePluginSettings(
+                current,
+                /** @type {Partial<PluginSettings>} */ ({ [key]: value }),
+            );
             store.save(next);
         },
     };

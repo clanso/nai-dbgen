@@ -4,6 +4,7 @@
  */
 
 import { t } from '../i18n/zh-CN.js';
+import { paintSafeCover, pickCoverField } from './safe-url.js';
 
 /**
  * @param {object} item
@@ -31,40 +32,12 @@ function idOf(item) {
 }
 
 /**
- * @param {object|null|undefined} item
- * @returns {string}
- */
-function coverUrlOf(item) {
-    if (!item) return '';
-    const raw = item.coverImage || item.coverUrl || item.cover || '';
-    return raw == null ? '' : String(raw);
-}
-
-/**
- * @param {string} label
- * @returns {string}
- */
-function initialOf(label) {
-    const s = String(label || '').trim();
-    return s ? s.slice(0, 1).toUpperCase() : '?';
-}
-
-/**
  * @param {HTMLElement} coverEl
  * @param {object|null|undefined} item
  * @param {string} label
  */
 function paintCover(coverEl, item, label) {
-    coverEl.replaceChildren();
-    const url = coverUrlOf(item);
-    if (url) {
-        const img = document.createElement('img');
-        img.src = url;
-        img.alt = label;
-        coverEl.appendChild(img);
-        return;
-    }
-    coverEl.textContent = initialOf(label);
+    paintSafeCover(coverEl, pickCoverField(item), label);
 }
 
 /**

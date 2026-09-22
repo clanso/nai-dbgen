@@ -1,6 +1,9 @@
 /**
  * L2 适配器 · 经 ST ChatCompletionService + reverse_proxy（基线 §8.4）。
  * 归属：W1-C 网关代理实现。W0 仅冻结签名。
+ *
+ * 裁决 D26：AppError.message 必须是中文用户文案；英文宿主信息只进 cause / context.preview。
+ * 裁决 D27：无法从宿主异常中解析出真实 HTTP 状态码时，默认不可重试（避免误重试计费/写操作）。
  */
 
 import { Ok, Err } from '../../../infra/result.js';
@@ -33,11 +36,14 @@ export function createStBackendLlmTransport(deps) {
          */
         async complete(req) {
             const config = req?.config;
+            const traceId = req?.traceId ?? null;
+
             if (!config || !String(config.baseUrl || '').trim()) {
                 return Err(configError({
                     code: 'LLM_CONFIG_URL',
                     message: 'LLM 接口地址为空',
                     hint: '请在 LLM API 库填写 baseUrl',
+                    traceId,
                 }));
             }
             if (!String(config.apiKey || '').trim()) {
@@ -45,6 +51,7 @@ export function createStBackendLlmTransport(deps) {
                     code: 'LLM_CONFIG_KEY',
                     message: 'LLM API Key 为空',
                     hint: '请在 LLM API 库填写 Key',
+                    traceId,
                 }));
             }
             if (!String(config.model || '').trim()) {
@@ -52,12 +59,14 @@ export function createStBackendLlmTransport(deps) {
                     code: 'LLM_CONFIG_MODEL',
                     message: 'LLM 模型名为空',
                     hint: '请在 LLM API 库填写模型名',
+                    traceId,
                 }));
             }
             if (!Array.isArray(req.messages) || req.messages.length === 0) {
                 return Err(configError({
                     code: 'LLM_MESSAGES_EMPTY',
                     message: '没有可发送的聊天消息',
+                    traceId,
                 }));
             }
 
@@ -70,6 +79,7 @@ export function createStBackendLlmTransport(deps) {
                     message: '无法获取酒馆上下文',
                     hint: '请确认插件在 SillyTavern 页面内加载',
                     cause,
+                    traceId,
                 }));
             }
 
@@ -79,6 +89,7 @@ export function createStBackendLlmTransport(deps) {
                     code: 'LLM_ST_CCS_MISSING',
                     message: '宿主缺少 ChatCompletionService',
                     hint: '请升级 SillyTavern，或改用 direct 传输',
+                    traceId,
                 }));
             }
 
@@ -128,24 +139,36 @@ export function createStBackendLlmTransport(deps) {
                 return Ok(out);
             } catch (cause) {
                 if (isAbortError(cause) || req.signal?.aborted) {
-                    return Err(upstreamFromHttpStatus(0, { cause: toAbort(cause) }));
+                    return Err(upstreamFromHttpStatus(0, {
+                        cause: toAbort(cause),
+                        traceId,
+                    }));
                 }
-                const message = cause instanceof Error ? cause.message : String(cause);
-                // ST 常见：throw new Error(String(json.error?.message || 'Response not OK'))
-                if (/not ok|unauthorized|401|403|429|500|502|503/i.test(message)) {
-                    const status = guessStatusFromMessage(message);
+                const preview = (cause instanceof Error ? cause.message : String(cause)).slice(0, 300);
+                // 仅当消息里能解析出真实状态码时才映射为 UpstreamError；否则保守不可重试（D27）
+                const status = parseHttpStatusFromMessage(preview);
+                if (status != null) {
+                    // D26：不覆盖中文 message；英文只进 cause / preview
                     return Err(upstreamFromHttpStatus(status, {
-                        message: message.slice(0, 300),
                         cause,
-                        context: { transport: 'st-backend' },
+                        traceId,
+                        context: {
+                            transport: 'st-backend',
+                            preview,
+                        },
                     }));
                 }
                 return Err(transportError({
                     code: 'LLM_ST_BACKEND_FAILED',
                     message: '经酒馆 ChatCompletionService 调用失败',
-                    hint: message.slice(0, 200) || null,
+                    hint: '请检查接口配置与模型可用性',
+                    retryable: false,
                     cause,
-                    context: { transport: 'st-backend' },
+                    traceId,
+                    context: {
+                        transport: 'st-backend',
+                        preview,
+                    },
                 }));
             }
         },
@@ -188,30 +211,27 @@ function toStJsonSchema(jsonSchema) {
 }
 
 /**
+ * 从宿主英文异常文案中解析 HTTP 状态码。
+ * 解析不到则返回 null —— 调用方必须按「不可重试」处理（裁决 D27）。
+ *
  * @param {string} message
- * @returns {number}
+ * @returns {number|null}
  */
-function guessStatusFromMessage(message) {
+function parseHttpStatusFromMessage(message) {
     const m = String(message);
-    if (/\b401\b/.test(m) || /unauthorized/i.test(m)) {
+    // 优先匹配显式数字状态码（含 "Got response status 503"）
+    const digit = m.match(/\b([45]\d{2})\b/);
+    if (digit) {
+        return Number(digit[1]);
+    }
+    // 无数字时：仅映射语义明确且不可重试的鉴权词；绝不默认 5xx
+    if (/unauthorized/i.test(m)) {
         return 401;
     }
-    if (/\b403\b/.test(m)) {
+    if (/forbidden/i.test(m)) {
         return 403;
     }
-    if (/\b429\b/.test(m)) {
-        return 429;
-    }
-    if (/\b503\b/.test(m)) {
-        return 503;
-    }
-    if (/\b502\b/.test(m)) {
-        return 502;
-    }
-    if (/\b500\b/.test(m)) {
-        return 500;
-    }
-    return 502;
+    return null;
 }
 
 /**

@@ -92,6 +92,21 @@ export function isHostStreamingActive() {
 }
 
 /**
+ * 是否像可挂载的 slot 节点（Node 测试环境可能没有 Element 全局）。
+ * @param {unknown} node
+ * @returns {boolean}
+ */
+function isSlotLikeNode(node) {
+    if (node == null || typeof node !== 'object') {
+        return false;
+    }
+    if (typeof Element !== 'undefined' && node instanceof Element) {
+        return true;
+    }
+    return typeof /** @type {{ getAttribute?: unknown }} */ (node).getAttribute === 'function';
+}
+
+/**
  * 收集根下尚未挂载的 slot 元素。
  * @param {Element} root
  * @returns {Element[]}
@@ -104,13 +119,14 @@ export function collectUnmountedSlots(root) {
     /** @type {Element[]} */
     const out = [];
     for (const node of nodes) {
-        if (!(node instanceof Element)) {
+        if (!isSlotLikeNode(node)) {
             continue;
         }
-        if (node.getAttribute(SLOT_MOUNTED_ATTR) === '1') {
+        const el = /** @type {Element} */ (node);
+        if (el.getAttribute(SLOT_MOUNTED_ATTR) === '1') {
             continue;
         }
-        out.push(node);
+        out.push(el);
     }
     return out;
 }

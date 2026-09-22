@@ -167,8 +167,17 @@ export function createCharacterRepo(deps) {
 
         async exportJson() {
             return catchToResult(async () => {
-                const groups = await db.getAll(GROUPS);
-                const characters = await db.getAll(CHARS);
+                // 与 list 路径一致：只导出通过校验的实体（避免脏行进出不对称）
+                const groups = (await db.getAll(GROUPS))
+                    .map((r) => validateCharacterGroup(r))
+                    .filter((r) => r.ok)
+                    .map((r) => r.value)
+                    .sort((a, b) => a.order - b.order || a.name.localeCompare(b.name));
+                const characters = (await db.getAll(CHARS))
+                    .map((r) => validateCharacter(r))
+                    .filter((r) => r.ok)
+                    .map((r) => r.value)
+                    .sort((a, b) => a.name.localeCompare(b.name));
                 return buildExportEnvelope({
                     kind: 'character',
                     schemaVersion: CHARACTER_SCHEMA_VERSION,

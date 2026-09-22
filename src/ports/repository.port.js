@@ -1,5 +1,5 @@
 /**
- * L2 契约 · Repository 端口族（架构文档 §4.4，裁决 D7 / D12）。
+ * L2 契约 · Repository 端口族（架构文档 §4.4，裁决 D7 / D12 / D16–D17 / D22–D23）。
  * 同构 Repository 仅用于 artist / preset / llm-config / nai-config。
  * 角色库、标签库是两层结构，必须用 CharacterRepository / TagRepository。
  * 无具体实现。归属：W0 冻结；实现归 W1-D `adapters/storage/`。
@@ -14,9 +14,46 @@ import { requireArg } from '../infra/validate.js';
  */
 
 /**
+ * IndexedDB 客户端形状（`openIdb` 的返回值，裁决 D16 / D17）。
+ *
+ * **错误约定（D16）**：本层**不**返回 `Result`。方法以 Promise reject / 同步 throw
+ * 抛出 `AppError`；仓库层统一 `catch` 后包成 `Result`。理由：IDB 事务边界与
+ * Result 值传递不匹配，强行包装会让事务语义更难看清。
+ *
+ * @typedef {object} IdbClient
+ * @property {(store: string, key: string) => Promise<any>} get
+ * @property {(store: string, value: any, key?: string) => Promise<void>} put
+ * @property {(store: string, key: string) => Promise<void>} delete
+ * @property {(store: string) => Promise<any[]>} getAll
+ * @property {(store: string, indexName: string, query: IDBValidKey|IDBKeyRange) => Promise<any[]>} getAllByIndex
+ *   按对象仓库索引列出（裁决 D17）。实现见 `adapters/storage/idb.js`。
+ * @property {(storeNames: string|string[], mode: IDBTransactionMode, runner: (stores: Record<string, IDBObjectStore>) => void|Promise<void>) => Promise<void>} runTransaction
+ *   显式事务边界（裁决 D17）；runner 内可同步读写多个 store。
+ * @property {() => void} close
+ */
+
+/**
+ * 设置 store 工厂依赖（裁决 D15）。
+ * 存取一律经 `HostPort.loadSettings` / `saveSettings`，本 store 只做
+ * PluginSettings 的 migrate / merge / 单键 get/set。**禁止**再直接吃 `getContext`。
+ *
+ * @typedef {object} SettingsStoreDeps
+ * @property {import('./host.port.js').HostPort} host
+ */
+
+/**
+ * @typedef {object} SettingsStore
+ * @property {() => import('../domain/model/plugin-settings.js').PluginSettings} load
+ * @property {(settings: import('../domain/model/plugin-settings.js').PluginSettings) => void} save
+ * @property {(key: string, fallback?: any) => any} get
+ * @property {(key: string, value: any) => void} set
+ */
+
+/**
  * 统一 CRUD + 导入导出形状（单实体仓库）。
  * 失败：ConfigError（校验）、HostError（存储不可用）、DomainError（迁移失败）。
  * 存储载体见宿主能力基线 §9（IndexedDB / message.extra / extension_settings）。
+ * 仓库实现须将 `IdbClient` 的抛错统一包成 `Result`（裁决 D16）。
  *
  * @template T
  * @typedef {object} Repository
@@ -97,7 +134,17 @@ import { requireArg } from '../infra/validate.js';
  * @property {(blob: Blob) => Promise<import('../infra/result.js').Ok<ImageRef>|import('../infra/result.js').Err<import('../infra/errors.js').AppError>>} put
  * @property {(ref: ImageRef) => Promise<import('../infra/result.js').Ok<string|null>|import('../infra/result.js').Err<import('../infra/errors.js').AppError>>} getUrl
  *   返回可展示的 object URL（或 null）。
- * @property {(liveRefs: ImageRef[]) => Promise<import('../infra/result.js').Ok<{ removed: number }>|import('../infra/result.js').Err<import('../infra/errors.js').AppError>>} gc
+ * @property {(liveRefs: ImageRef[], opts?: { force?: boolean }) => Promise<import('../infra/result.js').Ok<{ removed: number }>|import('../infra/result.js').Err<import('../infra/errors.js').AppError>>} gc
+ *   删除不在 `liveRefs` 中的 blob。
+ *
+ *   **liveRefs 收集范围（裁决 D23）**：必须覆盖**全部 swipe**——
+ *   `message.extra['nai-dbgen']` **与** `message.swipe_info[].extra['nai-dbgen']`
+ *   两处的全部 `imageRef`。只扫当前 extra 会删掉其他 swipe 仍引用的图。
+ *   实现侧应提供 `collectLiveRefs(message)` 工具，调用方不得手写遗漏。
+ *
+ *   **空输入安全（裁决 D22）**：`liveRefs` 为 `undefined` / 非数组 / **空数组**时
+ *   必须返回 `Err`，**绝不得**解释为「清空全库」。要清空必须显式
+ *   `opts.force === true`（且仍建议附带审计用的 trace/context）。
  */
 
 /** @type {readonly string[]} */

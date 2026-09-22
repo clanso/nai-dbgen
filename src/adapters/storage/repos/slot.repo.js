@@ -6,9 +6,11 @@
  * - 权威：message.extra['nai-dbgen'].slots（经 messageExtra / HostPort）
  * - 派生：IndexedDB slot_index（可重建；不一致时以 extra 为准）
  * - 图片二进制只走 ImageRepository，本仓库只存 imageRef
+ *
+ * 读失败绝不当作空权威（否则 reconcile 会误删索引 / GC 会误删图）。
  */
 
-import { Ok, Err } from '../../../infra/result.js';
+import { Ok, Err, isErr } from '../../../infra/result.js';
 import { configError, hostError } from '../../../infra/errors.js';
 import { nowIso } from '../../../infra/clock.js';
 import { mapIdbError, IDB_STORES } from '../idb.js';
@@ -18,7 +20,6 @@ import {
     validateSlotRecord,
 } from '../../../domain/model/slot.js';
 import { catchToResult, createChangeEmitter } from '../import-export.js';
-import { normalizeNaiExtra } from '../message-extra.store.js';
 
 /**
  * @param {import('../../../domain/model/slot.js').SlotRecord} record
@@ -38,17 +39,40 @@ export function toSlotIndexRow(record) {
 }
 
 /**
+ * @param {{ read: (messageId: number) => any }} messageExtra
+ * @param {number} messageId
+ * @returns {{ ok: true, value: { schemaVersion: number, slots: import('../../../domain/model/slot.js').SlotRecord[] } } | { ok: false, error: import('../../../infra/errors.js').AppError }}
+ */
+function readAuthority(messageExtra, messageId) {
+    const r = messageExtra.read(messageId);
+    if (r && typeof r === 'object' && 'ok' in r) {
+        return r;
+    }
+    return Err(hostError({
+        code: 'MESSAGE_EXTRA_READ_SHAPE',
+        message: 'messageExtra.read 未返回 Result',
+        context: { messageId },
+    }));
+}
+
+/**
  * 对账：以 message.extra 为准，重建 / 修剪 IDB 索引。
+ * 读失败时**不删任何索引**（避免空权威误伤）。
+ *
  * @param {object} args
  * @param {object} args.db
- * @param {{ read: (messageId: number) => object }} args.messageExtra
+ * @param {{ read: (messageId: number) => any }} args.messageExtra
  * @param {number} args.messageId
  * @returns {Promise<{ ok: true, value: { repaired: number, removed: number } } | { ok: false, error: import('../../../infra/errors.js').AppError }>}
  */
 export async function reconcileSlotIndex(args) {
     const { db, messageExtra, messageId } = args;
     try {
-        const authority = normalizeNaiExtra(messageExtra.read(messageId));
+        const authorityResult = readAuthority(messageExtra, messageId);
+        if (isErr(authorityResult)) {
+            return authorityResult;
+        }
+        const authority = authorityResult.value;
         const indexed = typeof db.getAllByIndex === 'function'
             ? await db.getAllByIndex(IDB_STORES.SLOT_INDEX, 'by_messageId', messageId)
             : (await db.getAll(IDB_STORES.SLOT_INDEX)).filter((r) => r.messageId === messageId);
@@ -135,20 +159,26 @@ export function createSlotRepo(deps) {
     return {
         async getByMessage(messageId) {
             return catchToResult(async () => {
-                const authority = normalizeNaiExtra(messageExtra.read(messageId));
+                const authorityResult = readAuthority(messageExtra, messageId);
+                if (isErr(authorityResult)) {
+                    throw authorityResult.error;
+                }
                 // 读路径顺便轻量对账（不强制 await 成功）
                 void reconcileSlotIndex({ db, messageExtra, messageId }).then(
                     () => undefined,
                     () => undefined,
                 );
-                return authority.slots;
+                return authorityResult.value.slots;
             }, mapErr, Ok, Err);
         },
 
         async get(messageId, slotId) {
             return catchToResult(async () => {
-                const authority = normalizeNaiExtra(messageExtra.read(messageId));
-                return authority.slots.find((s) => s.slotId === Number(slotId)) || null;
+                const authorityResult = readAuthority(messageExtra, messageId);
+                if (isErr(authorityResult)) {
+                    throw authorityResult.error;
+                }
+                return authorityResult.value.slots.find((s) => s.slotId === Number(slotId)) || null;
             }, mapErr, Ok, Err);
         },
 
@@ -188,7 +218,11 @@ export function createSlotRepo(deps) {
                 }));
             }
             return catchToResult(async () => {
-                const authority = normalizeNaiExtra(messageExtra.read(messageId));
+                const authorityResult = readAuthority(messageExtra, messageId);
+                if (isErr(authorityResult)) {
+                    throw authorityResult.error;
+                }
+                const authority = authorityResult.value;
                 const idx = authority.slots.findIndex((s) => s.slotId === Number(slotId));
                 if (idx < 0) {
                     throw hostError({

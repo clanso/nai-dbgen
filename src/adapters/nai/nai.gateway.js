@@ -15,9 +15,7 @@ const BASE_BACKOFF_MS = 2000;
 const MAX_BACKOFF_MS = 60000;
 
 /**
- * @typedef {object} NaiGatewayDeps
- * @property {Record<string, { send: Function }>} transports 含 direct / st-cors-proxy
- * @property {Record<string, { decode: Function }>} decoders 含 json-base64 / zip
+ * @typedef {import('../../ports/image-gen.port.js').NaiGatewayDeps} NaiGatewayDeps
  */
 
 /**
@@ -92,9 +90,8 @@ export function createNaiGateway(deps) {
                 });
 
                 if (isErr(sent)) {
-                    const err = sent.error;
-                    err.traceId = err.traceId ?? traceId;
-                    // 传输层失败（CORS/代理关闭）：不按上游状态重试多轮；代理关闭不可重试
+                    const err = stampTrace(sent.error, traceId);
+                    // 传输层失败（CORS/代理关闭）：代理关闭等不可重试；其余可重试但受 maxAttempts 限制
                     if (!err.retryable || attempt === maxAttempts - 1) {
                         return Err(err);
                     }
@@ -115,8 +112,7 @@ export function createNaiGateway(deps) {
                     if (isOk(decoded)) {
                         return decoded;
                     }
-                    decoded.error.traceId = decoded.error.traceId ?? traceId;
-                    return decoded;
+                    return Err(stampTrace(decoded.error, traceId));
                 }
 
                 const retryAfterSec = parseRetryAfterSec(response.headers);
@@ -139,7 +135,7 @@ export function createNaiGateway(deps) {
                 }
             }
 
-            return Err(lastError ?? transportError({
+            return Err(stampTrace(lastError, traceId) ?? transportError({
                 code: 'NAI_GENERATE_FAILED',
                 message: '生图请求失败',
                 traceId,
@@ -246,6 +242,20 @@ export function createNaiGateway(deps) {
             };
         },
     };
+}
+
+/**
+ * 确保 AppError.traceId 不为空（裁决 D14 / 架构 §10）。
+ * @template {import('../../infra/errors.js').AppError} E
+ * @param {E|null|undefined} err
+ * @param {string|null} traceId
+ * @returns {E|null|undefined}
+ */
+function stampTrace(err, traceId) {
+    if (err && traceId && !err.traceId) {
+        err.traceId = traceId;
+    }
+    return err;
 }
 
 /**
@@ -372,8 +382,15 @@ async function decodeResponse(response, decoderPref, decoders, traceId) {
         // auto：JSON 失败再试 zip
         const zipDec = decoders.zip;
         if (zipDec && typeof zipDec.decode === 'function') {
-            return zipDec.decode(response);
+            const zipResult = await zipDec.decode(response);
+            if (isErr(zipResult)) {
+                stampTrace(zipResult.error, traceId);
+            }
+            return zipResult;
         }
+    }
+    if (isErr(result)) {
+        stampTrace(result.error, traceId);
     }
     return result;
 }

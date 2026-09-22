@@ -87,12 +87,17 @@ import { requireArg } from '../infra/validate.js';
  * @property {(element: Element) => void} mountSettingsPanel
  *   挂到 #extensions_settings2。基线 §11。
  *
- * @property {(opts: { title: string, element: Element, wide?: boolean }) => Promise<void>} openModal
- *   包一层酒馆 Popup。基线 §11。
+ * @property {(opts: { title: string, element: Element, wide?: boolean, large?: boolean, allowVerticalScrolling?: boolean }) => Promise<void>} openModal
+ *   包一层酒馆 Popup（基线 §11）。必须透传 `wide` / `large` / `allowVerticalScrolling`（裁决 D20），
+ *   不得写死一档——管理台要 large，小确认框不要。
  *
  * @property {(spec: object) => void} registerSlashCommand
  *
  * @property {(level: 'info'|'success'|'warning'|'error', message: string) => void} toast
+ *
+ * @property {() => void} dispose
+ *   干净卸载：取消事件订阅、停观察器、卸全局拦截器等（裁决 D18）。
+ *   manifest `hooks.disable` → bootstrap dispose 必须能调用到本方法。可重复调用。
  */
 
 /** @type {readonly string[]} */
@@ -117,6 +122,7 @@ const REQUIRED_METHODS = Object.freeze([
     'openModal',
     'registerSlashCommand',
     'toast',
+    'dispose',
 ]);
 
 /**

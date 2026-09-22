@@ -240,9 +240,44 @@
 }
 
 #nai-dbgen-root .nd-checkbox-row input {
+    -webkit-appearance: none;
+    -moz-appearance: none;
+    appearance: none;
     width: 16px;
     height: 16px;
+    margin: 0;
+    flex-shrink: 0;
+    display: inline-grid;
+    place-content: center;
+    border: 1px solid var(--nd-line-strong);
+    border-radius: 3px;
+    background: var(--nd-input-bg);
+    box-shadow: inset 0 0 2px var(--nd-shadow-c);
     accent-color: var(--nd-accent);
+    cursor: pointer;
+    color: inherit;
+    font: inherit;
+    filter: none;
+    transform: none;
+}
+
+#nai-dbgen-root .nd-checkbox-row input::before {
+    content: "";
+    width: 0.65em;
+    height: 0.65em;
+    transform: scale(0);
+    box-shadow: inset 1em 1em var(--nd-accent);
+    clip-path: polygon(14% 44%, 0 65%, 50% 100%, 100% 16%, 80% 0%, 43% 62%);
+    transition: transform 0.12s ease-in-out;
+}
+
+#nai-dbgen-root .nd-checkbox-row input:checked::before {
+    transform: scale(1);
+}
+
+#nai-dbgen-root .nd-checkbox-row input:disabled {
+    opacity: 0.45;
+    cursor: default;
 }
 
 /* —— toggle-row（CSS 兄弟选择器套路） —— */
@@ -342,8 +377,49 @@
 }
 
 #nai-dbgen-root .nd-range {
+    -webkit-appearance: none;
+    appearance: none;
     width: 100%;
+    height: 5px;
+    margin: 0;
+    padding: 0;
+    border: 0;
+    border-radius: 999px;
+    background: var(--nd-toggle-track);
+    box-shadow: inset 0 0 2px var(--nd-shadow-c);
     accent-color: var(--nd-accent);
+    cursor: ew-resize;
+    filter: none;
+    color: inherit;
+    font: inherit;
+}
+
+#nai-dbgen-root .nd-range::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    appearance: none;
+    width: 15px;
+    height: 15px;
+    border-radius: 50%;
+    border: 1px solid var(--nd-line-strong);
+    background: var(--nd-accent);
+    box-shadow: 0 1px 4px var(--nd-shadow-c);
+    cursor: grab;
+}
+
+#nai-dbgen-root .nd-range::-moz-range-thumb {
+    width: 15px;
+    height: 15px;
+    border-radius: 50%;
+    border: 1px solid var(--nd-line-strong);
+    background: var(--nd-accent);
+    box-shadow: 0 1px 4px var(--nd-shadow-c);
+    cursor: grab;
+}
+
+#nai-dbgen-root .nd-range::-moz-range-track {
+    height: 5px;
+    border-radius: 999px;
+    background: var(--nd-toggle-track);
 }
 
 /* —— details 折叠 —— */
@@ -567,6 +643,13 @@
     margin: 0;
     font-size: 0.93em;
     color: var(--nd-text);
+}
+
+#nai-dbgen-root .nd-style-card__subtitle {
+    margin: 0;
+    color: var(--nd-muted);
+    font-size: 0.67em;
+    line-height: 1.45;
 }
 
 #nai-dbgen-root .nd-style-card__actions {
@@ -893,4 +976,128 @@
     justify-content: flex-end;
     gap: 8px;
     margin-top: 18px;
+}
+
+/* —— 原生 dialog 兜底（内容必须在 #nai-dbgen-root 内，D30） —— */
+#nai-dbgen-root .nd-native-dialog__shell {
+    position: relative;
+}
+
+#nai-dbgen-root .nd-native-dialog__card {
+    padding: 22px;
+    border: 1px solid var(--nd-line);
+    border-radius: var(--nd-radius);
+    background: var(--nd-surface);
+    color: var(--nd-text);
+    box-shadow: var(--nd-shadow);
+    max-height: min(820px, calc(100% - 28px));
+    overflow: auto;
+}
+
+#nai-dbgen-root .nd-native-dialog__close {
+    position: absolute;
+    z-index: 2;
+    top: 10px;
+    right: 12px;
+    width: 30px;
+    height: 30px;
+    border: 0;
+    background: transparent;
+    color: var(--nd-muted);
+    font-size: 22px;
+    line-height: 1;
+    cursor: pointer;
+}
+
+/* —— 两层列表（组→角色 / 库→条目） —— */
+#nai-dbgen-root .nd-nested-list {
+    display: grid;
+    gap: 10px;
+}
+
+#nai-dbgen-root .nd-nested-list__parent {
+    border: 1px solid var(--nd-line);
+    border-radius: 14px;
+    background: var(--nd-surface);
+    overflow: hidden;
+}
+
+#nai-dbgen-root .nd-nested-list__parent.is-disabled {
+    opacity: 0.72;
+}
+
+#nai-dbgen-root .nd-nested-list__header {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 10px;
+    padding: 10px 12px;
+    border-bottom: 1px solid var(--nd-line);
+    background: var(--nd-surface-2);
+}
+
+#nai-dbgen-root .nd-nested-list__expand {
+    width: var(--nd-h-micro);
+    height: var(--nd-h-micro);
+    min-height: var(--nd-h-micro);
+    display: inline-grid;
+    place-items: center;
+    padding: 0;
+    border: 1px solid var(--nd-line);
+    border-radius: 8px;
+    background: var(--nd-surface);
+    color: var(--nd-soft);
+    cursor: pointer;
+    font: inherit;
+    font-size: 0.8em;
+}
+
+#nai-dbgen-root .nd-nested-list__title {
+    min-width: 0;
+    flex: 1 1 auto;
+    color: var(--nd-text);
+    font-size: 0.87em;
+}
+
+#nai-dbgen-root .nd-nested-list__meta {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    color: var(--nd-muted);
+    font-size: 0.67em;
+}
+
+#nai-dbgen-root .nd-nested-list__enable {
+    flex: 0 0 auto;
+    min-height: var(--nd-h-icon);
+}
+
+#nai-dbgen-root .nd-nested-list__children {
+    display: grid;
+    gap: 0;
+}
+
+#nai-dbgen-root .nd-nested-list__child {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 0 12px;
+    border-bottom: 1px solid var(--nd-line);
+    color: var(--nd-text);
+    font-size: 0.8em;
+    box-sizing: border-box;
+}
+
+#nai-dbgen-root .nd-nested-list__child:last-child {
+    border-bottom: 0;
+}
+
+#nai-dbgen-root .nd-nested-list__empty {
+    padding: 14px 12px;
+    color: var(--nd-muted);
+    font-size: 0.73em;
+}
+
+#nai-dbgen-root .nd-nested-list__virtual {
+    overflow: hidden;
 }

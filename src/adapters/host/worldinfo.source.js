@@ -6,6 +6,8 @@
  * HostPort.resolveWorldInfo 收到的 HostMessage[] 在 sillytavern.host 内
  * 按酒馆 world_info_include_names 决定是否带发言人名，再转成 scanInput 字符串数组
  * （裁决 D6：该判断属宿主知识，不上浮到 application）。
+ *
+ * 裁决 D21：只有真正快照过才恢复；API 不可用 / getContext 抛错时绝不碰 extensionPrompts。
  */
 
 import { Ok, Err } from '../../infra/result.js';
@@ -39,7 +41,7 @@ export function buildWorldInfoScanInput(contextWindow, includeNames) {
 /**
  * 深快照作者注释 extension prompt 条目（用于 dryRun 副作用回滚）。
  * @param {any} extensionPrompts
- * @returns {object|null}
+ * @returns {object|null} 存在则带 existed:true；调用前不存在则 null
  */
 export function snapshotAuthorNotePrompt(extensionPrompts) {
     if (!extensionPrompts || typeof extensionPrompts !== 'object') {
@@ -61,7 +63,8 @@ export function snapshotAuthorNotePrompt(extensionPrompts) {
 }
 
 /**
- * 恢复作者注释；若调用前不存在则删除被 dryRun 写进去的条目。
+ * 恢复作者注释；若快照为 null（调用前不存在）则删除被 dryRun 写进去的条目。
+ * **调用方必须仅在 didSnapshot===true 时调用**（裁决 D21）。
  * @param {any} ctx getContext()
  * @param {object|null} snapshot
  * @returns {void}
@@ -119,10 +122,18 @@ export function createWorldInfoSource(deps) {
      * @returns {Promise<import('../../infra/result.js').Ok<string>|import('../../infra/result.js').Err<import('../../infra/errors.js').AppError>>}
      */
     async function resolve(scanInput, maxContext, globalScanData) {
+        /** @type {object|null} */
         let snapshot = null;
+        /** 只有真正执行过快照才允许 restore（裁决 D21） */
+        let didSnapshot = false;
+        /** 快照时拿到的 ctx；finally 不再二次 getContext，避免恢复失败 */
+        /** @type {any} */
+        let ctxForRestore = null;
+
         try {
             const ctx = getContext();
             if (!ctx || typeof ctx.getWorldInfoPrompt !== 'function') {
+                // 未快照 → finally 不碰 extensionPrompts
                 return Err(hostError({
                     code: 'WORLDINFO_UNAVAILABLE',
                     message: '酒馆世界书 API 不可用',
@@ -130,7 +141,10 @@ export function createWorldInfoSource(deps) {
                 }));
             }
 
+            ctxForRestore = ctx;
             snapshot = snapshotAuthorNotePrompt(ctx.extensionPrompts);
+            didSnapshot = true;
+
             const chat = Array.isArray(scanInput) ? scanInput : [];
             const max = Number.isFinite(Number(maxContext)) ? Number(maxContext) : 0;
             const scanData = globalScanData && typeof globalScanData === 'object'
@@ -151,10 +165,12 @@ export function createWorldInfoSource(deps) {
                 retryable: true,
             }));
         } finally {
-            try {
-                restoreAuthorNotePrompt(getContext(), snapshot);
-            } catch {
-                // 回滚失败不能再抛，避免掩盖主错误；上层应靠下次生成前的 setFloatingPrompt 自愈
+            if (didSnapshot) {
+                try {
+                    restoreAuthorNotePrompt(ctxForRestore, snapshot);
+                } catch {
+                    // 回滚失败不能再抛，避免掩盖主错误
+                }
             }
         }
     }

@@ -163,4 +163,164 @@ describe('sillytavern.host HostPort', () => {
         assert.equal(r.value, 'WI:Char: second|Char: first');
         host.dispose();
     });
+
+    it('D18 dispose 是可枚举契约方法且 assertHostPort 通过', () => {
+        const ctx = makeFakeContext();
+        const host = createSillyTavernHost({ getContext: () => ctx });
+        assert.equal(typeof host.dispose, 'function');
+        assert.equal(Object.keys(host).includes('dispose'), true);
+        assert.equal(assertHostPort(host).ok, true);
+        host.dispose();
+        host.dispose(); // 可重复
+    });
+
+    it('D20 openModal 透传 wide/large/allowVerticalScrolling', async () => {
+        /** @type {object|null} */
+        let seenOpts = null;
+        const ctx = makeFakeContext();
+        ctx.POPUP_TYPE = { DISPLAY: 4 };
+        ctx.callGenericPopup = async (_content, _type, _input, popupOpts) => {
+            seenOpts = popupOpts;
+        };
+
+        const prevDoc = globalThis.document;
+        globalThis.document = {
+            createElement(tag) {
+                return {
+                    id: '',
+                    tagName: String(tag).toUpperCase(),
+                    textContent: '',
+                    appendChild() {},
+                };
+            },
+        };
+
+        const host = createSillyTavernHost({ getContext: () => ctx });
+        const el = { nodeType: 1 };
+        await host.openModal({
+            title: '小确认',
+            element: el,
+            wide: false,
+            large: false,
+            allowVerticalScrolling: false,
+        });
+        assert.deepEqual(seenOpts, {
+            wide: false,
+            large: false,
+            allowVerticalScrolling: false,
+        });
+
+        seenOpts = null;
+        await host.openModal({
+            title: '管理台',
+            element: el,
+            wide: true,
+            large: true,
+            allowVerticalScrolling: true,
+        });
+        assert.deepEqual(seenOpts, {
+            wide: true,
+            large: true,
+            allowVerticalScrolling: true,
+        });
+
+        // 未传的选项不得被写死塞进 popupOpts
+        seenOpts = null;
+        await host.openModal({ title: 't', element: el });
+        assert.deepEqual(seenOpts, {});
+        host.dispose();
+        globalThis.document = prevDoc;
+    });
+
+    it('D28 dispose 移除设置抽屉；斜杠同名幂等覆盖', () => {
+        const commands = {};
+        const ctx = makeFakeContext();
+        ctx.SlashCommand = {
+            fromProps(spec) {
+                return { name: spec.name, aliases: spec.aliases ?? [], ...spec };
+            },
+        };
+        ctx.SlashCommandParser = {
+            addCommandObject(cmd) {
+                commands[cmd.name] = cmd;
+            },
+            commands,
+        };
+
+        // 最小 document 替身
+        const drawers = new Map();
+        const fakeDoc = {
+            getElementById(id) {
+                if (id === 'extensions_settings2') {
+                    return {
+                        querySelector(sel) {
+                            if (sel === '#nai-dbgen-settings-drawer') {
+                                return drawers.get('nai-dbgen-settings-drawer') ?? null;
+                            }
+                            return null;
+                        },
+                        appendChild(el) {
+                            drawers.set(el.id, el);
+                        },
+                    };
+                }
+                return drawers.get(id) ?? null;
+            },
+        };
+        const prevDoc = globalThis.document;
+        globalThis.document = fakeDoc;
+
+        const host = createSillyTavernHost({ getContext: () => ctx });
+        const panel = {
+            id: 'panel',
+            // replaceChildren no-op for duck
+        };
+        // mountSettingsPanel 需要 element 与 createElement
+        fakeDoc.createElement = (tag) => {
+            const el = {
+                id: '',
+                className: '',
+                tagName: tag,
+                replaceChildren() {},
+                remove() {
+                    drawers.delete(this.id);
+                },
+                parentNode: {
+                    removeChild(child) {
+                        drawers.delete(child.id);
+                    },
+                },
+            };
+            return el;
+        };
+        // Re-get hostEl path: getElementById extensions_settings2
+        const hostEl = fakeDoc.getElementById('extensions_settings2');
+        let drawerRef = null;
+        hostEl.querySelector = (sel) => {
+            if (sel === '#nai-dbgen-settings-drawer') {
+                return drawerRef;
+            }
+            return null;
+        };
+        hostEl.appendChild = (el) => {
+            drawerRef = el;
+            drawers.set(el.id, el);
+            el.remove = () => {
+                drawers.delete(el.id);
+                drawerRef = null;
+            };
+        };
+
+        host.mountSettingsPanel(panel);
+        assert.ok(drawers.has('nai-dbgen-settings-drawer'));
+
+        host.registerSlashCommand({ name: 'naidb', callback: () => 'a' });
+        host.registerSlashCommand({ name: 'naidb', callback: () => 'b' });
+        assert.equal(commands.naidb.callback(), 'b');
+
+        host.dispose();
+        assert.equal(drawers.has('nai-dbgen-settings-drawer'), false);
+
+        globalThis.document = prevDoc;
+    });
 });

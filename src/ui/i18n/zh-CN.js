@@ -49,6 +49,17 @@ export const zhCN = Object.freeze({
     'import.colKind': '类型',
 
     'modal.fallbackTitle': '对话框',
+
+    'library.searchPlaceholder': '搜索资料库',
+    'library.filter': '筛选',
+    'library.sort': '排序',
+    'library.create': '＋新建',
+    'library.enabled': '启用',
+
+    'nested.emptyParents': '还没有分组或库。',
+    'nested.emptyChildren': '此组暂无条目。',
+    'nested.expand': '展开',
+    'nested.collapse': '折叠',
 });
 
 /**

@@ -100,9 +100,17 @@ export interface HostPort {
     loadSettings(): PluginSettings;
     saveSettings(settings: PluginSettings): void;
     mountSettingsPanel(element: Element): void;
-    openModal(opts: { title: string; element: Element; wide?: boolean }): Promise<void>;
+    openModal(opts: {
+        title: string;
+        element: Element;
+        wide?: boolean;
+        large?: boolean;
+        allowVerticalScrolling?: boolean;
+    }): Promise<void>;
     registerSlashCommand(spec: object): void;
     toast(level: 'info' | 'success' | 'warning' | 'error', message: string): void;
+    /** 干净卸载（裁决 D18）。可重复调用。 */
+    dispose(): void;
 }
 
 /* ── Image gen / LLM ────────────────────────────────── */
@@ -138,9 +146,17 @@ export interface NaiApiConfig {
 export interface ImageGenPort {
     generate(
         req: NaiRequest,
-        opts: { signal?: AbortSignal; config: NaiApiConfig },
+        opts: { signal?: AbortSignal; config: NaiApiConfig; traceId?: string },
     ): Promise<Result<GeneratedImage[]>>;
     probe(config: NaiApiConfig): Promise<TransportProbeResult>;
+}
+
+/** 裁决 D19 */
+export interface NaiGatewayDeps {
+    transports: Record<string, { send: Function }>;
+    decoders: Record<string, { decode: Function }>;
+    maxAttempts?: number;
+    sleep?: (ms: number) => Promise<void>;
 }
 
 export interface ChatMessage {
@@ -163,6 +179,8 @@ export interface LlmCompleteRequest {
     config: LlmApiConfig;
     jsonSchema?: object;
     signal?: AbortSignal;
+    /** 裁决 D14 */
+    traceId?: string;
 }
 
 export interface LlmCompleteResult {
@@ -173,6 +191,14 @@ export interface LlmCompleteResult {
 export interface LlmPort {
     complete(req: LlmCompleteRequest): Promise<Result<LlmCompleteResult>>;
     probe(config: LlmApiConfig): Promise<TransportProbeResult>;
+}
+
+/** 裁决 D19 */
+export interface LlmGatewayDeps {
+    transports: Record<string, { complete: Function }>;
+    extractJson?: (text: string) => Result<unknown>;
+    maxAttempts?: number;
+    sleep?: (ms: number) => Promise<void>;
 }
 
 /* ── Repository ─────────────────────────────────────── */
@@ -308,7 +334,48 @@ export interface SlotRepository {
 export interface ImageRepository {
     put(blob: Blob): Promise<Result<ImageRef>>;
     getUrl(ref: ImageRef): Promise<Result<string | null>>;
-    gc(liveRefs: ImageRef[]): Promise<Result<{ removed: number }>>;
+    /**
+     * liveRefs 必须覆盖全部 swipe（extra + swipe_info[].extra）。
+     * 空/非数组 → Err；清空须 opts.force === true（D22/D23）。
+     */
+    gc(
+        liveRefs: ImageRef[],
+        opts?: { force?: boolean },
+    ): Promise<Result<{ removed: number }>>;
+}
+
+/**
+ * IndexedDB 客户端（openIdb 返回值）。抛/拒 AppError，不返回 Result（D16）。
+ * 含 getAllByIndex / runTransaction（D17）。
+ */
+export interface IdbClient {
+    get(store: string, key: string): Promise<unknown>;
+    put(store: string, value: unknown, key?: string): Promise<void>;
+    delete(store: string, key: string): Promise<void>;
+    getAll(store: string): Promise<unknown[]>;
+    getAllByIndex(
+        store: string,
+        indexName: string,
+        query: IDBValidKey | IDBKeyRange,
+    ): Promise<unknown[]>;
+    runTransaction(
+        storeNames: string | string[],
+        mode: IDBTransactionMode,
+        runner: (stores: Record<string, IDBObjectStore>) => void | Promise<void>,
+    ): Promise<void>;
+    close(): void;
+}
+
+/** createSettingsStore 依赖：一律经 HostPort（D15） */
+export interface SettingsStoreDeps {
+    host: HostPort;
+}
+
+export interface SettingsStore {
+    load(): PluginSettings;
+    save(settings: PluginSettings): void;
+    get<K extends keyof PluginSettings>(key: K, fallback?: PluginSettings[K]): PluginSettings[K];
+    set<K extends keyof PluginSettings>(key: K, value: PluginSettings[K]): void;
 }
 
 /* ── External 4.14 API ──────────────────────────────── */

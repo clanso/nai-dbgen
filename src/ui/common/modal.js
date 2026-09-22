@@ -4,13 +4,13 @@
  *
  * 策略：优先走 HostPort.openModal（W1-B 已接 callGenericPopup / Popup.DISPLAY）；
  * 宿主无弹窗能力时降级为原生 <dialog>，保证管理台仍可打开。
- * 原生 dialog 不参与酒馆层叠，故仅作兜底（见交付报告）。
+ * destroy 只关本实例持有的 dialog（裁决 D30），不盲猜最后一个 open dialog。
  */
 
 import { t } from '../i18n/zh-CN.js';
 
 /**
- * @param {{ title: string, element: Element, wide?: boolean, large?: boolean }} opts
+ * @param {{ title: string, element: Element, wide?: boolean, large?: boolean, allowVerticalScrolling?: boolean }} opts
  * @returns {HTMLElement}
  */
 function buildRoot(opts) {
@@ -30,49 +30,67 @@ function buildRoot(opts) {
 }
 
 /**
- * @param {HTMLElement} content
- * @param {string} title
- * @returns {{ destroy: () => void }}
+ * @param {Element|null|undefined} node
+ * @returns {HTMLDialogElement|null}
  */
-function openNativeDialog(content, title) {
+function closestDialog(node) {
+    if (!(node instanceof Element)) {
+        return null;
+    }
+    const dlg = node.closest('dialog');
+    return dlg instanceof HTMLDialogElement ? dlg : null;
+}
+
+/**
+ * @param {HTMLDialogElement|null} dlg
+ */
+function closeOwnedDialog(dlg) {
+    if (!dlg) {
+        return;
+    }
+    const closeBtn = dlg.querySelector('.popup-button-close, [data-nd-close], .nd-native-dialog__close');
+    if (closeBtn instanceof HTMLElement) {
+        closeBtn.click();
+        return;
+    }
+    if (typeof dlg.close === 'function') {
+        dlg.close();
+    }
+    if (dlg.classList.contains('nd-native-dialog')) {
+        dlg.remove();
+    }
+}
+
+/**
+ * 原生兜底：dialog 内必须挂 #nai-dbgen-root，令牌才生效（D30）。
+ * @param {HTMLElement} contentRoot 已是 #nai-dbgen-root
+ * @param {string} title
+ * @returns {{ destroy: () => void, dialog: HTMLDialogElement }}
+ */
+function openNativeDialog(contentRoot, title) {
     const dlg = document.createElement('dialog');
     dlg.className = 'nd-native-dialog';
     dlg.setAttribute('aria-label', title || t('modal.fallbackTitle'));
 
-    // 原生兜底样式：不走 components.css 的视口单位布局，仅保证可读
-    dlg.style.border = '0';
-    dlg.style.padding = '0';
-    dlg.style.background = 'transparent';
-    dlg.style.maxWidth = 'min(920px, calc(100% - 28px))';
-
-    const card = document.createElement('div');
-    card.style.padding = '22px';
-    card.style.borderRadius = '18px';
-    card.style.border = '1px solid var(--nd-line, rgba(123,70,96,.21))';
-    card.style.background = 'var(--nd-surface, #fffdfd)';
-    card.style.color = 'var(--nd-text, #4b3040)';
-    card.style.boxShadow = 'var(--nd-shadow, 0 22px 60px rgba(123,70,96,.16))';
-    card.style.maxHeight = 'min(820px, calc(100% - 28px))';
-    card.style.overflow = 'auto';
-    card.appendChild(content);
+    const shell = document.createElement('div');
+    shell.className = 'nd-native-dialog__shell';
 
     const closeBtn = document.createElement('button');
     closeBtn.type = 'button';
+    closeBtn.className = 'nd-native-dialog__close';
     closeBtn.textContent = '×';
     closeBtn.setAttribute('aria-label', t('common.close'));
-    closeBtn.style.position = 'absolute';
-    closeBtn.style.top = '10px';
-    closeBtn.style.right = '12px';
-    closeBtn.style.border = '0';
-    closeBtn.style.background = 'transparent';
-    closeBtn.style.cursor = 'pointer';
-    closeBtn.style.fontSize = '22px';
-    closeBtn.style.color = 'var(--nd-muted, #7f5f70)';
+    closeBtn.setAttribute('data-nd-close', '1');
 
-    const shell = document.createElement('div');
-    shell.style.position = 'relative';
+    const card = document.createElement('div');
+    card.className = 'nd-native-dialog__card';
+    while (contentRoot.firstChild) {
+        card.appendChild(contentRoot.firstChild);
+    }
+
     shell.append(closeBtn, card);
-    dlg.appendChild(shell);
+    contentRoot.appendChild(shell);
+    dlg.appendChild(contentRoot);
     document.body.appendChild(dlg);
 
     let closed = false;
@@ -99,38 +117,13 @@ function openNativeDialog(content, title) {
         dlg.setAttribute('open', '');
     }
 
-    return { destroy: close };
-}
-
-/**
- * @returns {Element|null}
- */
-function findOpenPopupDialog() {
-    const dialogs = document.querySelectorAll('dialog.popup[open], dialog[open]');
-    return dialogs.length ? dialogs[dialogs.length - 1] : null;
-}
-
-/**
- * @param {Element|null} dlg
- */
-function closeDialog(dlg) {
-    if (!(dlg instanceof HTMLElement)) {
-        return;
-    }
-    const closeBtn = dlg.querySelector('.popup-button-close, [data-nd-close]');
-    if (closeBtn instanceof HTMLElement) {
-        closeBtn.click();
-        return;
-    }
-    if (typeof /** @type {HTMLDialogElement} */ (dlg).close === 'function') {
-        /** @type {HTMLDialogElement} */ (dlg).close();
-    }
+    return { destroy: close, dialog: dlg };
 }
 
 /**
  * @param {object} deps
  * @param {import('../../ports/host.port.js').HostPort} deps.host
- * @param {{ title: string, element: Element, wide?: boolean, large?: boolean }} opts
+ * @param {{ title: string, element: Element, wide?: boolean, large?: boolean, allowVerticalScrolling?: boolean }} opts
  * @returns {Promise<{ destroy: () => void }>}
  */
 export async function openModal(deps, opts) {
@@ -141,19 +134,31 @@ export async function openModal(deps, opts) {
         throw new Error('openModal: opts.element must be an Element');
     }
 
-    // HostPort.openModal 自身会包 #nai-dbgen-root + title；宽/大由宿主默认 wide+large。
     if (host && typeof host.openModal === 'function') {
-        const pending = host.openModal({
-            title,
-            element,
-            wide: opts?.wide !== false,
-        });
+        /** @type {{ title: string, element: Element, wide?: boolean, large?: boolean, allowVerticalScrolling?: boolean }} */
+        const hostOpts = { title, element };
+        // 裁决 D20：透传，不吞、不写死
+        if (opts && Object.prototype.hasOwnProperty.call(opts, 'wide')) {
+            hostOpts.wide = opts.wide;
+        }
+        if (opts && Object.prototype.hasOwnProperty.call(opts, 'large')) {
+            hostOpts.large = opts.large;
+        }
+        if (opts && Object.prototype.hasOwnProperty.call(opts, 'allowVerticalScrolling')) {
+            hostOpts.allowVerticalScrolling = opts.allowVerticalScrolling;
+        }
 
-        // 让宿主有机会挂上 dialog 后再绑定 destroy
+        const pending = host.openModal(hostOpts);
+
         await Promise.resolve();
         await new Promise((resolve) => {
             setTimeout(resolve, 0);
         });
+
+        // 持有本实例内容所在 dialog，禁止盲猜最后一个 open（D30）
+        const rooted = document.getElementById('nai-dbgen-root');
+        /** @type {HTMLDialogElement|null} */
+        let ownedDialog = closestDialog(rooted) || closestDialog(element);
 
         let destroyed = false;
         const destroy = () => {
@@ -161,18 +166,16 @@ export async function openModal(deps, opts) {
                 return;
             }
             destroyed = true;
-            closeDialog(findOpenPopupDialog());
+            closeOwnedDialog(ownedDialog);
         };
 
-        // 不阻塞调用方；弹窗关闭后 pending settle
         Promise.resolve(pending).catch(() => {});
 
-        // 若宿主静默 no-op（无 getContext），退到原生 dialog
-        const dlg = findOpenPopupDialog();
-        const rooted = document.getElementById('nai-dbgen-root');
-        if (!dlg && !rooted) {
+        if (!ownedDialog && !rooted) {
             const wrap = buildRoot({ title, element });
-            return openNativeDialog(wrap, title);
+            const native = openNativeDialog(wrap, title);
+            ownedDialog = native.dialog;
+            return { destroy: native.destroy };
         }
 
         return { destroy };

@@ -15,6 +15,8 @@ import {
     validateTagLibrary,
     validateTagEntry,
     migrateTagLibrary,
+    migrateTagEntry,
+    TAG_SCHEMA_VERSION,
 } from '../../src/domain/model/tag.js';
 import {
     slotPlanFromLlmItem,
@@ -105,6 +107,42 @@ describe('model/tag', () => {
         assert.equal(validateTagEntry(entry).ok, true);
         assert.equal(validateTagEntry({ id: 'e', libraryId: 'l', key: '', value: 'v' }).ok, false);
         assert.equal(migrateTagLibrary({ name: 'n', active: 1 }, 0).ok, true);
+    });
+
+    it('export → import roundtrip via migrate + validate (domain side)', () => {
+        // 模拟「导出」：深拷贝为纯 JSON（无函数 / 无原型）
+        const lib = createTagLibrary({ name: '场景', active: true }, DEPS);
+        const entry = createTagEntry({
+            libraryId: lib.id,
+            key: '雨夜',
+            value: 'rainy night, wet street',
+        }, { id: 'entry-1', now: DEPS.now });
+
+        const exportedLib = JSON.parse(JSON.stringify(lib));
+        const exportedEntry = JSON.parse(JSON.stringify(entry));
+
+        // 模拟「导入」：经 migrate 抬升 schema，再 validate
+        const migLib = migrateTagLibrary(exportedLib, 0);
+        assert.equal(migLib.ok, true);
+        const checkedLib = validateTagLibrary(migLib.value);
+        assert.equal(checkedLib.ok, true);
+        assert.equal(checkedLib.value.name, '场景');
+        assert.equal(checkedLib.value.active, true);
+        assert.equal(checkedLib.value.schemaVersion, TAG_SCHEMA_VERSION);
+
+        const migEntry = migrateTagEntry(exportedEntry, 0);
+        assert.equal(migEntry.ok, true);
+        const checkedEntry = validateTagEntry(migEntry.value);
+        assert.equal(checkedEntry.ok, true);
+        assert.equal(checkedEntry.value.key, '雨夜');
+        assert.equal(checkedEntry.value.value, 'rainy night, wet street');
+        assert.equal(checkedEntry.value.libraryId, lib.id);
+        assert.equal(checkedEntry.value.schemaVersion, TAG_SCHEMA_VERSION);
+
+        // 缺关键字段的导入必须失败（不能静默变成可用条目）
+        const bad = migrateTagEntry({ libraryId: 'l', key: '', value: 'x' }, 0);
+        assert.equal(bad.ok, true); // migrate 只抬 schema
+        assert.equal(validateTagEntry(bad.value).ok, false);
     });
 });
 

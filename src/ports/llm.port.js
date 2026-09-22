@@ -23,6 +23,7 @@ import { requireArg } from '../infra/validate.js';
  * @property {LlmApiConfig} config
  * @property {object} [jsonSchema] 结构化输出 schema；中转不支持时由适配器容错解析
  * @property {AbortSignal} [signal]
+ * @property {string} [traceId] 链路追踪 id（裁决 D14）；与同一次写 slot 的另一次 LLM / 后续 NAI 共用
  */
 
 /**
@@ -33,6 +34,16 @@ import { requireArg } from '../infra/validate.js';
 
 /**
  * @typedef {import('./image-gen.port.js').TransportProbeResult} TransportProbeResult
+ */
+
+/**
+ * LLM 网关工厂依赖（裁决 D19）。实现见 `adapters/llm/llm.gateway.js`。
+ *
+ * @typedef {object} LlmGatewayDeps
+ * @property {Record<string, { complete: Function }>} transports
+ * @property {(text: string) => import('../infra/result.js').Ok<any>|import('../infra/result.js').Err<import('../infra/errors.js').AppError>} [extractJson]
+ * @property {number} [maxAttempts] 上游可重试错误的最大尝试次数；缺省由实现定（通常 3）
+ * @property {(ms: number) => Promise<void>} [sleep] 可注入睡眠（单测用假时钟）；缺省用真实延迟
  */
 
 /**
