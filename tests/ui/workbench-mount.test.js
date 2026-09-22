@@ -171,6 +171,106 @@ describe('ui/workbench mountWorkbench', () => {
     /**
      * @param {Element} root
      * @param {string} label
+     * @param {boolean} checked
+     */
+    function setCheckboxByLabel(root, label, checked) {
+        /** @type {any[]} */
+        const stack = [root];
+        while (stack.length) {
+            const node = stack.pop();
+            if (!node) continue;
+            const cls = String(node.className || '');
+            if (cls.includes('nd-checkbox-row') || cls.includes('nd-toggle-row')) {
+                const text = [...(node.childNodes || [])]
+                    .map((c) => String(c.textContent || ''))
+                    .join('');
+                if (text.includes(label)) {
+                    const input = (node.childNodes || []).find(
+                        (c) => c && String(c.tagName).toUpperCase() === 'INPUT',
+                    );
+                    assert.ok(input, `checkbox input missing for ${label}`);
+                    input.checked = checked;
+                    const change = (input._listeners || []).find((l) => l.type === 'change');
+                    change?.fn();
+                    return;
+                }
+            }
+            if (Array.isArray(node.childNodes)) {
+                for (const c of node.childNodes) stack.push(c);
+            }
+        }
+        throw new Error(`checkbox not found: ${label}`);
+    }
+
+    /**
+     * @param {Element} root
+     * @param {string} label
+     * @param {string|number} value
+     */
+    function setNumberByLabel(root, label, value) {
+        /** @type {any[]} */
+        const stack = [root];
+        while (stack.length) {
+            const node = stack.pop();
+            if (!node) continue;
+            if (String(node.className || '').includes('nd-field')) {
+                const labelEl = (node.childNodes || []).find(
+                    (c) => c && String(c.className || '').includes('nd-field__label'),
+                );
+                if (labelEl && String(labelEl.textContent || '') === label) {
+                    const input = (node.childNodes || []).find(
+                        (c) => c && String(c.tagName).toUpperCase() === 'INPUT',
+                    );
+                    assert.ok(input, `number input missing for ${label}`);
+                    input.value = String(value);
+                    const handler = (input._listeners || []).find((l) => l.type === 'input');
+                    handler?.fn();
+                    return;
+                }
+            }
+            if (Array.isArray(node.childNodes)) {
+                for (const c of node.childNodes) stack.push(c);
+            }
+        }
+        throw new Error(`number field not found: ${label}`);
+    }
+
+    /**
+     * @param {Element} root
+     * @param {string} label
+     * @param {string} value
+     */
+    function setSelectByLabel(root, label, value) {
+        /** @type {any[]} */
+        const stack = [root];
+        while (stack.length) {
+            const node = stack.pop();
+            if (!node) continue;
+            if (String(node.className || '').includes('nd-field')) {
+                const labelEl = (node.childNodes || []).find(
+                    (c) => c && String(c.className || '').includes('nd-field__label'),
+                );
+                if (labelEl && String(labelEl.textContent || '') === label) {
+                    const select = (node.childNodes || []).find(
+                        (c) => c && String(c.tagName).toUpperCase() === 'SELECT',
+                    );
+                    assert.ok(select, `select missing for ${label}`);
+                    select.value = String(value);
+                    const handler = (select._listeners || []).find((l) => l.type === 'change');
+                    handler?.fn();
+                    return;
+                }
+            }
+            if (Array.isArray(node.childNodes)) {
+                for (const c of node.childNodes) stack.push(c);
+            }
+        }
+        throw new Error(`select not found: ${label}`);
+    }
+
+    /**
+     * @param {Element} root
+     * @param {string} label
      * @returns {any}
      */
     function findButton(root, label) {
@@ -333,5 +433,36 @@ describe('ui/workbench mountWorkbench', () => {
         assert.ok(findButton(ctx2.root, '写提示词'));
         assert.ok(findButton(ctx2.root, '出图'));
         ctx2.handle.destroy();
+    });
+
+    it('D47: Variety / 透明底 / qualityStrategy 经 readParams 透传给出图', async () => {
+        const ctx = mount();
+        setCheckboxByLabel(ctx.root, '启用 Variety（skip_cfg_above_sigma）', true);
+        setNumberByLabel(ctx.root, 'skip_cfg_above_sigma', 19);
+        setCheckboxByLabel(ctx.root, 'tag_hint_transparent_background', true);
+        setSelectByLabel(ctx.root, 'qualityStrategy', 'caption');
+
+        await clickButton(ctx.root, '出图');
+        await new Promise((r) => setTimeout(r, 0));
+
+        assert.equal(ctx.genCalls.length, 1);
+        const params = ctx.genCalls[0].params;
+        assert.equal(params.skip_cfg_above_sigma, 19);
+        assert.equal(params.tag_hint_transparent_background, true);
+        assert.equal(params.qualityStrategy, 'caption');
+        assert.equal(params.n_samples, defaultNaiParams().n_samples);
+        assert.equal(params.model, defaultNaiParams().model);
+        ctx.handle.destroy();
+    });
+
+    it('D52: 双实例各自出图互不串扰（无 document 级定位）', async () => {
+        const a = mount();
+        const b = mount();
+        await clickButton(b.root, '出图');
+        await new Promise((r) => setTimeout(r, 0));
+        assert.equal(a.genCalls.length, 0, '实例 A 不应被 B 的点击触发');
+        assert.equal(b.genCalls.length, 1);
+        a.handle.destroy();
+        b.handle.destroy();
     });
 });

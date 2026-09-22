@@ -21,13 +21,14 @@ import {
     createInlineError,
     createStatusPill,
 } from '../common/controls.js';
-import { emptyNaiCaption } from '../../domain/model/nai-params.js';
+import { defaultNaiParams, emptyNaiCaption } from '../../domain/model/nai-params.js';
 import { mountCaptionEditor } from './caption-editor.js';
 import {
     buildWritePromptInput,
     buildGenerateImageInput,
     createDecoupledWorkbenchApi,
     resolveSessionParams,
+    assembleWorkbenchNaiParams,
     formatUnmatchedKeys,
     isWorkbenchAbort,
     workbenchErrorMessage,
@@ -187,28 +188,58 @@ export function mountWorkbench(root, deps) {
         checked: false,
     });
 
-    const model = createField({ label: '模型', value: sessionParams.model });
+    // 4.13 控件：默认值一律取自 domain（与 trigger-panel 选型对齐，D47）
+    const defaults = defaultNaiParams();
+    const model = createField({
+        label: '模型',
+        value: String(sessionParams.model ?? defaults.model),
+    });
     const width = createNumberField({
-        label: '宽', value: sessionParams.width, min: 64, max: 4096, step: 64,
+        label: '宽',
+        value: Number(sessionParams.width ?? defaults.width),
+        min: 64,
+        max: 2048,
+        step: 64,
     });
     const height = createNumberField({
-        label: '高', value: sessionParams.height, min: 64, max: 4096, step: 64,
+        label: '高',
+        value: Number(sessionParams.height ?? defaults.height),
+        min: 64,
+        max: 2048,
+        step: 64,
     });
     const steps = createNumberField({
-        label: 'steps', value: sessionParams.steps, min: 1, max: 50, step: 1,
+        label: 'steps',
+        value: Number(sessionParams.steps ?? defaults.steps),
+        min: 1,
+        max: 50,
+        step: 1,
     });
     const scale = createNumberField({
-        label: 'scale', value: sessionParams.scale, min: 0, max: 10, step: 0.1,
+        label: 'scale',
+        value: Number(sessionParams.scale ?? defaults.scale),
+        min: 0,
+        max: 10,
+        step: 0.1,
     });
-    const sampler = createField({ label: 'sampler', value: sessionParams.sampler });
+    const sampler = createField({
+        label: 'sampler',
+        value: String(sessionParams.sampler ?? defaults.sampler),
+    });
     const noise = createField({
-        label: 'noise_schedule', value: sessionParams.noise_schedule,
+        label: 'noise_schedule',
+        value: String(sessionParams.noise_schedule ?? defaults.noise_schedule),
     });
     const seed = createNumberField({
-        label: 'seed', value: sessionParams.seed, min: 0, max: 4294967295, step: 1,
+        label: 'seed',
+        value: Number(sessionParams.seed ?? defaults.seed),
+        min: 0,
+        max: 4294967295,
+        step: 1,
     });
     const seedRandom = createCheckbox({
-        label: '随机 seed', checked: sessionParams.seedRandom !== false,
+        label: '随机 seed',
+        checked: sessionParams.seedRandom !== false,
     });
     const imageFormat = createSelect({
         label: '图片格式',
@@ -219,29 +250,71 @@ export function mountWorkbench(root, deps) {
         ],
     });
     const qualityToggle = createCheckbox({
-        label: 'qualityToggle', checked: sessionParams.qualityToggle !== false,
+        label: 'qualityToggle',
+        checked: sessionParams.qualityToggle !== false,
     });
     const tagHintQt = createCheckbox({
-        label: 'tag_hint_qt', checked: sessionParams.tag_hint_qt !== false,
+        label: 'tag_hint_qt',
+        checked: sessionParams.tag_hint_qt !== false,
     });
     const ucPreset = createNumberField({
-        label: 'ucPreset', value: sessionParams.ucPreset ?? 0, min: 0, max: 10, step: 1,
+        label: 'ucPreset',
+        value: Number(sessionParams.ucPreset ?? defaults.ucPreset),
+        min: 0,
+        max: 10,
+        step: 1,
     });
     const tagHintUc = createCheckbox({
-        label: 'tag_hint_uc_preset', checked: sessionParams.tag_hint_uc_preset !== false,
+        label: 'tag_hint_uc_preset',
+        checked: sessionParams.tag_hint_uc_preset !== false,
     });
     const cfgRescale = createNumberField({
-        label: 'cfg_rescale', value: sessionParams.cfg_rescale ?? 0, min: 0, max: 1, step: 0.01,
+        label: 'cfg_rescale',
+        value: Number(sessionParams.cfg_rescale ?? defaults.cfg_rescale),
+        min: 0,
+        max: 1,
+        step: 0.01,
     });
-    const sm = createCheckbox({ label: 'SMEA (sm)', checked: sessionParams.sm === true });
-    const smDyn = createCheckbox({ label: 'sm_dyn', checked: sessionParams.sm_dyn === true });
+    const varietyEnabled = createCheckbox({
+        label: '启用 Variety（skip_cfg_above_sigma）',
+        checked: sessionParams.skip_cfg_above_sigma != null,
+    });
+    const varietySigma = createNumberField({
+        label: 'skip_cfg_above_sigma',
+        value: sessionParams.skip_cfg_above_sigma == null
+            ? 0
+            : Number(sessionParams.skip_cfg_above_sigma),
+        min: 0,
+        max: 100,
+        step: 0.1,
+    });
+    const sm = createCheckbox({
+        label: 'sm（SMEA）',
+        checked: sessionParams.sm === true,
+    });
+    const smDyn = createCheckbox({
+        label: 'sm_dyn',
+        checked: sessionParams.sm_dyn === true,
+    });
     const straightAlpha = createCheckbox({
-        label: '透明底 (straight_alpha)', checked: sessionParams.straight_alpha === true,
+        label: 'straight_alpha',
+        checked: sessionParams.straight_alpha === true,
+    });
+    const tagHintTransparent = createCheckbox({
+        label: 'tag_hint_transparent_background',
+        checked: sessionParams.tag_hint_transparent_background === true,
+    });
+    const qualityStrategy = createSelect({
+        label: 'qualityStrategy',
+        value: sessionParams.qualityStrategy === 'caption' ? 'caption' : 'field',
+        options: [
+            { value: 'field', label: 'field' },
+            { value: 'caption', label: 'caption' },
+        ],
     });
 
     function readParams() {
-        return {
-            ...sessionParams,
+        return assembleWorkbenchNaiParams(sessionParams, {
             model: model.getValue(),
             width: width.getValue(),
             height: height.getValue(),
@@ -257,11 +330,14 @@ export function mountWorkbench(root, deps) {
             ucPreset: ucPreset.getValue(),
             tag_hint_uc_preset: tagHintUc.getValue(),
             cfg_rescale: cfgRescale.getValue(),
+            varietyEnabled: varietyEnabled.getValue(),
+            skip_cfg_above_sigma: varietySigma.getValue(),
             sm: sm.getValue(),
             sm_dyn: smDyn.getValue(),
             straight_alpha: straightAlpha.getValue(),
-            n_samples: 1,
-        };
+            tag_hint_transparent_background: tagHintTransparent.getValue(),
+            qualityStrategy: qualityStrategy.getValue(),
+        });
     }
 
     /** @type {AbortController|null} */
@@ -488,7 +564,9 @@ export function mountWorkbench(root, deps) {
             sampler.el, noise.el, seed.el, seedRandom.el,
             imageFormat.el, qualityToggle.el, tagHintQt.el,
             ucPreset.el, tagHintUc.el, cfgRescale.el,
-            sm.el, smDyn.el, straightAlpha.el,
+            varietyEnabled.el, varietySigma.el,
+            sm.el, smDyn.el, straightAlpha.el, tagHintTransparent.el,
+            qualityStrategy.el,
         ],
     });
 
@@ -548,9 +626,13 @@ export function mountWorkbench(root, deps) {
             ucPreset.destroy();
             tagHintUc.destroy();
             cfgRescale.destroy();
+            varietyEnabled.destroy();
+            varietySigma.destroy();
             sm.destroy();
             smDyn.destroy();
             straightAlpha.destroy();
+            tagHintTransparent.destroy();
+            qualityStrategy.destroy();
             paramsDetails.destroy();
             writeSection.destroy();
             captionSection.destroy();

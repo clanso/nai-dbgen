@@ -154,6 +154,54 @@ export function roundTripCaption(caption) {
 }
 
 /**
+ * 工作台有独立控件的 4.13 键（与 assembleWorkbenchNaiParams / 页面控件一一对应）。
+ * 领域层 defaultNaiParams 新增键时，覆盖度测例会失败，提醒补控件或进 FIXED 白名单。
+ * @type {readonly string[]}
+ */
+export const WORKBENCH_EDITABLE_NAI_KEYS = Object.freeze([
+    'model',
+    'width',
+    'height',
+    'steps',
+    'scale',
+    'sampler',
+    'noise_schedule',
+    'seed',
+    'seedRandom',
+    'image_format',
+    'qualityToggle',
+    'tag_hint_qt',
+    'ucPreset',
+    'tag_hint_uc_preset',
+    'cfg_rescale',
+    'skip_cfg_above_sigma',
+    'sm',
+    'sm_dyn',
+    'straight_alpha',
+    'tag_hint_transparent_background',
+    'qualityStrategy',
+]);
+
+/**
+ * 故意不提供自由改控件的 domain 键 → 理由。
+ * @type {Readonly<Record<string, string>>}
+ */
+export const WORKBENCH_FIXED_NAI_KEYS = Object.freeze({
+    schemaVersion: 'schema 元数据，随 domain 默认写入，不提供改控件',
+    n_samples: '需求 4.13 固定为 1；工作台按次出图不改张数',
+});
+
+/**
+ * @returns {string[]} domain 有、但既不在可改列表也不在 FIXED 白名单的键
+ */
+export function uncoveredNaiParamKeys() {
+    const domainKeys = Object.keys(defaultNaiParams());
+    const editable = new Set(WORKBENCH_EDITABLE_NAI_KEYS);
+    const fixed = new Set(Object.keys(WORKBENCH_FIXED_NAI_KEYS));
+    return domainKeys.filter((k) => !editable.has(k) && !fixed.has(k));
+}
+
+/**
  * 从设置取本次出图参数默认值（禁止魔法数，一律走 domain）。
  * @param {object} [settings]
  * @returns {NaiParams}
@@ -167,6 +215,52 @@ export function resolveSessionParams(settings) {
         return normalizeNaiParams({ ...base, ...fromSettings });
     }
     return normalizeNaiParams(base);
+}
+
+/**
+ * 把页面表单值收成一次出图用的 NaiParams（D47）。
+ * Variety：`varietyEnabled === false` → `skip_cfg_above_sigma: null`；开启则读数值。
+ *
+ * @param {NaiParams|object} base resolveSessionParams 结果
+ * @param {object} form 控件当前值
+ * @returns {NaiParams}
+ */
+export function assembleWorkbenchNaiParams(base, form) {
+    const defaults = defaultNaiParams();
+    const b = base && typeof base === 'object' ? base : defaults;
+    const f = form && typeof form === 'object' ? form : {};
+    const varietyOn = f.varietyEnabled === true;
+    const sigmaRaw = f.skip_cfg_above_sigma;
+    const skipCfg = varietyOn && sigmaRaw != null && Number.isFinite(Number(sigmaRaw))
+        ? Number(sigmaRaw)
+        : null;
+
+    return normalizeNaiParams({
+        ...b,
+        model: f.model != null ? String(f.model) : b.model,
+        width: f.width != null ? Number(f.width) : b.width,
+        height: f.height != null ? Number(f.height) : b.height,
+        steps: f.steps != null ? Number(f.steps) : b.steps,
+        scale: f.scale != null ? Number(f.scale) : b.scale,
+        sampler: f.sampler != null ? String(f.sampler) : b.sampler,
+        noise_schedule: f.noise_schedule != null ? String(f.noise_schedule) : b.noise_schedule,
+        seed: f.seed != null ? Number(f.seed) : b.seed,
+        seedRandom: f.seedRandom !== false,
+        image_format: f.image_format === 'webp' ? 'webp' : 'png',
+        qualityToggle: f.qualityToggle !== false,
+        tag_hint_qt: f.tag_hint_qt !== false,
+        ucPreset: f.ucPreset != null ? Number(f.ucPreset) : b.ucPreset,
+        tag_hint_uc_preset: f.tag_hint_uc_preset !== false,
+        cfg_rescale: f.cfg_rescale != null ? Number(f.cfg_rescale) : b.cfg_rescale,
+        skip_cfg_above_sigma: skipCfg,
+        sm: f.sm === true,
+        sm_dyn: f.sm_dyn === true,
+        straight_alpha: f.straight_alpha === true,
+        tag_hint_transparent_background: f.tag_hint_transparent_background === true,
+        qualityStrategy: f.qualityStrategy === 'caption' ? 'caption' : 'field',
+        n_samples: defaults.n_samples,
+        schemaVersion: defaults.schemaVersion,
+    });
 }
 
 /**

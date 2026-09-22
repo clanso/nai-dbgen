@@ -1,6 +1,6 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { createSillyTavernHost, PLUGIN_NS } from '../../src/adapters/host/sillytavern.host.js';
+import { createSillyTavernHost, PLUGIN_NS, ND_ROOT_CLASS, SETTINGS_DRAWER_ID } from '../../src/adapters/host/sillytavern.host.js';
 import { defaultPluginSettings } from '../../src/domain/model/plugin-settings.js';
 import { assertHostPort } from '../../src/ports/host.port.js';
 import { isOk } from '../../src/infra/result.js';
@@ -148,6 +148,23 @@ describe('sillytavern.host HostPort', () => {
         host.dispose();
     });
 
+    it('D38 回翻 MESSAGE_SWIPED 不触发 settled；RENDERED 仍触发', () => {
+        const ctx = makeFakeContext();
+        ctx.eventTypes.MESSAGE_SWIPED = 'message_swiped';
+        const host = createSillyTavernHost({ getContext: () => ctx });
+        const settled = [];
+        host.onAiMessageSettled((id) => settled.push(id));
+
+        // 回翻已有 swipe（与新生成 overs wipe 共用同一事件，无法区分）
+        ctx.eventSource.emit(ctx.eventTypes.MESSAGE_SWIPED, 2);
+        assert.deepEqual(settled, [], '浏览 swipe 不得触发 settled');
+
+        // 新 swipe 生成完成后仍走 CHARACTER_MESSAGE_RENDERED
+        ctx.eventSource.emit(ctx.eventTypes.CHARACTER_MESSAGE_RENDERED, 2, 'swipe');
+        assert.deepEqual(settled, [2]);
+        host.dispose();
+    });
+
     it('resolveWorldInfo 使用 scanInput（含人名）', async () => {
         const ctx = makeFakeContext();
         const host = createSillyTavernHost({ getContext: () => ctx });
@@ -174,29 +191,51 @@ describe('sillytavern.host HostPort', () => {
         host.dispose(); // 可重复
     });
 
-    it('D20 openModal 透传 wide/large/allowVerticalScrolling', async () => {
+    it('D20 openModal 透传 wide/large/allowVerticalScrolling；D52 挂 nd-root class', async () => {
         /** @type {object|null} */
         let seenOpts = null;
+        /** @type {object|null} */
+        let seenContent = null;
         const ctx = makeFakeContext();
         ctx.POPUP_TYPE = { DISPLAY: 4 };
-        ctx.callGenericPopup = async (_content, _type, _input, popupOpts) => {
+        ctx.callGenericPopup = async (content, _type, _input, popupOpts) => {
+            seenContent = content;
             seenOpts = popupOpts;
         };
 
         const prevDoc = globalThis.document;
         globalThis.document = {
             createElement(tag) {
+                const classes = new Set();
                 return {
                     id: '',
                     tagName: String(tag).toUpperCase(),
                     textContent: '',
+                    classList: {
+                        add(...names) {
+                            for (const n of names) {
+                                classes.add(n);
+                            }
+                        },
+                        contains(n) {
+                            return classes.has(n);
+                        },
+                    },
                     appendChild() {},
                 };
             },
         };
 
         const host = createSillyTavernHost({ getContext: () => ctx });
-        const el = { nodeType: 1 };
+        const el = {
+            nodeType: 1,
+            classList: {
+                add() {},
+                contains() {
+                    return false;
+                },
+            },
+        };
         await host.openModal({
             title: '小确认',
             element: el,
@@ -209,6 +248,8 @@ describe('sillytavern.host HostPort', () => {
             large: false,
             allowVerticalScrolling: false,
         });
+        assert.equal(seenContent?.classList?.contains(ND_ROOT_CLASS), true);
+        assert.notEqual(seenContent?.id, 'nai-dbgen-root');
 
         seenOpts = null;
         await host.openModal({
@@ -312,14 +353,14 @@ describe('sillytavern.host HostPort', () => {
         };
 
         host.mountSettingsPanel(panel);
-        assert.ok(drawers.has('nai-dbgen-settings-drawer'));
+        assert.ok(drawers.has(SETTINGS_DRAWER_ID));
 
         host.registerSlashCommand({ name: 'naidb', callback: () => 'a' });
         host.registerSlashCommand({ name: 'naidb', callback: () => 'b' });
         assert.equal(commands.naidb.callback(), 'b');
 
         host.dispose();
-        assert.equal(drawers.has('nai-dbgen-settings-drawer'), false);
+        assert.equal(drawers.has(SETTINGS_DRAWER_ID), false);
 
         globalThis.document = prevDoc;
     });

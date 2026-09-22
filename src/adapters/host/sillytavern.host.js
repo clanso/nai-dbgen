@@ -25,8 +25,11 @@ import {
 /** extension_settings / message.extra 命名空间（裁决 D8 / D12） */
 export const PLUGIN_NS = 'nai-dbgen';
 
-/** 设置抽屉 DOM id（dispose 必须移除，裁决 D28） */
+/** 设置抽屉 DOM id（dispose 必须移除，裁决 D28；单例保留 id） */
 export const SETTINGS_DRAWER_ID = 'nai-dbgen-settings-drawer';
+
+/** 作用域根 class（裁决 D52；可多实例并存，不用 id） */
+export const ND_ROOT_CLASS = 'nd-root';
 
 /**
  * @typedef {object} SillyTavernHostDeps
@@ -187,9 +190,11 @@ export function createSillyTavernHost(deps) {
             if (et.CHARACTER_MESSAGE_RENDERED) {
                 bindEvent(es, et.CHARACTER_MESSAGE_RENDERED, onSettled);
             }
-            if (et.MESSAGE_SWIPED) {
-                bindEvent(es, et.MESSAGE_SWIPED, onSettled);
-            }
+            // 裁决 D38：故意不接 MESSAGE_SWIPED。
+            // 回翻已有 swipe 与「overswipe 开新生成」都会 emit MESSAGE_SWIPED
+            //（script.js:10315），事件载荷只有 mesId，无法区分。
+            // 新 swipe 正文落定仍由 CHARACTER_MESSAGE_RENDERED 覆盖
+            //（非流式 script.js:6693；流式 :3800）。宁可少触发，不可浏览扣费。
             if (et.MESSAGE_UPDATED) {
                 bindEvent(es, et.MESSAGE_UPDATED, (messageId) => {
                     notifyDomReadyForMessage(Number(messageId));
@@ -508,6 +513,10 @@ export function createSillyTavernHost(deps) {
         },
 
         onAiMessageSettled(fn) {
+            // 仅封装 CHARACTER_MESSAGE_RENDERED（流式/非流式 AI 楼落定）。
+            // 不含 MESSAGE_SWIPED（裁决 D38）。回调签名仅 messageId；
+            // 当前激活 swipe 的正文/extra 已由酒馆 sync 进 chat[messageId]，
+            // 下游用 getMessage / readMessageExtra 读「当前展示的那一 swipe」。
             if (typeof fn !== 'function') {
                 return () => {};
             }
@@ -589,15 +598,15 @@ export function createSillyTavernHost(deps) {
             let content = element ?? '';
             if (element && title) {
                 const wrap = document.createElement('div');
-                wrap.id = 'nai-dbgen-root';
+                wrap.classList.add(ND_ROOT_CLASS);
                 const h = document.createElement('h3');
                 h.textContent = title;
                 wrap.appendChild(h);
                 wrap.appendChild(element);
                 content = wrap;
             } else if (element) {
-                if (element instanceof Element && !element.id) {
-                    element.id = 'nai-dbgen-root';
+                if (element instanceof Element) {
+                    element.classList.add(ND_ROOT_CLASS);
                 }
                 content = element;
             }

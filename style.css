@@ -1,1 +1,19 @@
-/* 插件根样式入口。归属：W3-J。W0 占位；正式样式由各 UI 分包维护。 */
+/**
+ * 插件根样式入口。归属：W3-J。
+ *
+ * 酒馆用 <link rel="stylesheet" href="…/style.css"> 加载（extensions.js addExtensionStyle）。
+ * 官方内置扩展已用 @import 聚合子样式，相对路径相对本 CSS 文件解析：
+ *   - public/scripts/extensions/tts/style.css → @import './css/minimax-tts.css'
+ *   - public/scripts/extensions/regex/style.css → @import "debugger.css"
+ * 因此无构建前提下 @import 可用；路径相对本文件（插件根）。
+ *
+ * D52：各分包选择器挂 :is(#nai-dbgen-root, .nd-root)；slot 控件另有独立命名空间。
+ * 本文件不写 :root / body / #chat / .mes。
+ */
+
+@import url('./src/ui/common/tokens.css');
+@import url('./src/ui/common/components.css');
+@import url('./src/ui/panels/panels.css');
+@import url('./src/ui/drawer/drawer.css');
+@import url('./src/ui/workbench/workbench.css');
+@import url('./src/ui/slot-widget/slot-widget.css');

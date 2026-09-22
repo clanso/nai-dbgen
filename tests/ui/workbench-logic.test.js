@@ -11,6 +11,10 @@ import {
     editorStateToCaption,
     roundTripCaption,
     resolveSessionParams,
+    assembleWorkbenchNaiParams,
+    WORKBENCH_EDITABLE_NAI_KEYS,
+    WORKBENCH_FIXED_NAI_KEYS,
+    uncoveredNaiParamKeys,
     buildWritePromptInput,
     buildGenerateImageInput,
     createDecoupledWorkbenchApi,
@@ -224,7 +228,10 @@ describe('ui/workbench logic · unmatchedKeys / 参数默认 / 取消 / XSS', ()
         assert.equal(resolved.height, domain.height);
         assert.equal(resolved.steps, domain.steps);
         assert.equal(resolved.sampler, domain.sampler);
-        assert.equal(resolved.n_samples, 1);
+        assert.equal(resolved.n_samples, domain.n_samples);
+        assert.equal(resolved.skip_cfg_above_sigma, domain.skip_cfg_above_sigma);
+        assert.equal(resolved.tag_hint_transparent_background, domain.tag_hint_transparent_background);
+        assert.equal(resolved.qualityStrategy, domain.qualityStrategy);
 
         const overridden = resolveSessionParams({
             naiParams: { width: 1024, steps: 20 },
@@ -242,13 +249,13 @@ describe('ui/workbench logic · unmatchedKeys / 参数默认 / 取消 / XSS', ()
         assert.equal(isWorkbenchAbort({ code: 'UPSTREAM_401', message: '鉴权失败' }), false);
     });
 
-    it('恶意图片 URL 被拦', () => {
+    it('恶意图片 URL 被拦；预览不依赖 SVG data', () => {
         assert.equal(gatePreviewUrl('javascript:alert(1)'), null);
         assert.equal(gatePreviewUrl('data:text/html,x'), null);
+        assert.equal(gatePreviewUrl('data:image/svg+xml,<svg></svg>'), null);
         assert.equal(gatePreviewUrl('https://cdn.example/a.png'), 'https://cdn.example/a.png');
         assert.ok(gatePreviewUrl('data:image/png;base64,abc'));
 
-        // 模拟危险 createObjectURL 返回值被二次门禁
         const fakeUrlApi = {
             createObjectURL() { return 'javascript:evil'; },
             revokeObjectURL() {},
@@ -258,5 +265,105 @@ describe('ui/workbench logic · unmatchedKeys / 参数默认 / 取消 / XSS', ()
             fakeUrlApi,
         );
         assert.equal(bad.url, null);
+    });
+});
+
+describe('ui/workbench logic · D47 4.13 全字段覆盖', () => {
+    it('defaultNaiParams 每个键要么可改要么在 FIXED 白名单（缺一失败）', () => {
+        const missing = uncoveredNaiParamKeys();
+        assert.deepEqual(
+            missing,
+            [],
+            `领域层有未覆盖键，请补控件或写入 WORKBENCH_FIXED_NAI_KEYS：${missing.join(', ')}`,
+        );
+
+        // 可改列表不得含 FIXED；FIXED 必须是 domain 真有的键
+        const domain = new Set(Object.keys(defaultNaiParams()));
+        for (const key of WORKBENCH_EDITABLE_NAI_KEYS) {
+            assert.ok(domain.has(key), `可改键不在 domain：${key}`);
+            assert.equal(
+                Object.prototype.hasOwnProperty.call(WORKBENCH_FIXED_NAI_KEYS, key),
+                false,
+                `键同时出现在可改与 FIXED：${key}`,
+            );
+        }
+        for (const key of Object.keys(WORKBENCH_FIXED_NAI_KEYS)) {
+            assert.ok(domain.has(key), `FIXED 白名单键不在 domain：${key}`);
+            assert.ok(
+                String(WORKBENCH_FIXED_NAI_KEYS[key]).trim().length > 0,
+                `FIXED 键缺少理由注释：${key}`,
+            );
+        }
+    });
+
+    it('assembleWorkbenchNaiParams 读到 Variety / 透明底 / qualityStrategy 等新增字段', () => {
+        const base = defaultNaiParams();
+        const off = assembleWorkbenchNaiParams(base, {
+            varietyEnabled: false,
+            skip_cfg_above_sigma: 19,
+            tag_hint_transparent_background: false,
+            qualityStrategy: 'field',
+            sm: false,
+            tag_hint_qt: true,
+        });
+        assert.equal(off.skip_cfg_above_sigma, null, '未启用 Variety → null');
+        assert.equal(off.tag_hint_transparent_background, false);
+        assert.equal(off.qualityStrategy, 'field');
+        assert.equal(off.n_samples, base.n_samples);
+        assert.equal(off.schemaVersion, base.schemaVersion);
+
+        const on = assembleWorkbenchNaiParams(base, {
+            model: 'nai-diffusion-5-full',
+            width: 1024,
+            height: 1536,
+            steps: 30,
+            scale: 6.5,
+            sampler: 'k_euler',
+            noise_schedule: 'native',
+            seed: 42,
+            seedRandom: false,
+            image_format: 'webp',
+            qualityToggle: false,
+            tag_hint_qt: false,
+            ucPreset: 2,
+            tag_hint_uc_preset: false,
+            cfg_rescale: 0.3,
+            varietyEnabled: true,
+            skip_cfg_above_sigma: 19,
+            sm: true,
+            sm_dyn: true,
+            straight_alpha: true,
+            tag_hint_transparent_background: true,
+            qualityStrategy: 'caption',
+        });
+        assert.equal(on.model, 'nai-diffusion-5-full');
+        assert.equal(on.width, 1024);
+        assert.equal(on.height, 1536);
+        assert.equal(on.steps, 30);
+        assert.equal(on.scale, 6.5);
+        assert.equal(on.sampler, 'k_euler');
+        assert.equal(on.noise_schedule, 'native');
+        assert.equal(on.seed, 42);
+        assert.equal(on.seedRandom, false);
+        assert.equal(on.image_format, 'webp');
+        assert.equal(on.qualityToggle, false);
+        assert.equal(on.tag_hint_qt, false);
+        assert.equal(on.ucPreset, 2);
+        assert.equal(on.tag_hint_uc_preset, false);
+        assert.equal(on.cfg_rescale, 0.3);
+        assert.equal(on.skip_cfg_above_sigma, 19);
+        assert.equal(on.sm, true);
+        assert.equal(on.sm_dyn, true);
+        assert.equal(on.straight_alpha, true);
+        assert.equal(on.tag_hint_transparent_background, true);
+        assert.equal(on.qualityStrategy, 'caption');
+
+        // 每个可改键都真的出现在组装结果里（与 domain 同名）
+        for (const key of WORKBENCH_EDITABLE_NAI_KEYS) {
+            assert.ok(
+                Object.prototype.hasOwnProperty.call(on, key),
+                `assemble 结果缺少可改键 ${key}`,
+            );
+        }
     });
 });
