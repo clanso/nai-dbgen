@@ -142,6 +142,28 @@ export function mountDrawer(root, deps) {
             (id) => patch({ promptGenLlmConfigId: id }),
         ));
     }
+    if (repos.preset) {
+        pickerHandles.push(addPicker(
+            '生图预设',
+            async () => {
+                const r = await repos.preset.list();
+                const items = r?.ok ? r.value : [];
+                return (items || []).filter((p) => p && p.kind === 'imagegen');
+            },
+            () => load().activeImagegenPresetId,
+            (id) => patch({ activeImagegenPresetId: id }),
+        ));
+        pickerHandles.push(addPicker(
+            '召回预设',
+            async () => {
+                const r = await repos.preset.list();
+                const items = r?.ok ? r.value : [];
+                return (items || []).filter((p) => p && p.kind === 'recall');
+            },
+            () => load().activeRecallPresetId,
+            (id) => patch({ activeRecallPresetId: id }),
+        ));
+    }
 
     const openBtn = createButton({
         label: '打开管理台',

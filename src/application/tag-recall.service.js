@@ -105,7 +105,9 @@ export function createTagRecallService(deps) {
                 .map((e) => e?.key)
                 .filter((k) => typeof k === 'string' && k.length > 0);
 
-            // 无候选：不调用 LLM
+            // 无候选：跳过召回 LLM（省钱）。
+            // 需求 L72「下限」+ §10#6「恰好两次」指有候选时的正常路径；
+            // 空列表仍打召回是零信息浪费。generateSlots.llmCallCount 此时为 1。
             if (candidateKeys.length === 0) {
                 return Ok({ matched: [], unmatched: [], llmCalled: false });
             }

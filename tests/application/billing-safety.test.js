@@ -1,11 +1,9 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { isOk, isErr, Ok, Err } from '../../src/infra/result.js';
-import { hostError } from '../../src/infra/errors.js';
+import { isOk, isErr, Ok } from '../../src/infra/result.js';
 import { APP_EVENTS } from '../../src/application/_helpers.js';
 import {
     buildPipeline,
-    createFakeHost,
     makeCaption,
 } from './_fakes.js';
 
@@ -236,51 +234,102 @@ describe('D42 recordImage fail then retry write-only', () => {
     });
 });
 
-describe('D41 concurrent generateSlots without mutating llm', () => {
-    it('two concurrent generateSlots keep independent llmCallCount', async () => {
-        const hostA = createFakeHost({ chatId: 'chat-a' });
-        hostA.byId.set(2, {
-            messageId: 2, name: 'B', text: 'Alice walked into the garden.',
-            isUser: false, isSystem: false,
-        });
-        const hostB = createFakeHost({ chatId: 'chat-b' });
-        hostB.byId.set(2, {
-            messageId: 2, name: 'B', text: 'Alice walked into the garden.',
-            isUser: false, isSystem: false,
-        });
-
-        const p1 = buildPipeline({ host: hostA });
-        const p2 = buildPipeline({ host: hostB });
-        // 共享同一 llm 对象以复现「改写 port」竞态
-        const sharedLlm = p1.llm;
-        p2.llm.complete = sharedLlm.complete.bind(sharedLlm);
-        // tagRecall 已闭包各自 llm；把 p2 的 tagRecall 也指到共享 complete
-        // 直接并发两路 generate（各自 tagRecall 绑定各自 pipeline 的 llm）
-        // 为严格测试：让两个 pipeline 用同一个 llm 引用
-        const pShared = buildPipeline();
-        const llm = pShared.llm;
-        const q1 = buildPipeline();
-        const q2 = buildPipeline();
-        // 重建 usecase 共享 llm — 简化：连续并发同一 pipeline 两次
-        const [r1, r2] = await Promise.all([
-            pShared.generateSlots.execute(2),
-            pShared.generateSlots.execute(2),
-        ]);
-        assert.equal(isOk(r1), true, r1.ok ? '' : r1.error?.message);
-        assert.equal(isOk(r2), true, r2.ok ? '' : r2.error?.message);
-        assert.equal(r1.value.llmCallCount, 2);
-        assert.equal(r2.value.llmCallCount, 2);
-        // 共享 llm.complete 未被改写成残缺包装
-        assert.equal(typeof llm.complete, 'function');
-        const probe = await llm.complete({
-            messages: [{ role: 'user', content: 'x' }],
-            config: {
-                schemaVersion: 1, id: 'llm-prompt', name: 'p',
-                baseUrl: 'https://x', apiKey: 'k', model: 'm', transport: 'direct',
+describe('D54 write gate — single LLM for concurrent generateSlots', () => {
+    it('same floor concurrent → total two LLM calls, shared result', async () => {
+        let release;
+        const gate = new Promise((r) => { release = r; });
+        let llmStarts = 0;
+        const p = buildPipeline({
+            llmComplete: async (req) => {
+                llmStarts += 1;
+                await gate;
+                if (req.config.id === 'llm-recall') {
+                    return Ok({ text: '[]', json: ['garden'] });
+                }
+                return Ok({
+                    text: '[]',
+                    json: [{
+                        slotid: 1,
+                        生成点: 'Alice walked into the garden.',
+                        生图内容: makeCaption('scene'),
+                    }],
+                });
             },
         });
-        assert.equal(isOk(probe) || isErr(probe), true);
-        void q1; void q2; void p1; void p2;
+
+        const a = p.generateSlots.execute(2);
+        assert.equal(p.generateSlots.isWriting(2), true);
+        const b = p.generateSlots.execute(2);
+        release();
+        const [r1, r2] = await Promise.all([a, b]);
+        assert.equal(isOk(r1), true, r1.ok ? '' : r1.error?.message);
+        assert.equal(isOk(r2), true, r2.ok ? '' : r2.error?.message);
+        assert.equal(r1.value, r2.value, 'must share the same result object');
+        assert.equal(r1.value.llmCallCount, 2);
+        assert.equal(llmStarts, 2, 'concurrent same floor must bill LLM exactly twice total');
+        assert.equal(p.generateSlots.isWriting(2), false);
+    });
+
+    it('auto-write + manual concurrent on same floor → still two LLM', async () => {
+        let release;
+        const gate = new Promise((r) => { release = r; });
+        let llmStarts = 0;
+        const p = buildPipeline({
+            llmComplete: async (req) => {
+                llmStarts += 1;
+                await gate;
+                if (req.config.id === 'llm-recall') {
+                    return Ok({ text: '[]', json: ['garden'] });
+                }
+                return Ok({
+                    text: '[]',
+                    json: [{
+                        slotid: 1,
+                        生成点: 'Alice walked into the garden.',
+                        生图内容: makeCaption('scene'),
+                    }],
+                });
+            },
+        });
+        p.patchSettings({ autoWriteSlots: true, autoRenderSlots: false });
+        p.autoTrigger.start();
+
+        const written = waitForEvent(p.bus, APP_EVENTS.SLOTS_WRITTEN);
+        p.host.emitSettled(2);
+        for (let i = 0; i < 40 && !p.generateSlots.isWriting(2); i += 1) {
+            await new Promise((r) => setImmediate(r));
+        }
+        assert.equal(p.generateSlots.isWriting(2), true, 'auto path should hold write lock');
+        const manual = p.generateSlots.execute(2);
+        release();
+        await Promise.all([written, manual]);
+        assert.equal(llmStarts, 2, 'auto+manual must not double-bill LLM');
+    });
+});
+
+describe('D41 concurrent generateSlots on different floors without mutating llm', () => {
+    it('two different floors concurrent keep llm.complete identity and each bill twice', async () => {
+        const p = buildPipeline();
+        p.host.byId.set(3, {
+            messageId: 3,
+            name: 'B',
+            text: 'Alice walked into the garden.',
+            isUser: false,
+            isSystem: false,
+        });
+        // contextCollector 读 host 窗口；确保 3 也能走通
+        const completeBefore = p.llm.complete;
+        const [r2, r3] = await Promise.all([
+            p.generateSlots.execute(2),
+            p.generateSlots.execute(3),
+        ]);
+        assert.equal(isOk(r2), true, r2.ok ? '' : r2.error?.message);
+        assert.equal(isOk(r3), true, r3.ok ? '' : r3.error?.message);
+        assert.equal(r2.value.llmCallCount, 2);
+        assert.equal(r3.value.llmCallCount, 2);
+        assert.equal(p.llm.complete, completeBefore, 'must not wrap/replace shared llm.complete');
+        // 不同楼各跑一轮 → 合计 4 次 LLM
+        assert.equal(p.llmCalls.length, 4);
     });
 });
 

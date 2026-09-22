@@ -9,7 +9,7 @@ import { paintSafeCover } from '../../common/safe-url.js';
 import { createArtist } from '../../../domain/model/artist.js';
 import { ARTIST_PREVIEW_SIZE } from '../../../domain/model/nai-params.js';
 import { mountLibraryView } from '../library-view.js';
-import { buildArtistPreviewRequest, gateCoverUrl, applyFormFields } from '../_lib/library-logic.js';
+import { buildArtistPreviewRequest, gateCoverUrl, applyFormFields, paidActionLabels, formatErrorDisplay } from '../_lib/library-logic.js';
 import {
     el,
     setText,
@@ -21,6 +21,7 @@ import {
     openFormModal,
     awaitRepo,
     toast,
+    runExclusivePaidAction,
 } from '../_lib/panel-kit.js';
 
 /**
@@ -169,8 +170,9 @@ export function mountArtistPanel(root, deps) {
             },
         });
 
+        const previewLabels = paidActionLabels('artistPreview');
         const previewBtn = createButton({
-            label: '手填预览生图',
+            label: previewLabels.idle,
             variant: 'primary',
             onClick: async () => {
                 err.clear();
@@ -178,33 +180,41 @@ export function mountArtistPanel(root, deps) {
                     err.setMessage('预览服务未装配');
                     return;
                 }
-                const draft = await persistDraft();
-                if (!draft) return;
 
-                // D9 / D46：只用编辑中的那条；完全不读不写 activeArtistId
-                const req = buildArtistPreviewRequest(draft, {
-                    promptText: promptField.getValue(),
-                    negativeText: negPreview.getValue(),
-                    saveAsPreview: true,
+                await runExclusivePaidAction({
+                    button: previewBtn,
+                    idleLabel: previewLabels.idle,
+                    busyLabel: previewLabels.busy,
+                    run: async () => {
+                        const draft = await persistDraft();
+                        if (!draft) return;
+
+                        // D9 / D46：只用编辑中的那条；完全不读不写 activeArtistId
+                        const req = buildArtistPreviewRequest(draft, {
+                            promptText: promptField.getValue(),
+                            negativeText: negPreview.getValue(),
+                            saveAsPreview: true,
+                        });
+
+                        const result = await previewSvc.preview({
+                            artistId: req.artistId,
+                            promptText: req.promptText,
+                            negativeText: req.negativeText,
+                            saveAsPreview: req.saveAsPreview,
+                        });
+
+                        if (!result?.ok) {
+                            err.setMessage(formatErrorDisplay(result?.error, '预览失败'));
+                            return;
+                        }
+                        toast(host, 'success', '预览已生成');
+                        const url = result.value?.imageRef
+                            ? await resolveCover(result.value.imageRef)
+                            : null;
+                        if (url) paintSafeCover(coverBox, url, draft.name);
+                        await view?.refresh();
+                    },
                 });
-
-                const result = await previewSvc.preview({
-                    artistId: req.artistId,
-                    promptText: req.promptText,
-                    negativeText: req.negativeText,
-                    saveAsPreview: req.saveAsPreview,
-                });
-
-                if (!result?.ok) {
-                    err.setMessage(result?.error?.message || '预览失败');
-                    return;
-                }
-                toast(host, 'success', '预览已生成');
-                const url = result.value?.imageRef
-                    ? await resolveCover(result.value.imageRef)
-                    : null;
-                if (url) paintSafeCover(coverBox, url, draft.name);
-                await view?.refresh();
             },
         });
 

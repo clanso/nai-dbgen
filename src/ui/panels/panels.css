@@ -156,3 +156,9 @@
     align-items: center;
     gap: 8px;
 }
+
+:is(#nai-dbgen-root, .nd-root) .nd-button.is-busy,
+:is(#nai-dbgen-root, .nd-root) .nd-button:disabled {
+    opacity: 0.65;
+    cursor: not-allowed;
+}

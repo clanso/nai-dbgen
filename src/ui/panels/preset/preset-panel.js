@@ -266,7 +266,7 @@ export function mountPresetPanel(root, deps) {
                             { id: ids.id('pr'), now: ids.now() },
                         );
                         if (!imported.ok) {
-                            modal.setError(imported.error.message);
+                            modal.setError(imported.error);
                             return;
                         }
                         nameField.setValue(imported.value.name);

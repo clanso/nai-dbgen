@@ -9,7 +9,7 @@ import { mountImportExport } from '../../common/import-export.js';
 import { mergePluginSettings } from '../../../domain/model/plugin-settings.js';
 import { newId } from '../../../infra/id.js';
 import { nowIso } from '../../../infra/clock.js';
-import { prepareImportCommit, pickAllowedSettingsPatch } from './library-logic.js';
+import { prepareImportCommit, pickAllowedSettingsPatch, formatErrorDisplay } from './library-logic.js';
 
 /**
  * @param {string} tag
@@ -31,15 +31,12 @@ export function setText(node, text) {
 }
 
 /**
- * @param {{ ok: boolean, value?: unknown, error?: { message?: string } }} result
+ * @param {{ ok: boolean, value?: unknown, error?: { message?: string, hint?: string } }} result
  * @returns {unknown}
  */
 export function unwrapOrThrow(result) {
     if (result && result.ok) return result.value;
-    const msg = result?.error?.message != null
-        ? String(result.error.message)
-        : '操作失败';
-    throw new Error(msg);
+    throw new Error(formatErrorDisplay(result?.error, '操作失败'));
 }
 
 /**
@@ -51,6 +48,17 @@ export function toast(host, level, message) {
     if (host && typeof host.toast === 'function') {
         host.toast(level, message);
     }
+}
+
+/**
+ * D58：把 Result / AppError / 普通 Error 收成带 hint 的展示文案后 toast。
+ * @param {object} [host]
+ * @param {'info'|'success'|'warning'|'error'} level
+ * @param {unknown} errOrMessage
+ * @param {string} [fallback]
+ */
+export function toastError(host, errOrMessage, fallback = '操作失败') {
+    toast(host, 'error', formatErrorDisplay(errOrMessage, fallback));
 }
 
 /**
@@ -223,7 +231,7 @@ export async function openImportExportModal(deps, title, expectedKind, importJso
                 toast(deps?.host, 'success', '导入完成');
                 return result;
             } catch (e) {
-                const msg = e instanceof Error ? e.message : String(e);
+                const msg = formatErrorDisplay(e, '导入失败');
                 err.setMessage(msg);
                 throw e;
             }
@@ -275,7 +283,7 @@ export async function openFormModal(deps, title, formEl) {
             modal.destroy();
         },
         setError(msg) {
-            err.setMessage(msg);
+            err.setMessage(formatErrorDisplay(msg, ''));
         },
     };
 }
@@ -292,9 +300,9 @@ export function paintEmpty(host, title, description) {
 }
 
 /**
- * Result 仓储调用 → 失败 toast。
+ * Result 仓储调用 → 失败 toast（含 hint）。
  * @param {object} [host]
- * @param {Promise<{ ok: boolean, value?: any, error?: { message?: string } }>} promise
+ * @param {Promise<{ ok: boolean, value?: any, error?: { message?: string, hint?: string } }>} promise
  * @param {string} [fallback]
  * @returns {Promise<any|null>}
  */
@@ -302,12 +310,51 @@ export async function awaitRepo(host, promise, fallback = '操作失败') {
     try {
         const r = await promise;
         if (r && r.ok) return r.value;
-        const msg = r?.error?.message != null ? String(r.error.message) : fallback;
-        toast(host, 'error', msg);
+        toastError(host, r?.error, fallback);
         return null;
     } catch (e) {
-        toast(host, 'error', e instanceof Error ? e.message : String(e));
+        toastError(host, e, fallback);
         return null;
+    }
+}
+
+/**
+ * D55：付费按钮互斥执行。进行中禁用 + 文案反馈；结束（成功/失败/取消）后恢复。
+ * @param {object} opts
+ * @param {HTMLButtonElement} opts.button
+ * @param {string} opts.idleLabel
+ * @param {string} opts.busyLabel
+ * @param {() => Promise<unknown>} opts.run
+ * @returns {Promise<{ started: boolean, value?: unknown }>}
+ */
+export async function runExclusivePaidAction(opts) {
+    const button = opts?.button;
+    if (!(button instanceof HTMLButtonElement) && !(button && button.tagName === 'BUTTON')) {
+        throw new Error('runExclusivePaidAction: button required');
+    }
+    if (button.disabled || button.dataset.ndBusy === '1') {
+        return { started: false };
+    }
+    const idleLabel = opts.idleLabel != null ? String(opts.idleLabel) : (button.textContent || '');
+    const busyLabel = opts.busyLabel != null ? String(opts.busyLabel) : '进行中…';
+    button.dataset.ndBusy = '1';
+    button.disabled = true;
+    button.textContent = busyLabel;
+    button.classList.add('is-busy');
+    if (typeof button.setAttribute === 'function') {
+        button.setAttribute('aria-busy', 'true');
+    }
+    try {
+        const value = await opts.run();
+        return { started: true, value };
+    } finally {
+        button.dataset.ndBusy = '0';
+        button.disabled = false;
+        button.textContent = idleLabel;
+        button.classList.remove('is-busy');
+        if (typeof button.removeAttribute === 'function') {
+            button.removeAttribute('aria-busy');
+        }
     }
 }
 

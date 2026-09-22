@@ -1,5 +1,5 @@
 /**
- * W3 · lifecycle：activate 失败回滚、dispose 再 activate、对外入口、宿主降级。
+ * W3 · lifecycle：activate 失败回滚、dispose 再 activate、D54/D56/D58。
  */
 
 import { describe, it, beforeEach, afterEach } from 'node:test';
@@ -9,6 +9,8 @@ import {
     dispose,
     _runtimeForTest,
     PUBLIC_API_NAME,
+    formatUserMessage,
+    ensureFloorGenerateButton,
 } from '../../src/bootstrap/lifecycle.js';
 import { createContainer } from '../../src/bootstrap/container.js';
 import { createMemoryIdb } from '../../src/adapters/storage/memory-idb.js';
@@ -17,9 +19,11 @@ import { GENERATE_INTERCEPTOR_GLOBAL_NAME } from '../../src/adapters/host/genera
 import { installFakeDom } from '../ui/fake-dom.js';
 import { emptyNaiCaption } from '../../src/domain/model/nai-params.js';
 import { probeCapabilities } from '../../src/bootstrap/capabilities.js';
+import { Ok } from '../../src/infra/result.js';
 
 function makeFakeContext(overrides = {}) {
-    const slashRegistry = [];
+    /** @type {object[]} */
+    const slashCommands = [];
     const listeners = new Map();
     const ctx = {
         chat: [
@@ -60,7 +64,10 @@ function makeFakeContext(overrides = {}) {
         setExtensionPrompt() {},
         SlashCommandParser: {
             addCommandObject(cmd) {
-                slashRegistry.push(cmd?.name ?? '');
+                const name = cmd?.name ?? '';
+                const idx = slashCommands.findIndex((c) => c.name === name);
+                if (idx >= 0) slashCommands[idx] = cmd;
+                else slashCommands.push(cmd);
             },
         },
         SlashCommand: {
@@ -70,16 +77,56 @@ function makeFakeContext(overrides = {}) {
         },
         substituteParams: (t) => t,
         callGenericPopup: async () => {},
-        _slashRegistry: slashRegistry,
+        _slashCommands: slashCommands,
+        _slashRegistry: slashCommands, // 兼容旧断言：用 .includes 会失败，改测例
         ...overrides,
     };
+    // 让 _slashRegistry.includes 仍可用：代理成名字数组视图
+    Object.defineProperty(ctx, '_slashRegistry', {
+        get() {
+            return slashCommands.map((c) => c.name);
+        },
+        enumerable: true,
+    });
     return ctx;
 }
+
+async function boot(ctx) {
+    const getContext = () => ctx;
+    await activate({
+        getContext,
+        createContainer: (opts) => createContainer({
+            ...opts,
+            getContext,
+            host: createSillyTavernHost({ getContext }),
+            db: createMemoryIdb(),
+        }),
+    });
+}
+
+describe('bootstrap/formatUserMessage · D58', () => {
+    it('有 hint 时拼进文案', () => {
+        const text = formatUserMessage({
+            message: '未选择生图预设',
+            hint: '请先编写并选中一份生图预设',
+        });
+        assert.match(text, /未选择生图预设/);
+        assert.match(text, /请先编写并选中一份生图预设/);
+    });
+
+    it('Result 形状取 error.hint', () => {
+        const text = formatUserMessage({
+            ok: false,
+            error: { message: '失败', hint: '下一步去设置' },
+        });
+        assert.match(text, /下一步去设置/);
+    });
+});
 
 describe('bootstrap/lifecycle', () => {
     /** @type {ReturnType<typeof installFakeDom>|null} */
     let fakeDom = null;
-    /** @type {string[]} */
+    /** @type {Array<[string, string]>} */
     let toasts = [];
 
     beforeEach(async () => {
@@ -92,7 +139,6 @@ describe('bootstrap/lifecycle', () => {
             error: (m) => { toasts.push(['error', m]); },
         };
         fakeDom = installFakeDom();
-        // extensions_settings2 挂载点
         const settings = fakeDom.document.createElement('div');
         settings.id = 'extensions_settings2';
         fakeDom.document.body.appendChild(settings);
@@ -112,16 +158,7 @@ describe('bootstrap/lifecycle', () => {
 
     it('activate 成功：挂上对外入口与 interceptor', async () => {
         const ctx = makeFakeContext();
-        const getContext = () => ctx;
-        await activate({
-            getContext,
-            createContainer: (opts) => createContainer({
-                ...opts,
-                getContext,
-                host: createSillyTavernHost({ getContext }),
-                db: createMemoryIdb(),
-            }),
-        });
+        await boot(ctx);
 
         const rt = _runtimeForTest();
         assert.ok(rt.container);
@@ -133,16 +170,7 @@ describe('bootstrap/lifecycle', () => {
 
     it('对外入口缺 replaceCharacterKeywords → 报错', async () => {
         const ctx = makeFakeContext();
-        const getContext = () => ctx;
-        await activate({
-            getContext,
-            createContainer: (opts) => createContainer({
-                ...opts,
-                getContext,
-                host: createSillyTavernHost({ getContext }),
-                db: createMemoryIdb(),
-            }),
-        });
+        await boot(ctx);
 
         await assert.rejects(
             () => globalThis[PUBLIC_API_NAME].generate({ caption: emptyNaiCaption() }),
@@ -169,59 +197,91 @@ describe('bootstrap/lifecycle', () => {
                     disposed = true;
                     origDispose();
                 };
-                const origStart = c.services.autoTrigger.start.bind(c.services.autoTrigger);
                 c.services.autoTrigger.start = () => {
                     throw new Error('模拟自动触发启动失败');
                 };
-                // 保留 stop
-                c.services.autoTrigger._origStart = origStart;
                 return c;
             },
         });
 
-        // 不抛；运行时已清空
         const rt = _runtimeForTest();
         assert.equal(rt.container, null);
         assert.equal(globalThis[PUBLIC_API_NAME], undefined);
         assert.equal(disposed, true);
         assert.ok(toasts.some((t) => t[0] === 'error' && /启动失败/.test(t[1])));
+        // D56：失败发生在斜杠注册之前 → 本次未注册
+        assert.equal(ctx._slashRegistry.includes('naigen'), false);
     });
 
-    it('dispose 后再 activate → 斜杠不重复累积泄漏态', async () => {
+    it('D56：dispose 后敲 /naigen →「未成功加载」而非死容器报错', async () => {
         const ctx = makeFakeContext();
+        await boot(ctx);
+        const cmd = ctx._slashCommands.find((c) => c.name === 'naigen');
+        assert.ok(cmd && typeof cmd.callback === 'function');
+
+        await dispose();
+        assert.equal(_runtimeForTest().container, null);
+        toasts.length = 0;
+
+        const out = await cmd.callback({}, '');
+        assert.equal(out, '');
+        assert.ok(toasts.some((t) => /未成功加载/.test(t[1])));
+    });
+
+    it('D56：activate 失败后（曾成功过）敲 /naigen →「未成功加载」', async () => {
+        const ctx = makeFakeContext();
+        await boot(ctx);
+        const cmd = ctx._slashCommands.find((c) => c.name === 'naigen');
+        assert.ok(cmd);
+
+        // 再 activate 并在 autoTrigger 失败
         const getContext = () => ctx;
-        const make = () => activate({
+        await activate({
             getContext,
-            createContainer: (opts) => createContainer({
-                ...opts,
-                getContext,
-                host: createSillyTavernHost({ getContext }),
-                db: createMemoryIdb(),
-            }),
+            createContainer: async (opts) => {
+                const c = await createContainer({
+                    ...opts,
+                    getContext,
+                    host: createSillyTavernHost({ getContext }),
+                    db: createMemoryIdb(),
+                });
+                c.services.autoTrigger.start = () => {
+                    throw new Error('二次启动失败');
+                };
+                return c;
+            },
         });
 
-        await make();
-        const firstCount = ctx._slashRegistry.filter((n) => n === 'naigen').length;
+        assert.equal(_runtimeForTest().container, null);
+        toasts.length = 0;
+        await cmd.callback({}, '1');
+        assert.ok(toasts.some((t) => /未成功加载/.test(t[1])));
+    });
+
+    it('dispose 后再 activate → 不泄漏、斜杠仍可用', async () => {
+        const ctx = makeFakeContext();
+        await boot(ctx);
         await dispose();
         assert.equal(_runtimeForTest().container, null);
         assert.equal(globalThis[PUBLIC_API_NAME], undefined);
 
-        await make();
-        const secondCount = ctx._slashRegistry.filter((n) => n === 'naigen').length;
-        // 宿主无卸载 API：会再注册一次（覆盖语义），但运行时只有一份 container
-        assert.equal(firstCount, 1);
-        assert.equal(secondCount, 2);
+        await boot(ctx);
         assert.ok(_runtimeForTest().container);
+        const cmd = ctx._slashCommands.find((c) => c.name === 'naigen');
+        assert.ok(cmd);
+        // 活查应指向新容器（不 toast 未加载）
+        toasts.length = 0;
+        // execute 会因缺配置失败，但不应是「未成功加载」
+        await cmd.callback({}, '1');
+        assert.equal(toasts.some((t) => /未成功加载/.test(t[1])), false);
     });
 
     it('宿主缺关键 API → 优雅降级并报中文错误', async () => {
-        // getContext 抛错 → 能力探测失败
         await activate({
             getContext: () => {
                 throw new Error('no ctx');
             },
             createContainer: async () => {
-                // 仍需一个能 dispose 的最小容器；这里直接让 create 抛
                 throw new Error('找不到 SillyTavern.getContext；请确认在酒馆页面内加载本插件');
             },
         });
@@ -240,12 +300,97 @@ describe('bootstrap/lifecycle', () => {
         const report = await probeCapabilities(/** @type {any} */ (host), {
             getContext: () => ({
                 extensionSettings: {},
-                // 无 eventSource
             }),
             assume: { indexedDB: true },
         });
         const item = report.items.find((i) => i.id === 'eventSource');
         assert.equal(item?.available, false);
         assert.ok(/自动写 slot/.test(item?.detail || ''));
+    });
+
+    it('D54：楼层按钮进行中再点 → execute 只进入一次（共享 Promise）', async () => {
+        const ctx = makeFakeContext();
+        await boot(ctx);
+        const container = _runtimeForTest().container;
+        assert.ok(container);
+
+        let enterCount = 0;
+        const origExecute = container.useCases.generateSlots.execute.bind(container.useCases.generateSlots);
+        const origIsWriting = container.useCases.generateSlots.isWriting.bind(container.useCases.generateSlots);
+
+        let release;
+        const blocker = new Promise((resolve) => { release = resolve; });
+        /** @type {Promise<any>|null} */
+        let shared = null;
+
+        container.useCases.generateSlots.isWriting = () => !!shared;
+        container.useCases.generateSlots.execute = async () => {
+            if (shared) {
+                return shared;
+            }
+            enterCount += 1;
+            shared = (async () => {
+                await blocker;
+                return Ok({
+                    records: [],
+                    traceId: 't',
+                    llmCallCount: 0,
+                    unmatchedKeys: [],
+                });
+            })();
+            return shared;
+        };
+
+        // fake-dom 的 querySelector/getElementById 是空实现 → 手持引用
+        const mes = fakeDom.document.createElement('div');
+        mes.className = 'mes';
+        mes.setAttribute('mesid', '1');
+        // 让 ensureFloorGenerateButton 走 messageEl 兜底挂载（querySelector 恒 null）
+        const beforeCount = mes.childNodes.length;
+        ensureFloorGenerateButton(mes, 1, container);
+        assert.equal(mes.childNodes.length, beforeCount + 1);
+        const btn = mes.childNodes[mes.childNodes.length - 1];
+        assert.equal(btn.getAttribute('data-nai-dbgen-floor-btn'), '1');
+
+        const click = () => {
+            const listeners = btn._listeners?.filter((l) => l.type === 'click') ?? [];
+            return Promise.all(listeners.map((l) => l.fn({
+                preventDefault() {},
+                stopPropagation() {},
+            })));
+        };
+
+        const p1 = click();
+        await Promise.resolve();
+        assert.equal(enterCount, 1);
+        assert.equal(btn.getAttribute('aria-disabled'), 'true');
+
+        const p2 = click();
+        await Promise.resolve();
+        assert.equal(enterCount, 1);
+
+        release();
+        await p1;
+        await p2;
+        assert.equal(enterCount, 1);
+
+        container.useCases.generateSlots.execute = origExecute;
+        container.useCases.generateSlots.isWriting = origIsWriting;
+    });
+
+    it('D58：错误 toast 含 hint', async () => {
+        const ctx = makeFakeContext();
+        await boot(ctx);
+        const cmd = ctx._slashCommands.find((c) => c.name === 'naigen');
+        toasts.length = 0;
+        // 未配预设 → 应用层 Err 带 hint
+        await cmd.callback({}, '1');
+        const errToast = toasts.find((t) => t[0] === 'error');
+        assert.ok(errToast, `应有 error toast，实际：${JSON.stringify(toasts)}`);
+        // hint 常见文案：请先… / 请在…
+        assert.ok(
+            /。/.test(errToast[1]) || /请/.test(errToast[1]),
+            `toast 应含指引：${errToast[1]}`,
+        );
     });
 });

@@ -7,6 +7,13 @@
  * - D37：先 slotRepo.put，再 replaceMessageText（避免孤儿 token）
  * - D38：put 时保留已有 images，绝不抹掉已出图记录
  * - D41：用 tagRecall.llmCalled 计数，禁止改写共享 llm.complete
+ * - D54：写锁在本 usecase（键 chatId:messageId）；同键并发共享 Promise；导出 isWriting
+ *
+ * 无候选 key 时的 LLM 次数（需求 L72「下限」+ §10#6「恰好两次」）：
+ * - 有候选：召回 1 + 提示词 1 = 恰好 2（验收 #6 的正常路径）
+ * - 无候选：跳过召回 LLM（llmCalled=false），仅提示词 1 次 → llmCallCount=1
+ * 理由：L72 写的是「下限」而非「无论有无候选都必须打满两次」；
+ * 空候选列表仍调召回是零信息浪费 token。跳过是省钱裁决，非静默吞掉。
  */
 
 import { Ok, Err } from '../infra/result.js';
@@ -28,6 +35,7 @@ import {
     APP_EVENTS,
     SLOT_PLAN_JSON_SCHEMA,
 } from './_helpers.js';
+import { writeGateKey } from './_gate-key.js';
 
 const log = createLogger('application/generate-slots');
 
@@ -71,15 +79,28 @@ const log = createLogger('application/generate-slots');
 
 /**
  * @param {GenerateSlotsDeps} deps
- * @returns {{ execute: (messageId: number, opts?: GenerateSlotsOptions) => Promise<import('../infra/result.js').Ok<GenerateSlotsResult>|import('../infra/result.js').Err<import('../infra/errors.js').AppError>> }}
+ * @returns {{
+ *   execute: (messageId: number, opts?: GenerateSlotsOptions) => Promise<import('../infra/result.js').Ok<GenerateSlotsResult>|import('../infra/result.js').Err<import('../infra/errors.js').AppError>>,
+ *   isWriting: (messageId: number) => boolean,
+ * }}
  */
 export function createGenerateSlotsUseCase(deps) {
-    return {
-        /**
-         * @param {number} messageId
-         * @param {GenerateSlotsOptions} [opts]
-         */
-        async execute(messageId, opts) {
+    /** @type {Map<string, Promise<import('../infra/result.js').Ok<GenerateSlotsResult>|import('../infra/result.js').Err<import('../infra/errors.js').AppError>>>} */
+    const inflight = new Map();
+
+    /**
+     * @param {number} messageId
+     * @returns {string}
+     */
+    function currentWriteKey(messageId) {
+        return writeGateKey(deps.host.getCurrentChatId(), messageId);
+    }
+
+    /**
+     * @param {number} messageId
+     * @param {GenerateSlotsOptions} [opts]
+     */
+    async function runOnce(messageId, opts) {
             const traceId = opts?.traceId ?? deps.newTraceId();
             const signal = opts?.signal;
             /** @type {number} */
@@ -131,7 +152,7 @@ export function createGenerateSlotsUseCase(deps) {
                 return aborted1;
             }
 
-            // ── 4. 标签召回 ★LLM #1 ──────────────────────────────────
+            // ── 4. 标签召回 ★LLM #1（无候选 key 时跳过，见文件头 D54/验收#6 注释）──
             /** @type {import('../domain/model/tag.js').TagEntry[]} */
             let tagEntries = [];
             /** @type {string[]} */
@@ -158,7 +179,6 @@ export function createGenerateSlotsUseCase(deps) {
             } else if (tagR.error?.code === 'UPSTREAM_ABORTED') {
                 return attachTraceId(tagR, traceId);
             } else {
-                // 失败也可能已调过 LLM（例如空回文 ContractError）
                 if (tagR.error?.context?.llmCalled === true) {
                     llmCallCount += 1;
                 }
@@ -281,7 +301,6 @@ export function createGenerateSlotsUseCase(deps) {
             const existingById = new Map();
             const existingR = await deps.slotRepo.getByMessage(messageId);
             if (!existingR.ok) {
-                // D39：读失败不得当空；中止写入以免覆盖未知状态
                 log.warn('getByMessage failed before put; abort write', {
                     traceId,
                     messageId,
@@ -319,7 +338,6 @@ export function createGenerateSlotsUseCase(deps) {
             const placed = placeSlots(mes.text ?? '', plans);
             const replaceR = await deps.host.replaceMessageText(messageId, placed.text);
             if (!replaceR.ok) {
-                // 记录已在；正文未改 → 无孤儿 token；可重试覆盖
                 return attachTraceId(replaceR, traceId);
             }
 
@@ -332,14 +350,42 @@ export function createGenerateSlotsUseCase(deps) {
                 placements: placed.placements,
             });
 
+            // 有候选时通常为 2；无候选跳过召回则为 1（见文件头）
             if (llmCallCount !== 2) {
-                log.warn('llmCallCount != 2 (empty candidate keys skip recall LLM)', {
-                    traceId,
-                    llmCallCount,
-                });
+                log.info('llmCallCount != 2', { traceId, llmCallCount });
             }
 
             return Ok({ records, traceId, llmCallCount, unmatchedKeys });
+    }
+
+    return {
+        /**
+         * D54：同键并发共享同一 Promise（手点 + 自动写只跑一轮 LLM）。
+         * @param {number} messageId
+         * @param {GenerateSlotsOptions} [opts]
+         */
+        execute(messageId, opts) {
+            const key = currentWriteKey(messageId);
+            const existing = inflight.get(key);
+            if (existing) {
+                return existing;
+            }
+            const promise = runOnce(messageId, opts).finally(() => {
+                if (inflight.get(key) === promise) {
+                    inflight.delete(key);
+                }
+            });
+            inflight.set(key, promise);
+            return promise;
+        },
+
+        /**
+         * 供 UI / 装配层禁用「生图」按钮（D54）。
+         * @param {number} messageId
+         * @returns {boolean}
+         */
+        isWriting(messageId) {
+            return inflight.has(currentWriteKey(messageId));
         },
     };
 }

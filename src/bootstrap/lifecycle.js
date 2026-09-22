@@ -2,8 +2,12 @@
  * L0 装配 · activate / dispose（manifest hooks）。
  * 归属：W3-J 装配代理实现。
  *
- * activate：装配 → 装正则 → 挂抽屉 → 挂 slot 观察器 → 斜杠命令 → 自动触发 → 对外入口
+ * activate：装配 → 装正则 → 挂抽屉 → 挂 slot 观察器 → 自动触发 → 对外入口 → 斜杠（最后，D56）
  * dispose：全部倒序拆干净（D28）。中途失败须回收已建资源，不抛到宿主。
+ *
+ * D56：斜杠回调不闭包死容器，一律读 runtime.container；未加载时提示「未成功加载」。
+ * D54：楼层写 slot 按钮跟 generateSlots.isWriting 禁用。
+ * D58：toast 拼上 AppError.hint。
  */
 
 import { newId } from '../infra/id.js';
@@ -29,6 +33,9 @@ export const PUBLIC_API_NAME = 'NaiDbGen';
 /** 楼层「写 slot」按钮标记 */
 const FLOOR_BTN_ATTR = 'data-nai-dbgen-floor-btn';
 
+/** 楼层按钮 busy 轮询间隔（跟 isWriting，含自动写） */
+const FLOOR_BUSY_POLL_MS = 200;
+
 /**
  * @typedef {object} RuntimeState
  * @property {Awaited<ReturnType<typeof createContainer>>|null} container
@@ -39,9 +46,12 @@ const FLOOR_BTN_ATTR = 'data-nai-dbgen-floor-btn';
  * @property {(() => void)|null} unsubDomReady
  * @property {(() => void)|null} unsubChatChanged
  * @property {(() => void)|null} unsubSlotRenderedCache
+ * @property {(() => void)|null} unsubSlotsWrittenCache
  * @property {{ destroy: () => void }|null} panelShell
  * @property {{ destroy: () => void }|null} workbenchModal
+ * @property {ReturnType<typeof setInterval>|null} floorBusyTimer
  * @property {boolean} activating
+ * @property {boolean} slashRegistered
  */
 
 /** @type {RuntimeState} */
@@ -54,13 +64,51 @@ const runtime = {
     unsubDomReady: null,
     unsubChatChanged: null,
     unsubSlotRenderedCache: null,
+    unsubSlotsWrittenCache: null,
     panelShell: null,
     workbenchModal: null,
+    floorBusyTimer: null,
     activating: false,
+    slashRegistered: false,
 };
 
 /** messageId::slotId → SlotRecord 同步缓存（控件 getRecord 是同步的） */
 const recordCache = new Map();
+
+/**
+ * 面向用户的错误文案：message + hint（D58）。
+ * @param {unknown} err
+ * @returns {string}
+ */
+export function formatUserMessage(err) {
+    if (err == null) {
+        return '操作失败';
+    }
+    if (typeof err === 'string') {
+        return err;
+    }
+    if (typeof err !== 'object') {
+        return String(err);
+    }
+    const rec = /** @type {{ message?: unknown, hint?: unknown, traceId?: unknown, error?: unknown }} */ (err);
+    // Result 形状：{ ok:false, error }
+    if (rec.error && typeof rec.error === 'object') {
+        return formatUserMessage(rec.error);
+    }
+    const message = typeof rec.message === 'string' && rec.message
+        ? rec.message
+        : '操作失败';
+    const hint = typeof rec.hint === 'string' && rec.hint.trim()
+        ? rec.hint.trim()
+        : '';
+    const tid = typeof rec.traceId === 'string' && rec.traceId
+        ? `（${rec.traceId}）`
+        : '';
+    if (hint) {
+        return `${message}。${hint}${tid}`;
+    }
+    return `${message}${tid}`;
+}
 
 /**
  * @returns {() => any}
@@ -81,9 +129,13 @@ function resolveGetContext() {
  * @param {string} message
  */
 function safeToast(host, level, message) {
+    const text = String(message ?? '');
+    if (!text) {
+        return;
+    }
     try {
         if (host && typeof host.toast === 'function') {
-            host.toast(level, message);
+            host.toast(level, text);
             return;
         }
     } catch {
@@ -94,10 +146,10 @@ function safeToast(host, level, message) {
         if (!toastr) {
             return;
         }
-        if (level === 'error') toastr.error(message);
-        else if (level === 'warning') toastr.warning(message);
-        else if (level === 'success') toastr.success(message);
-        else toastr.info(message);
+        if (level === 'error') toastr.error(text);
+        else if (level === 'warning') toastr.warning(text);
+        else if (level === 'success') toastr.success(text);
+        else toastr.info(text);
     } catch {
         // ignore
     }
@@ -113,11 +165,17 @@ function recordKey(messageId, slotId) {
 }
 
 /**
+ * @returns {Awaited<ReturnType<typeof createContainer>>|null}
+ */
+function liveContainer() {
+    return runtime.container;
+}
+
+/**
  * @param {Awaited<ReturnType<typeof createContainer>>} container
  * @returns {void}
  */
 function exposePublicApi(container) {
-    const imageGen = container.services.imageGen;
     const api = {
         version: PLUGIN_VERSION,
         getVersion() {
@@ -128,26 +186,48 @@ function exposePublicApi(container) {
          * @param {import('../application/image-gen.service.js').ImageGenRequest} req
          */
         async generate(req) {
+            const c = liveContainer();
+            if (!c) {
+                throw new Error('数据库生图插件未成功加载');
+            }
             if (!req || typeof req !== 'object') {
                 throw new Error('invalid argument: req');
             }
             if (typeof req.replaceCharacterKeywords !== 'boolean') {
                 throw new Error('invalid argument: replaceCharacterKeywords');
             }
-            return imageGen.generate(req);
+            return c.services.imageGen.generate(req);
         },
         async getActiveArtist() {
-            return imageGen.getActiveArtist();
+            const c = liveContainer();
+            if (!c) {
+                throw new Error('数据库生图插件未成功加载');
+            }
+            return c.services.imageGen.getActiveArtist();
         },
         async listNaiConfigs() {
-            const r = await container.repos.naiConfig.list();
+            const c = liveContainer();
+            if (!c) {
+                return [];
+            }
+            const r = await c.repos.naiConfig.list();
             return r?.ok ? r.value : [];
         },
         openWorkbench() {
-            return openWorkbenchUi(container);
+            const c = liveContainer();
+            if (!c) {
+                safeToast(null, 'warning', '数据库生图插件未成功加载');
+                return Promise.resolve();
+            }
+            return openWorkbenchUi(c);
         },
         openManagement() {
-            return openManagementUi(container);
+            const c = liveContainer();
+            if (!c) {
+                safeToast(null, 'warning', '数据库生图插件未成功加载');
+                return Promise.resolve();
+            }
+            return openManagementUi(c);
         },
     };
     globalThis[PUBLIC_API_NAME] = api;
@@ -259,41 +339,49 @@ async function openWorkbenchUi(container) {
 }
 
 /**
- * @param {Awaited<ReturnType<typeof createContainer>>} container
+ * D56：回调活查 runtime.container，绝不闭包已 dispose 的容器。
+ * @param {import('../ports/host.port.js').HostPort} host
  * @returns {void}
  */
-function registerSlashCommands(container) {
-    const host = container.host;
+function registerSlashCommands(host) {
     host.registerSlashCommand({
         name: 'naigen',
         aliases: ['nai-dbgen'],
         helpString: '对指定楼（或最近一条 AI 楼）执行数据库生图写 slot。用法：/naigen [messageId]',
         callback: async (_args, value) => {
+            const container = liveContainer();
+            if (!container) {
+                safeToast(null, 'warning', '数据库生图插件未成功加载');
+                return '';
+            }
+            const h = container.host;
             const raw = typeof value === 'string' ? value.trim() : '';
             let messageId = Number(raw);
             if (!Number.isInteger(messageId) || messageId < 0) {
-                const recent = host.getRecentAiMessages(1);
+                const recent = h.getRecentAiMessages(1);
                 if (!recent?.length) {
-                    safeToast(host, 'warning', '没有可用的 AI 楼');
+                    safeToast(h, 'warning', '没有可用的 AI 楼');
                     return '';
                 }
                 messageId = recent[0].messageId;
             }
-            safeToast(host, 'info', `正在为第 ${messageId} 楼写 slot…`);
+            if (container.useCases.generateSlots.isWriting(messageId)) {
+                safeToast(h, 'info', `第 ${messageId} 楼正在写 slot，请稍候…`);
+            } else {
+                safeToast(h, 'info', `正在为第 ${messageId} 楼写 slot…`);
+            }
             const result = await container.useCases.generateSlots.execute(messageId);
             if (!result.ok) {
-                const msg = result.error?.message || '写 slot 失败';
-                const tid = result.error?.traceId ? `（${result.error.traceId}）` : '';
-                safeToast(host, 'error', `${msg}${tid}`);
+                safeToast(h, 'error', formatUserMessage(result));
                 return '';
             }
             const unmatched = Array.isArray(result.value.unmatchedKeys)
                 ? result.value.unmatchedKeys
                 : [];
             if (unmatched.length) {
-                safeToast(host, 'warning', `召回未命中：${unmatched.join(', ')}`);
+                safeToast(h, 'warning', `召回未命中：${unmatched.join(', ')}`);
             }
-            safeToast(host, 'success', `已写入 ${result.value.records.length} 个 slot`);
+            safeToast(h, 'success', `已写入 ${result.value.records.length} 个 slot`);
             return '';
         },
     });
@@ -303,10 +391,96 @@ function registerSlashCommands(container) {
         aliases: ['nai-workbench'],
         helpString: '打开数据库生图 · 生成工作台',
         callback: async () => {
+            const container = liveContainer();
+            if (!container) {
+                safeToast(null, 'warning', '数据库生图插件未成功加载');
+                return '';
+            }
             await openWorkbenchUi(container);
             return '';
         },
     });
+
+    runtime.slashRegistered = true;
+}
+
+/**
+ * D54：楼层按钮进行中视觉 + 禁用。
+ * @param {Element} btn
+ * @param {boolean} busy
+ */
+function setFloorBtnBusy(btn, busy) {
+    if (!btn) {
+        return;
+    }
+    try {
+        btn.setAttribute('aria-busy', busy ? 'true' : 'false');
+        btn.setAttribute('aria-disabled', busy ? 'true' : 'false');
+        if (btn.classList) {
+            if (busy) btn.classList.add('is-busy');
+            else btn.classList.remove('is-busy');
+        }
+        btn.title = busy ? '正在写 slot…' : '数据库生图（写 slot）';
+        if (btn.style) {
+            btn.style.opacity = busy ? '0.45' : '';
+            btn.style.pointerEvents = busy ? 'none' : '';
+            btn.style.cursor = busy ? 'wait' : '';
+        }
+    } catch {
+        // ignore
+    }
+}
+
+/**
+ * @param {Element} btn
+ * @param {number} messageId
+ * @param {Awaited<ReturnType<typeof createContainer>>} container
+ */
+function syncFloorBtnBusy(btn, messageId, container) {
+    const writing = typeof container.useCases.generateSlots.isWriting === 'function'
+        && container.useCases.generateSlots.isWriting(messageId);
+    setFloorBtnBusy(btn, writing);
+}
+
+/**
+ * 轮询可见楼层按钮的 isWriting（覆盖自动写路径）。
+ * @param {Awaited<ReturnType<typeof createContainer>>} container
+ */
+function startFloorBusyWatch(container) {
+    stopFloorBusyWatch();
+    runtime.floorBusyTimer = setInterval(() => {
+        const c = liveContainer();
+        if (!c || c !== container) {
+            stopFloorBusyWatch();
+            return;
+        }
+        if (typeof document === 'undefined') {
+            return;
+        }
+        try {
+            document.querySelectorAll(`[${FLOOR_BTN_ATTR}]`).forEach((btn) => {
+                const mes = typeof btn.closest === 'function'
+                    ? btn.closest('.mes[mesid]')
+                    : null;
+                if (!mes) {
+                    return;
+                }
+                const mid = Number(mes.getAttribute('mesid'));
+                if (Number.isInteger(mid)) {
+                    syncFloorBtnBusy(btn, mid, c);
+                }
+            });
+        } catch {
+            // ignore
+        }
+    }, FLOOR_BUSY_POLL_MS);
+}
+
+function stopFloorBusyWatch() {
+    if (runtime.floorBusyTimer != null) {
+        clearInterval(runtime.floorBusyTimer);
+        runtime.floorBusyTimer = null;
+    }
 }
 
 /**
@@ -314,11 +488,15 @@ function registerSlashCommands(container) {
  * @param {number} messageId
  * @param {Awaited<ReturnType<typeof createContainer>>} container
  */
-function ensureFloorGenerateButton(messageEl, messageId, container) {
+export function ensureFloorGenerateButton(messageEl, messageId, container) {
     if (!messageEl || typeof messageEl.querySelector !== 'function') {
         return;
     }
     if (messageEl.querySelector(`[${FLOOR_BTN_ATTR}]`)) {
+        const existing = messageEl.querySelector(`[${FLOOR_BTN_ATTR}]`);
+        if (existing) {
+            syncFloorBtnBusy(existing, messageId, container);
+        }
         return;
     }
     const msg = container.host.getMessage(messageId);
@@ -338,33 +516,54 @@ function ensureFloorGenerateButton(messageEl, messageId, container) {
     btn.addEventListener('click', async (ev) => {
         ev.preventDefault();
         ev.stopPropagation();
-        const host = container.host;
-        safeToast(host, 'info', `正在为第 ${messageId} 楼写 slot…`);
-        const result = await container.useCases.generateSlots.execute(messageId);
-        if (!result.ok) {
-            const msgText = result.error?.message || '写 slot 失败';
-            const tid = result.error?.traceId ? `（${result.error.traceId}）` : '';
-            safeToast(host, 'error', `${msgText}${tid}`);
+        const c = liveContainer();
+        if (!c) {
+            safeToast(null, 'warning', '数据库生图插件未成功加载');
             return;
         }
-        const unmatched = Array.isArray(result.value.unmatchedKeys)
-            ? result.value.unmatchedKeys
-            : [];
-        if (unmatched.length) {
-            safeToast(host, 'warning', `召回未命中：${unmatched.join(', ')}`);
+        const host = c.host;
+        // D54：进行中再点不发起第二次（execute 会共享 Promise；UI 也拒）
+        if (c.useCases.generateSlots.isWriting(messageId)) {
+            setFloorBtnBusy(btn, true);
+            // 仍 await 同一 Promise，避免用户以为没点上
+            const result = await c.useCases.generateSlots.execute(messageId);
+            syncFloorBtnBusy(btn, messageId, c);
+            if (!result.ok) {
+                safeToast(host, 'error', formatUserMessage(result));
+            }
+            return;
         }
-        safeToast(host, 'success', `已写入 ${result.value.records.length} 个 slot`);
+        setFloorBtnBusy(btn, true);
+        safeToast(host, 'info', `正在为第 ${messageId} 楼写 slot…`);
+        try {
+            const result = await c.useCases.generateSlots.execute(messageId);
+            if (!result.ok) {
+                safeToast(host, 'error', formatUserMessage(result));
+                return;
+            }
+            const unmatched = Array.isArray(result.value.unmatchedKeys)
+                ? result.value.unmatchedKeys
+                : [];
+            if (unmatched.length) {
+                safeToast(host, 'warning', `召回未命中：${unmatched.join(', ')}`);
+            }
+            safeToast(host, 'success', `已写入 ${result.value.records.length} 个 slot`);
+        } finally {
+            syncFloorBtnBusy(btn, messageId, c);
+        }
     });
     hostEl.appendChild(btn);
+    syncFloorBtnBusy(btn, messageId, container);
 }
 
 /**
+ * 预热 recordCache 后再挂控件，避免 remount 闪「未生图」。
  * @param {Awaited<ReturnType<typeof createContainer>>} container
  * @param {Element} messageEl
  * @param {number} messageId
  * @param {number} slotId
  */
-function mountOneSlot(container, messageEl, messageId, slotId) {
+async function mountOneSlot(container, messageEl, messageId, slotId) {
     const slotRoot = (typeof messageEl.querySelector === 'function'
         ? messageEl.querySelector(`[data-slot="${slotId}"]`)
         : null) || messageEl;
@@ -378,6 +577,21 @@ function mountOneSlot(container, messageEl, messageId, slotId) {
             // ignore
         }
         runtime.slotWidgets.delete(key);
+    }
+
+    // 预热：先读权威记录再挂载（终审：cache 空时短暂像未生图）
+    try {
+        const r = await container.repos.slot.get(messageId, slotId);
+        if (r?.ok && r.value) {
+            recordCache.set(recordKey(messageId, slotId), r.value);
+        }
+    } catch {
+        // 读失败不阻断挂载；控件保持 idle/空
+    }
+
+    // 激活期间被 dispose
+    if (liveContainer() !== container) {
+        return;
     }
 
     const handle = mountSlotWidget(slotRoot, messageId, {
@@ -398,13 +612,27 @@ function mountOneSlot(container, messageEl, messageId, slotId) {
     });
 
     runtime.slotWidgets.set(key, handle);
+}
 
-    void container.repos.slot.get(messageId, slotId).then((r) => {
-        if (r?.ok && r.value) {
-            recordCache.set(recordKey(messageId, slotId), r.value);
-            handle.refresh();
+/**
+ * 预热某楼全部 slot 记录（切聊天 / 楼层就绪时）。
+ * @param {Awaited<ReturnType<typeof createContainer>>} container
+ * @param {number} messageId
+ */
+async function warmupMessageRecords(container, messageId) {
+    try {
+        const r = await container.repos.slot.getByMessage(messageId);
+        if (!r?.ok || !Array.isArray(r.value)) {
+            return;
         }
-    });
+        for (const rec of r.value) {
+            if (rec && rec.slotId != null) {
+                recordCache.set(recordKey(messageId, rec.slotId), rec);
+            }
+        }
+    } catch {
+        // ignore
+    }
 }
 
 /**
@@ -447,7 +675,6 @@ export async function activate(opts = {}) {
             runtime.container = null;
         });
 
-        // 容器已打开存储（含测试注入的 memory-idb）→ 视 indexedDB 可用
         const report = await probeCapabilities(container.host, {
             getContext,
             assume: { indexedDB: true },
@@ -464,7 +691,7 @@ export async function activate(opts = {}) {
 
         const regexResult = await container.host.ensureSlotRegexInstalled();
         if (regexResult && regexResult.ok === false) {
-            safeToast(container.host, 'warning', regexResult.error?.message || '正则脚本安装失败');
+            safeToast(container.host, 'warning', formatUserMessage(regexResult));
         }
 
         if (typeof document !== 'undefined') {
@@ -474,7 +701,12 @@ export async function activate(opts = {}) {
                 loadSettings: container.loadSettings,
                 saveSettings: (s) => container.settingsStore.save(s),
                 openManagementShell: () => {
-                    void openManagementUi(container);
+                    const c = liveContainer();
+                    if (!c) {
+                        safeToast(null, 'warning', '数据库生图插件未成功加载');
+                        return;
+                    }
+                    void openManagementUi(c);
                 },
                 repos: container.repos,
             });
@@ -482,7 +714,12 @@ export async function activate(opts = {}) {
                 label: '打开工作台',
                 variant: 'ghost',
                 onClick: () => {
-                    void openWorkbenchUi(container);
+                    const c = liveContainer();
+                    if (!c) {
+                        safeToast(null, 'warning', '数据库生图插件未成功加载');
+                        return;
+                    }
+                    void openWorkbenchUi(c);
                 },
             });
             drawerRoot.appendChild(wbBtn);
@@ -520,7 +757,7 @@ export async function activate(opts = {}) {
                     ? document.querySelector(`.mes[mesid="${messageId}"]`)
                     : null;
                 if (mes) {
-                    mountOneSlot(container, mes, messageId, slotId);
+                    void mountOneSlot(container, mes, messageId, slotId);
                 }
             },
         });
@@ -536,12 +773,18 @@ export async function activate(opts = {}) {
         });
 
         runtime.unsubDomReady = container.host.onMessageDomReady((messageEl, messageId) => {
-            ensureFloorGenerateButton(messageEl, messageId, container);
-            try {
-                runtime.slotObserver?.reconcile();
-            } catch {
-                // ignore
+            const c = liveContainer();
+            if (!c) {
+                return;
             }
+            void warmupMessageRecords(c, messageId).then(() => {
+                ensureFloorGenerateButton(messageEl, messageId, c);
+                try {
+                    runtime.slotObserver?.reconcile();
+                } catch {
+                    // ignore
+                }
+            });
         });
         rollback.push(() => {
             try {
@@ -591,6 +834,25 @@ export async function activate(opts = {}) {
             runtime.unsubSlotRenderedCache = null;
         });
 
+        runtime.unsubSlotsWrittenCache = container.bus.on(APP_EVENTS.SLOTS_WRITTEN, (payload) => {
+            if (!payload || !Array.isArray(payload.records)) {
+                return;
+            }
+            for (const rec of payload.records) {
+                if (rec && rec.messageId != null && rec.slotId != null) {
+                    recordCache.set(recordKey(rec.messageId, rec.slotId), rec);
+                }
+            }
+        });
+        rollback.push(() => {
+            try {
+                runtime.unsubSlotsWrittenCache?.();
+            } catch {
+                // ignore
+            }
+            runtime.unsubSlotsWrittenCache = null;
+        });
+
         runtime.unsubUnmatched = container.bus.on(APP_EVENTS.TAG_RECALL_UNMATCHED, (payload) => {
             const keys = Array.isArray(payload?.unmatchedKeys) ? payload.unmatchedKeys : [];
             if (!keys.length) {
@@ -607,8 +869,7 @@ export async function activate(opts = {}) {
             runtime.unsubUnmatched = null;
         });
 
-        registerSlashCommands(container);
-
+        // 可能失败的启动步骤放在斜杠注册之前（D56）
         container.services.autoTrigger.start();
         rollback.push(() => {
             try {
@@ -618,6 +879,9 @@ export async function activate(opts = {}) {
             }
         });
 
+        startFloorBusyWatch(container);
+        rollback.push(() => stopFloorBusyWatch());
+
         exposePublicApi(container);
         rollback.push(() => clearPublicApi());
 
@@ -625,9 +889,12 @@ export async function activate(opts = {}) {
             safeToast(container.host, 'warning', '出站剥 slot 拦截器未挂上，请检查 manifest.generate_interceptor');
         }
 
+        // D56：斜杠放在所有可能失败步骤之后；回调仍活查 container 防 dispose 僵尸
+        registerSlashCommands(container.host);
+
         rollback.length = 0;
     } catch (err) {
-        const message = err instanceof Error ? err.message : String(err ?? '未知错误');
+        const message = formatUserMessage(err);
         const host = runtime.container?.host;
         safeToast(host, 'error', `数据库生图插件启动失败：${message}`);
 
@@ -649,6 +916,8 @@ export async function activate(opts = {}) {
  * @returns {Promise<void>}
  */
 async function disposeInternal() {
+    stopFloorBusyWatch();
+
     try {
         runtime.workbenchModal?.destroy();
     } catch {
@@ -676,6 +945,13 @@ async function disposeInternal() {
         // ignore
     }
     runtime.unsubSlotRenderedCache = null;
+
+    try {
+        runtime.unsubSlotsWrittenCache?.();
+    } catch {
+        // ignore
+    }
+    runtime.unsubSlotsWrittenCache = null;
 
     try {
         runtime.unsubDomReady?.();
@@ -729,6 +1005,7 @@ async function disposeInternal() {
         // ignore
     }
     runtime.container = null;
+    // slashRegistered 保持：宿主无卸载；回调活查 container===null →「未成功加载」
 
     try {
         if (typeof document !== 'undefined') {
@@ -759,4 +1036,12 @@ export async function dispose() {
  */
 export function _runtimeForTest() {
     return runtime;
+}
+
+/**
+ * 测试用：读 recordCache。
+ * @returns {Map<string, import('../domain/model/slot.js').SlotRecord>}
+ */
+export function _recordCacheForTest() {
+    return recordCache;
 }

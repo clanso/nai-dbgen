@@ -15,8 +15,11 @@ import {
     mergePresetPrompt,
     resolveDeleteIdsByIdentity,
     assertImportKind,
+    formatErrorDisplay,
+    canSubmitPaidAction,
+    paidActionLabels,
 } from '../../src/ui/panels/_lib/library-logic.js';
-import { watchModalDismiss } from '../../src/ui/panels/_lib/panel-kit.js';
+import { watchModalDismiss, runExclusivePaidAction } from '../../src/ui/panels/_lib/panel-kit.js';
 import { ARTIST_PREVIEW_SIZE } from '../../src/domain/model/nai-params.js';
 import { defaultNaiParams } from '../../src/domain/model/nai-params.js';
 import { defaultPluginSettings } from '../../src/domain/model/plugin-settings.js';
@@ -270,6 +273,37 @@ describe('ui/panels library-logic', () => {
         assert.equal(merged.tag_hint_qt, d.tag_hint_qt);
         assert.equal(merged.steps, 30);
     });
+
+    it('D58: formatErrorDisplay appends hint when present', () => {
+        assert.equal(
+            formatErrorDisplay({ message: '未配置生图预设', hint: '请到抽屉选择生图预设' }),
+            '未配置生图预设（请到抽屉选择生图预设）',
+        );
+        assert.equal(formatErrorDisplay({ message: '只有消息' }), '只有消息');
+        assert.equal(formatErrorDisplay(null, '兜底'), '兜底');
+    });
+
+    it('D58: preset picker keys match D8 freeze table', () => {
+        const keys = new Set(PLUGIN_SETTINGS_KEYS);
+        assert.ok(keys.has('activeImagegenPresetId'));
+        assert.ok(keys.has('activeRecallPresetId'));
+        const patch = pickAllowedSettingsPatch({
+            activeImagegenPresetId: 'ig-1',
+            activeRecallPresetId: 'rc-1',
+            fakePresetId: 'nope',
+        });
+        assert.equal(patch.activeImagegenPresetId, 'ig-1');
+        assert.equal(patch.activeRecallPresetId, 'rc-1');
+        assert.equal(patch.fakePresetId, undefined);
+    });
+
+    it('D55: canSubmitPaidAction blocks while busy', () => {
+        assert.equal(canSubmitPaidAction(false), true);
+        assert.equal(canSubmitPaidAction(true), false);
+        const labels = paidActionLabels('artistPreview');
+        assert.match(labels.busy, /中/);
+        assert.notEqual(labels.idle, labels.busy);
+    });
 });
 
 describe('ui/panels confirmDanger dismiss (D50)', () => {
@@ -333,5 +367,85 @@ describe('ui/panels confirmDanger dismiss (D50)', () => {
         globalThis.MutationObserver.flush();
         assert.equal(settled, false);
         unwatch();
+    });
+});
+
+describe('ui/panels runExclusivePaidAction (D55)', () => {
+    /** @type {ReturnType<typeof installFakeDom>|null} */
+    let fake = null;
+
+    beforeEach(() => {
+        fake = installFakeDom();
+    });
+
+    afterEach(() => {
+        fake?.restore();
+        fake = null;
+    });
+
+    it('preview busy: second submit does not start; NAI called once; restores after fail', async () => {
+        const btn = document.createElement('button');
+        btn.textContent = '手填预览生图';
+        document.body.appendChild(btn);
+
+        let naiCalls = 0;
+        /** @type {() => void} */
+        let release;
+        const gate = new Promise((resolve) => {
+            release = resolve;
+        });
+
+        const first = runExclusivePaidAction({
+            button: btn,
+            idleLabel: '手填预览生图',
+            busyLabel: '预览生成中…',
+            run: async () => {
+                naiCalls += 1;
+                await gate;
+                throw new Error('boom');
+            },
+        });
+
+        // 进行中再点
+        const second = await runExclusivePaidAction({
+            button: btn,
+            idleLabel: '手填预览生图',
+            busyLabel: '预览生成中…',
+            run: async () => {
+                naiCalls += 1;
+            },
+        });
+        assert.equal(second.started, false);
+        assert.equal(btn.disabled, true);
+        assert.equal(btn.textContent, '预览生成中…');
+        assert.equal(btn.dataset.ndBusy, '1');
+
+        release();
+        let firstErr = null;
+        try {
+            await first;
+        } catch (e) {
+            firstErr = e;
+        }
+        assert.ok(firstErr);
+        assert.equal(naiCalls, 1);
+        // 失败后恢复可点
+        assert.equal(btn.disabled, false);
+        assert.equal(btn.textContent, '手填预览生图');
+        assert.equal(btn.dataset.ndBusy, '0');
+
+        // 恢复后可以再点
+        const third = await runExclusivePaidAction({
+            button: btn,
+            idleLabel: '手填预览生图',
+            busyLabel: '预览生成中…',
+            run: async () => {
+                naiCalls += 1;
+                return 'ok';
+            },
+        });
+        assert.equal(third.started, true);
+        assert.equal(naiCalls, 2);
+        assert.equal(btn.disabled, false);
     });
 });

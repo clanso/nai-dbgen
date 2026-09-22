@@ -383,3 +383,50 @@ export function settingsKeysUnchanged(before, after, keys) {
     }
     return true;
 }
+
+/**
+ * D58：错误展示拼上 hint，告知下一步。
+ * @param {unknown} err
+ * @param {string} [fallback]
+ * @returns {string}
+ */
+export function formatErrorDisplay(err, fallback = '操作失败') {
+    if (err == null) return fallback;
+    if (typeof err === 'string') {
+        const s = err.trim();
+        return s || fallback;
+    }
+    if (typeof err !== 'object') {
+        const s = String(err).trim();
+        return s || fallback;
+    }
+    const rec = /** @type {{ message?: unknown, hint?: unknown }} */ (err);
+    const message = rec.message != null && String(rec.message).trim() !== ''
+        ? String(rec.message).trim()
+        : fallback;
+    const hint = rec.hint != null && String(rec.hint).trim() !== ''
+        ? String(rec.hint).trim()
+        : '';
+    if (hint) return `${message}（${hint}）`;
+    return message;
+}
+
+/**
+ * D55：付费请求进行中不得再提交。
+ * @param {boolean} busy
+ * @returns {boolean}
+ */
+export function canSubmitPaidAction(busy) {
+    return busy !== true;
+}
+
+/**
+ * @param {'artistPreview'} kind
+ * @returns {{ idle: string, busy: string }}
+ */
+export function paidActionLabels(kind) {
+    if (kind === 'artistPreview') {
+        return { idle: '手填预览生图', busy: '预览生成中…' };
+    }
+    return { idle: '提交', busy: '进行中…' };
+}

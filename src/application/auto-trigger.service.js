@@ -5,14 +5,13 @@
  * 裁决：
  * - D32：注入 bus，订阅 slots:written
  * - D35：出图闸门在 renderSlot 内；本层不再维护 rendering Set
- * - D36：写入锁键带 chatId
  * - D38：已有 slot 记录则跳过（含回翻 swipe）；不重跑 LLM
  * - D39：读失败 warn + 跳过，绝不出图
+ * - D54：写锁收归 generateSlots；本层不再维护 writing Set（避免与手点双轨）
  */
 
 import { createLogger } from '../infra/logger.js';
 import { APP_EVENTS } from './_helpers.js';
-import { writeGateKey } from './_gate-key.js';
 
 const log = createLogger('application/auto-trigger');
 
@@ -40,19 +39,12 @@ export function createAutoTriggerService(deps) {
     /** @type {(() => void)|null} */
     let unsubSlotsWritten = null;
 
-    /** @type {Set<string>} `chatId:messageId` 正在写 slot（仅防并发） */
-    const writing = new Set();
-
     /**
      * @param {number} messageId
      * @returns {Promise<void>}
      */
     async function writeSlots(messageId) {
         const chatId = deps.host.getCurrentChatId();
-        const key = writeGateKey(chatId, messageId);
-        if (writing.has(key)) {
-            return;
-        }
 
         // D38 + D39：先查是否已有记录
         const existing = await deps.slotRepo.getByMessage(messageId);
@@ -69,34 +61,30 @@ export function createAutoTriggerService(deps) {
             return;
         }
 
-        writing.add(key);
-        try {
-            // 二次确认（并发窗口）
-            const again = await deps.slotRepo.getByMessage(messageId);
-            if (!again.ok) {
-                log.warn('autoWriteSlots: re-check failed; skip', {
-                    messageId,
-                    code: again.error?.code,
-                });
-                return;
-            }
-            if (again.value.length > 0) {
-                return;
-            }
-            if (deps.host.getCurrentChatId() !== chatId) {
-                log.warn('autoWriteSlots: chat changed; skip', { messageId, chatId });
-                return;
-            }
+        // 二次确认（并发窗口；真正互斥在 generateSlots D54）
+        const again = await deps.slotRepo.getByMessage(messageId);
+        if (!again.ok) {
+            log.warn('autoWriteSlots: re-check failed; skip', {
+                messageId,
+                code: again.error?.code,
+            });
+            return;
+        }
+        if (again.value.length > 0) {
+            return;
+        }
+        if (deps.host.getCurrentChatId() !== chatId) {
+            log.warn('autoWriteSlots: chat changed; skip', { messageId, chatId });
+            return;
+        }
 
-            const r = await deps.generateSlots.execute(messageId);
-            if (!r.ok) {
-                log.warn('autoWriteSlots failed', {
-                    messageId,
-                    code: r.error?.code,
-                });
-            }
-        } finally {
-            writing.delete(key);
+        // D54：闸门在 generateSlots；与手点共享同一 Promise
+        const r = await deps.generateSlots.execute(messageId);
+        if (!r.ok) {
+            log.warn('autoWriteSlots failed', {
+                messageId,
+                code: r.error?.code,
+            });
         }
     }
 

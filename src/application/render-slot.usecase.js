@@ -23,6 +23,9 @@ import { renderGateKey } from './_gate-key.js';
 
 const log = createLogger('application/render-slot');
 
+/** D42 挂起写盘上限：跨聊天保留但不无限增长（FIFO 淘汰最旧项） */
+const MAX_PENDING_WRITES = 32;
+
 /**
  * @typedef {object} RenderSlotDeps
  * @property {import('./image-gen.service.js').ImageGenService} imageGen
@@ -77,6 +80,29 @@ export function createRenderSlotUseCase(deps) {
     /** @type {Map<string, PendingWrite>} */
     const pendingWrites = new Map();
     // pendingWrites（已扣费待写盘）跨聊天保留；写盘前用 chatId 校验防写错楼（D36/D42）
+    // 上限 MAX_PENDING_WRITES：FIFO 淘汰，避免跳聊天永久泄漏
+
+    /**
+     * @param {string} key
+     * @param {PendingWrite} entry
+     */
+    function rememberPending(key, entry) {
+        if (pendingWrites.has(key)) {
+            pendingWrites.delete(key);
+        }
+        pendingWrites.set(key, entry);
+        while (pendingWrites.size > MAX_PENDING_WRITES) {
+            const oldest = pendingWrites.keys().next().value;
+            if (oldest == null) {
+                break;
+            }
+            pendingWrites.delete(oldest);
+            log.warn('pendingWrites capped; evicted oldest', {
+                evictedKey: oldest,
+                max: MAX_PENDING_WRITES,
+            });
+        }
+    }
 
     /**
      * @param {number} messageId
@@ -187,7 +213,7 @@ export function createRenderSlotUseCase(deps) {
         // D36：写盘前校验仍是发起时的 chat
         const chatNow = deps.host.getCurrentChatId();
         if (chatNow !== chatIdAtStart) {
-            pendingWrites.set(key, {
+            rememberPending(key, {
                 imageRef,
                 image,
                 chatId: chatIdAtStart,
@@ -222,7 +248,7 @@ export function createRenderSlotUseCase(deps) {
         });
         if (!recR.ok) {
             // D42：保留 imageRef，下次可只写盘
-            pendingWrites.set(key, {
+            rememberPending(key, {
                 imageRef,
                 image,
                 chatId: chatIdAtStart,
