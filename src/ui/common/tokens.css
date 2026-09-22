@@ -1,0 +1,40 @@
+/**
+ * L5 UI · 设计令牌（架构文档 §8.2）。W0 必须定死，后续代理不得改名。
+ * 全部定义在 #nai-dbgen-root 下，绝不碰 :root / html / body。
+ * 归属：W0 契约冻结（tokens）；样式消费归 W1-E / W2-*。
+ */
+
+#nai-dbgen-root {
+    /* 表层：跟随酒馆主题，保证在任何主题下都不突兀。均带兜底值 */
+    --nd-text: var(--SmartThemeBodyColor, #4b3040);
+    --nd-surface: var(--SmartThemeBlurTintColor, #fffdfd);
+    --nd-surface-2: var(--SmartThemeBotMesBlurTintColor, #fff0f6);
+    --nd-line: var(--SmartThemeBorderColor, rgba(123, 70, 96, 0.21));
+    --nd-muted: var(--SmartThemeEmColor, #7f5f70);
+    --nd-shadow-c: var(--SmartThemeShadowColor, rgba(123, 70, 96, 0.16));
+
+    /* 身份层：家族基因，不跟主题变 */
+    --nd-accent: #c13d75;
+    --nd-accent-deep: #aa2f65;
+    --nd-accent-soft: #f47eae;
+    --nd-danger: #d94f72;
+
+    /* 形状与尺寸：照搬本地项目 */
+    --nd-radius: 18px;
+    --nd-control-radius: 10px;
+    --nd-h-micro: 28px;
+    --nd-h-icon: 32px;
+    --nd-h: 36px;
+    --nd-h-primary: 40px;
+
+    /* 字号跟宿主缩放，字族留自己 */
+    font-size: var(--mainFontSize, 15px);
+    font-family: Aptos, "Microsoft YaHei UI", "PingFang SC", system-ui, sans-serif;
+    box-sizing: border-box;
+}
+
+#nai-dbgen-root *,
+#nai-dbgen-root *::before,
+#nai-dbgen-root *::after {
+    box-sizing: inherit;
+}
