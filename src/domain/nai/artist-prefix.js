@@ -17,7 +17,30 @@
  * @returns {NaiCaption}
  */
 export function prefixArtist(caption, artist) {
-    throw new Error('not implemented: prefixArtist');
+    if (!caption || typeof caption !== 'object') {
+        throw new Error('invalid argument: caption');
+    }
+    const posBase = caption.v4_prompt?.caption?.base_caption ?? '';
+    const negBase = caption.v4_negative_prompt?.caption?.base_caption ?? '';
+    const posChars = cloneCharCaptions(caption.v4_prompt?.caption?.char_captions);
+    const negChars = cloneCharCaptions(caption.v4_negative_prompt?.caption?.char_captions);
+
+    if (!artist) {
+        return cloneCaption(String(posBase), posChars, String(negBase), negChars);
+    }
+
+    const posArtist = String(artist.positive ?? '').trim();
+    const negArtist = String(artist.negative ?? '').trim();
+    if (!posArtist && !negArtist) {
+        return cloneCaption(String(posBase), posChars, String(negBase), negChars);
+    }
+
+    return cloneCaption(
+        prefixCaptionPart(String(posBase), posArtist),
+        posChars,
+        prefixCaptionPart(String(negBase), negArtist),
+        negChars,
+    );
 }
 
 /**
@@ -26,5 +49,58 @@ export function prefixArtist(caption, artist) {
  * @returns {string}
  */
 export function prefixCaptionPart(baseCaption, artistPart) {
-    throw new Error('not implemented: prefixCaptionPart');
+    const artist = artistPart == null ? '' : String(artistPart).trim();
+    if (!artist) {
+        return baseCaption == null ? '' : String(baseCaption);
+    }
+    const base = baseCaption == null ? '' : String(baseCaption);
+    if (!base.trim()) {
+        return artist;
+    }
+    return `${artist}, ${base}`;
+}
+
+/**
+ * @param {string} posBase
+ * @param {import('../model/nai-params.js').CharCaption[]} posChars
+ * @param {string} negBase
+ * @param {import('../model/nai-params.js').CharCaption[]} negChars
+ * @returns {NaiCaption}
+ */
+function cloneCaption(posBase, posChars, negBase, negChars) {
+    return {
+        v4_prompt: {
+            caption: {
+                base_caption: posBase,
+                char_captions: posChars,
+            },
+        },
+        v4_negative_prompt: {
+            caption: {
+                base_caption: negBase,
+                char_captions: negChars,
+            },
+        },
+    };
+}
+
+/**
+ * @param {unknown} raw
+ * @returns {import('../model/nai-params.js').CharCaption[]}
+ */
+function cloneCharCaptions(raw) {
+    if (!Array.isArray(raw)) {
+        return [];
+    }
+    return raw.map((c) => {
+        /** @type {import('../model/nai-params.js').CharCaption} */
+        const item = { char_caption: String(c?.char_caption ?? '') };
+        if (Array.isArray(c?.centers)) {
+            item.centers = c.centers.map((p) => ({
+                x: Number(p?.x) || 0,
+                y: Number(p?.y) || 0,
+            }));
+        }
+        return item;
+    });
 }

@@ -13,5 +13,12 @@
  * @returns {string}
  */
 export function formatTagBlock(entries) {
-    throw new Error('not implemented: formatTagBlock');
+    if (!Array.isArray(entries) || entries.length === 0) {
+        return '';
+    }
+    return entries
+        .filter((e) => e != null)
+        .map((e) => String(e.value ?? ''))
+        .filter((v) => v.length > 0)
+        .join('\n');
 }

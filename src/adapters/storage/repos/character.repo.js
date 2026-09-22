@@ -3,10 +3,286 @@
  * 归属：W1-D 存储代理实现。W0 仅冻结签名。
  */
 
+import { Ok, Err } from '../../../infra/result.js';
+import { configError } from '../../../infra/errors.js';
+import { mapIdbError, IDB_STORES } from '../idb.js';
+import {
+    CHARACTER_SCHEMA_VERSION,
+    migrateCharacter,
+    migrateCharacterGroup,
+    validateCharacter,
+    validateCharacterGroup,
+} from '../../../domain/model/character.js';
+import {
+    buildExportEnvelope,
+    catchToResult,
+    createChangeEmitter,
+    parseImportEnvelope,
+    resolveDuplicate,
+} from '../import-export.js';
+
 /**
  * @param {{ db: object, bus?: object }} deps
  * @returns {import('../../../ports/repository.port.js').CharacterRepository}
  */
 export function createCharacterRepo(deps) {
-    throw new Error('not implemented: createCharacterRepo');
+    const db = deps?.db;
+    if (!db) {
+        throw new Error('createCharacterRepo requires deps.db');
+    }
+    const changes = createChangeEmitter();
+    const GROUPS = IDB_STORES.CHARACTER_GROUPS;
+    const CHARS = IDB_STORES.CHARACTERS;
+
+    /**
+     * @param {unknown} err
+     */
+    function mapErr(err) {
+        if (err && typeof err === 'object' && 'category' in err && 'code' in err) {
+            return /** @type {import('../../../infra/errors.js').AppError} */ (err);
+        }
+        return mapIdbError(err);
+    }
+
+    return {
+        async listGroups() {
+            return catchToResult(async () => {
+                const rows = await db.getAll(GROUPS);
+                return rows
+                    .map((r) => validateCharacterGroup(r))
+                    .filter((r) => r.ok)
+                    .map((r) => r.value)
+                    .sort((a, b) => a.order - b.order || a.name.localeCompare(b.name));
+            }, mapErr, Ok, Err);
+        },
+
+        async getGroup(id) {
+            return catchToResult(async () => {
+                const row = await db.get(GROUPS, id);
+                if (!row) {
+                    return null;
+                }
+                const v = validateCharacterGroup(row);
+                return v.ok ? v.value : null;
+            }, mapErr, Ok, Err);
+        },
+
+        async putGroup(group) {
+            const validated = validateCharacterGroup(group);
+            if (!validated.ok) {
+                return validated;
+            }
+            return catchToResult(async () => {
+                await db.put(GROUPS, validated.value);
+                changes.emit({ type: 'group:put', id: validated.value.id, groupId: validated.value.id });
+                return validated.value;
+            }, mapErr, Ok, Err);
+        },
+
+        /**
+         * 删组时级联删除组内全部角色（需求 4.1：组是容器）。
+         */
+        async removeGroup(id) {
+            return catchToResult(async () => {
+                const members = typeof db.getAllByIndex === 'function'
+                    ? await db.getAllByIndex(CHARS, 'by_groupId', id)
+                    : (await db.getAll(CHARS)).filter((c) => c.groupId === id);
+                if (typeof db.runTransaction === 'function') {
+                    await db.runTransaction([GROUPS, CHARS], 'readwrite', (stores) => {
+                        stores[GROUPS].delete(id);
+                        for (const m of members) {
+                            stores[CHARS].delete(m.id);
+                        }
+                    });
+                } else {
+                    for (const m of members) {
+                        await db.delete(CHARS, m.id);
+                    }
+                    await db.delete(GROUPS, id);
+                }
+                changes.emit({ type: 'group:remove', id, groupId: id });
+            }, mapErr, Ok, Err);
+        },
+
+        async listByGroup(groupId) {
+            return catchToResult(async () => {
+                const rows = typeof db.getAllByIndex === 'function'
+                    ? await db.getAllByIndex(CHARS, 'by_groupId', groupId)
+                    : (await db.getAll(CHARS)).filter((c) => c.groupId === groupId);
+                return rows
+                    .map((r) => validateCharacter(r))
+                    .filter((r) => r.ok)
+                    .map((r) => r.value)
+                    .sort((a, b) => a.name.localeCompare(b.name));
+            }, mapErr, Ok, Err);
+        },
+
+        async get(id) {
+            return catchToResult(async () => {
+                const row = await db.get(CHARS, id);
+                if (!row) {
+                    return null;
+                }
+                const v = validateCharacter(row);
+                return v.ok ? v.value : null;
+            }, mapErr, Ok, Err);
+        },
+
+        async put(character) {
+            const validated = validateCharacter(character);
+            if (!validated.ok) {
+                return validated;
+            }
+            return catchToResult(async () => {
+                const group = await db.get(GROUPS, validated.value.groupId);
+                if (!group) {
+                    throw configError({
+                        code: 'CHAR_GROUP_MISSING',
+                        message: '角色所属组不存在',
+                        hint: '请先创建或选择角色组',
+                        context: { groupId: validated.value.groupId },
+                    });
+                }
+                await db.put(CHARS, validated.value);
+                changes.emit({
+                    type: 'character:put',
+                    id: validated.value.id,
+                    groupId: validated.value.groupId,
+                });
+                return validated.value;
+            }, mapErr, Ok, Err);
+        },
+
+        async remove(id) {
+            return catchToResult(async () => {
+                const existing = await db.get(CHARS, id);
+                await db.delete(CHARS, id);
+                changes.emit({
+                    type: 'character:remove',
+                    id,
+                    groupId: existing?.groupId,
+                });
+            }, mapErr, Ok, Err);
+        },
+
+        async exportJson() {
+            return catchToResult(async () => {
+                const groups = await db.getAll(GROUPS);
+                const characters = await db.getAll(CHARS);
+                return buildExportEnvelope({
+                    kind: 'character',
+                    schemaVersion: CHARACTER_SCHEMA_VERSION,
+                    payload: { groups, characters },
+                });
+            }, mapErr, Ok, Err);
+        },
+
+        async importJson(data, opts) {
+            const parsed = parseImportEnvelope(data, 'character');
+            if (!parsed.ok) {
+                return Err(configError({
+                    code: 'CHAR_IMPORT_SHAPE',
+                    message: parsed.error,
+                }));
+            }
+            const strategy = opts?.strategy || 'skip';
+            const body = parsed.value.body;
+            const groupsIn = Array.isArray(body.groups) ? body.groups : [];
+            const charsIn = Array.isArray(body.characters) ? body.characters : [];
+
+            let imported = 0;
+            let skipped = 0;
+            /** @type {string[]} */
+            const errors = [];
+            /** @type {Map<string, string>} 旧 groupId → 新 groupId（rename 时） */
+            const groupIdMap = new Map();
+
+            try {
+                const existingGroups = await db.getAll(GROUPS);
+                const groupById = new Map(existingGroups.map((g) => [g.id, g]));
+
+                for (const raw of groupsIn) {
+                    const fromVersion = Number(raw?.schemaVersion) || parsed.value.schemaVersion;
+                    const migrated = migrateCharacterGroup(raw, fromVersion);
+                    if (!migrated.ok) {
+                        errors.push(migrated.error.message);
+                        continue;
+                    }
+                    const validated = validateCharacterGroup(migrated.value);
+                    if (!validated.ok) {
+                        errors.push(validated.error.message);
+                        continue;
+                    }
+                    const decision = resolveDuplicate({
+                        incoming: validated.value,
+                        existing: groupById.get(validated.value.id),
+                        strategy,
+                        idPrefix: 'cg',
+                    });
+                    if (decision.action === 'skip') {
+                        skipped += 1;
+                        groupIdMap.set(validated.value.id, validated.value.id);
+                        continue;
+                    }
+                    await db.put(GROUPS, decision.entity);
+                    groupIdMap.set(validated.value.id, decision.entity.id);
+                    groupById.set(decision.entity.id, decision.entity);
+                    imported += 1;
+                }
+
+                const existingChars = await db.getAll(CHARS);
+                const charById = new Map(existingChars.map((c) => [c.id, c]));
+
+                for (const raw of charsIn) {
+                    const fromVersion = Number(raw?.schemaVersion) || parsed.value.schemaVersion;
+                    const migrated = migrateCharacter(raw, fromVersion);
+                    if (!migrated.ok) {
+                        errors.push(migrated.error.message);
+                        continue;
+                    }
+                    const mappedGroupId = groupIdMap.get(migrated.value.groupId) || migrated.value.groupId;
+                    const validated = validateCharacter({
+                        ...migrated.value,
+                        groupId: mappedGroupId,
+                    });
+                    if (!validated.ok) {
+                        errors.push(validated.error.message);
+                        continue;
+                    }
+                    const decision = resolveDuplicate({
+                        incoming: validated.value,
+                        existing: charById.get(validated.value.id),
+                        strategy,
+                        idPrefix: 'ch',
+                    });
+                    if (decision.action === 'skip') {
+                        skipped += 1;
+                        continue;
+                    }
+                    // rename 后仍挂到映射后的组
+                    const entity = {
+                        ...decision.entity,
+                        groupId: mappedGroupId,
+                    };
+                    const groupExists = await db.get(GROUPS, entity.groupId);
+                    if (!groupExists) {
+                        errors.push(`角色 ${entity.name || entity.id} 缺少所属组`);
+                        continue;
+                    }
+                    await db.put(CHARS, entity);
+                    charById.set(entity.id, entity);
+                    imported += 1;
+                }
+
+                changes.emit({ type: 'import', imported, skipped });
+                return Ok({ imported, skipped, errors });
+            } catch (err) {
+                return Err(mapErr(err));
+            }
+        },
+
+        onChanged(fn) {
+            return changes.subscribe(fn);
+        },
+    };
 }

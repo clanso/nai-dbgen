@@ -1,0 +1,15 @@
+{
+    "id": "nai-dbgen-0001-slot-to-widget",
+    "scriptName": "nai-dbgen:slot-to-widget",
+    "findRegex": "/<IMG>\\s*(\\d+)\\s*<\\/IMG>/gi",
+    "replaceString": "<div class=\"nai-slot\" data-slot=\"$1\"><button class=\"nai-slot-btn\"></button><div class=\"nai-slot-img\"></div></div>",
+    "trimStrings": [],
+    "placement": [2],
+    "disabled": false,
+    "markdownOnly": true,
+    "promptOnly": false,
+    "runOnEdit": true,
+    "substituteRegex": 0,
+    "minDepth": null,
+    "maxDepth": null
+}

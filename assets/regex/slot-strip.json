@@ -1,0 +1,15 @@
+{
+    "id": "nai-dbgen-0002-slot-strip",
+    "scriptName": "nai-dbgen:slot-strip",
+    "findRegex": "/<IMG>\\s*(\\d+)\\s*<\\/IMG>/gi",
+    "replaceString": "",
+    "trimStrings": [],
+    "placement": [2],
+    "disabled": false,
+    "markdownOnly": false,
+    "promptOnly": true,
+    "runOnEdit": false,
+    "substituteRegex": 0,
+    "minDepth": null,
+    "maxDepth": null
+}

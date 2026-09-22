@@ -10,5 +10,8 @@
  * @returns {string}
  */
 export function formatWorldInfoBlock(worldInfoString) {
-    throw new Error('not implemented: formatWorldInfoBlock');
+    if (worldInfoString == null) {
+        return '';
+    }
+    return String(worldInfoString).trim();
 }

@@ -11,7 +11,7 @@ export const SLOT_TOKEN_PATTERN_SOURCE = '<IMG>\\s*(\\d+)\\s*</IMG>';
  * @returns {RegExp} 全局正则，用于匹配正文中的 slot
  */
 export function createSlotTokenRegex() {
-    throw new Error('not implemented: createSlotTokenRegex');
+    return new RegExp(SLOT_TOKEN_PATTERN_SOURCE, 'gi');
 }
 
 /**
@@ -19,7 +19,11 @@ export function createSlotTokenRegex() {
  * @returns {string} `<IMG>\n{n}\n</IMG>` 规范形态
  */
 export function formatSlotToken(slotId) {
-    throw new Error('not implemented: formatSlotToken');
+    const id = Number(slotId);
+    if (!Number.isInteger(id) || id < 1) {
+        throw new Error('invalid argument: slotId');
+    }
+    return `<IMG>\n${id}\n</IMG>`;
 }
 
 /**
@@ -27,7 +31,18 @@ export function formatSlotToken(slotId) {
  * @returns {number[]} 正文中出现的全部 slotId（保序）
  */
 export function parseSlotIds(text) {
-    throw new Error('not implemented: parseSlotIds');
+    if (typeof text !== 'string' || text.length === 0) {
+        return [];
+    }
+    const re = createSlotTokenRegex();
+    /** @type {number[]} */
+    const ids = [];
+    let m = re.exec(text);
+    while (m) {
+        ids.push(Number(m[1]));
+        m = re.exec(text);
+    }
+    return ids;
 }
 
 /**
@@ -36,7 +51,10 @@ export function parseSlotIds(text) {
  * @returns {string}
  */
 export function stripSlotTokens(text) {
-    throw new Error('not implemented: stripSlotTokens');
+    if (typeof text !== 'string') {
+        return '';
+    }
+    return text.replace(createSlotTokenRegex(), '');
 }
 
 /**
@@ -44,5 +62,8 @@ export function stripSlotTokens(text) {
  * @returns {string}
  */
 export function slotWidgetReplaceTemplate() {
-    throw new Error('not implemented: slotWidgetReplaceTemplate');
+    return '<div class="nai-slot" data-slot="$1">'
+        + '<button class="nai-slot-btn"></button>'
+        + '<div class="nai-slot-img"></div>'
+        + '</div>';
 }

@@ -14,5 +14,29 @@
  * @returns {string}
  */
 export function formatCharacterBlock(characters) {
-    throw new Error('not implemented: formatCharacterBlock');
+    if (!Array.isArray(characters) || characters.length === 0) {
+        return '';
+    }
+    /** @type {string[]} */
+    const parts = [];
+    for (const character of characters) {
+        if (!character) {
+            continue;
+        }
+        const name = String(character.name ?? '');
+        const fixed = String(character.fixedFeatures ?? '');
+        /** @type {string[]} */
+        const lines = [`${name}：`, `固定特征：${fixed}`];
+        const vars = Array.isArray(character.variableFeatures)
+            ? character.variableFeatures.filter((v) => v && (v.name || v.prompt))
+            : [];
+        if (vars.length > 0) {
+            lines.push('非固定特征：');
+            for (const vf of vars) {
+                lines.push(`   ${String(vf.name ?? '')}：${String(vf.prompt ?? '')}`);
+            }
+        }
+        parts.push(lines.join('\n'));
+    }
+    return parts.join('\n\n');
 }

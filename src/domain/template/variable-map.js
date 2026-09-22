@@ -17,12 +17,51 @@ export const VARIABLE_NAMES = Object.freeze({
  * @property {string[]} aliases ASCII 等别名（不含花括号）
  */
 
+/** @type {readonly VariableAlias[]} */
+const ALIASES = Object.freeze([
+    Object.freeze({
+        canonical: VARIABLE_NAMES.WORLDINFO,
+        aliases: Object.freeze(['worldbook', 'world_info', 'worldinfo']),
+    }),
+    Object.freeze({
+        canonical: VARIABLE_NAMES.CONTEXT,
+        aliases: Object.freeze(['context', 'current_context']),
+    }),
+    Object.freeze({
+        canonical: VARIABLE_NAMES.CHARACTER,
+        aliases: Object.freeze(['character', 'characters', 'character_library']),
+    }),
+    Object.freeze({
+        canonical: VARIABLE_NAMES.TAG,
+        aliases: Object.freeze(['tags', 'tag', 'tag_library']),
+    }),
+]);
+
+/** @type {Map<string, string>|null} */
+let resolveCache = null;
+
+/**
+ * @returns {Map<string, string>}
+ */
+function buildResolveMap() {
+    /** @type {Map<string, string>} */
+    const map = new Map();
+    for (const item of ALIASES) {
+        map.set(item.canonical, item.canonical);
+        for (const alias of item.aliases) {
+            map.set(alias, item.canonical);
+            map.set(alias.toLowerCase(), item.canonical);
+        }
+    }
+    return map;
+}
+
 /**
  * 返回全部变量登记项（实现时填全别名，如 worldbook / context / character / tags）。
  * @returns {readonly VariableAlias[]}
  */
 export function listVariableAliases() {
-    throw new Error('not implemented: listVariableAliases');
+    return ALIASES;
 }
 
 /**
@@ -31,5 +70,22 @@ export function listVariableAliases() {
  * @returns {string|null}
  */
 export function resolveVariableName(name) {
-    throw new Error('not implemented: resolveVariableName');
+    if (typeof name !== 'string') {
+        return null;
+    }
+    const trimmed = name.trim();
+    if (!trimmed) {
+        return null;
+    }
+    if (!resolveCache) {
+        resolveCache = buildResolveMap();
+    }
+    if (resolveCache.has(trimmed)) {
+        return /** @type {string} */ (resolveCache.get(trimmed));
+    }
+    const lower = trimmed.toLowerCase();
+    if (resolveCache.has(lower)) {
+        return /** @type {string} */ (resolveCache.get(lower));
+    }
+    return null;
 }

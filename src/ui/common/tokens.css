@@ -27,9 +27,28 @@
     --nd-h: 36px;
     --nd-h-primary: 40px;
 
+    /* 派生结构令牌（components.css 只消费变量，不写死色值） */
+    --nd-soft: var(--SmartThemeEmColor, #735466);
+    --nd-line-strong: color-mix(in srgb, var(--nd-line) 70%, var(--nd-text));
+    --nd-on-accent: #ffffff;
+    --nd-shadow: 0 22px 60px var(--nd-shadow-c);
+    --nd-shadow-card: 0 18px 50px color-mix(in srgb, var(--nd-shadow-c) 60%, transparent);
+    --nd-cover-grad-a: #f9d7e6;
+    --nd-cover-grad-b: #f0e2fa;
+    --nd-accent-wash: color-mix(in srgb, var(--nd-accent-soft) 18%, var(--nd-surface));
+    --nd-accent-ring: color-mix(in srgb, var(--nd-accent) 28%, transparent);
+    --nd-danger-wash: color-mix(in srgb, var(--nd-danger) 6%, var(--nd-surface));
+    --nd-danger-ring: color-mix(in srgb, var(--nd-danger) 22%, transparent);
+    --nd-toggle-track: color-mix(in srgb, var(--nd-muted) 28%, var(--nd-surface));
+    --nd-toggle-knob: color-mix(in srgb, var(--nd-muted) 55%, var(--nd-surface));
+    --nd-status-idle: color-mix(in srgb, var(--nd-muted) 45%, var(--nd-surface));
+    --nd-input-bg: var(--nd-surface);
+    --nd-serif: Georgia, "Songti SC", "Noto Serif SC", serif;
+
     /* 字号跟宿主缩放，字族留自己 */
     font-size: var(--mainFontSize, 15px);
     font-family: Aptos, "Microsoft YaHei UI", "PingFang SC", system-ui, sans-serif;
+    color: var(--nd-text);
     box-sizing: border-box;
 }
 

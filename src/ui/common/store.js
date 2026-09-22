@@ -13,5 +13,44 @@
  * }}
  */
 export function createStore(initial) {
-    throw new Error('not implemented: createStore');
+    /** @type {T} */
+    let state = initial;
+    /** @type {Set<(state: T) => void>} */
+    const listeners = new Set();
+
+    return {
+        get() {
+            return state;
+        },
+        set(next) {
+            const value = typeof next === 'function'
+                ? /** @type {(prev: T) => T} */ (next)(state)
+                : next;
+            if (Object.is(value, state)) {
+                return;
+            }
+            state = value;
+            for (const fn of [...listeners]) {
+                try {
+                    fn(state);
+                } catch {
+                    // 订阅者异常不得拖垮 store
+                }
+            }
+        },
+        subscribe(fn) {
+            if (typeof fn !== 'function') {
+                return () => {};
+            }
+            listeners.add(fn);
+            let active = true;
+            return () => {
+                if (!active) {
+                    return;
+                }
+                active = false;
+                listeners.delete(fn);
+            };
+        },
+    };
 }

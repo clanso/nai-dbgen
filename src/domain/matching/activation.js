@@ -3,6 +3,8 @@
  * 归属：W1-A 领域代理实现。W0 仅冻结签名。
  */
 
+import { matchAnyKeyword } from './keyword-matcher.js';
+
 /**
  * @typedef {import('../model/character.js').Character} Character
  * @typedef {import('../model/character.js').CharacterGroup} CharacterGroup
@@ -23,5 +25,33 @@
  * @returns {Character[]} 命中集；未激活组内角色绝不出现
  */
 export function activateCharacters(groups, characters, contextText, globals) {
-    throw new Error('not implemented: activateCharacters');
+    if (!Array.isArray(groups) || !Array.isArray(characters)) {
+        return [];
+    }
+    const text = typeof contextText === 'string' ? contextText : '';
+    const matchGlobals = globals ?? { caseSensitive: false, matchWholeWords: false };
+
+    const activeGroups = groups
+        .filter((g) => g && g.active === true)
+        .slice()
+        .sort((a, b) => (Number(a.order) || 0) - (Number(b.order) || 0));
+
+    /** @type {Character[]} */
+    const hit = [];
+    for (const group of activeGroups) {
+        for (const character of characters) {
+            if (!character || character.groupId !== group.id) {
+                continue;
+            }
+            if (matchAnyKeyword(
+                text,
+                character.keywords ?? [],
+                character.matchOverrides ?? null,
+                matchGlobals,
+            )) {
+                hit.push(character);
+            }
+        }
+    }
+    return hit;
 }

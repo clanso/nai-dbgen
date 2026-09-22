@@ -15,7 +15,22 @@
  * @returns {BlockSet}
  */
 export function createBlockSet(entries) {
-    throw new Error('not implemented: createBlockSet');
+    /** @type {BlockSet} */
+    const map = new Map();
+    if (entries == null) {
+        return map;
+    }
+    for (const entry of entries) {
+        if (!Array.isArray(entry) || entry.length < 2) {
+            continue;
+        }
+        const [name, text] = entry;
+        if (typeof name !== 'string') {
+            continue;
+        }
+        map.set(name, text == null ? '' : String(text));
+    }
+    return map;
 }
 
 /**
@@ -25,7 +40,15 @@ export function createBlockSet(entries) {
  * @returns {BlockSet} 新 Map（或同引用，由实现决定；推荐不可变）
  */
 export function setBlock(set, variableName, text) {
-    throw new Error('not implemented: setBlock');
+    if (!(set instanceof Map)) {
+        throw new Error('invalid argument: set');
+    }
+    if (typeof variableName !== 'string') {
+        throw new Error('invalid argument: variableName');
+    }
+    const next = new Map(set);
+    next.set(variableName, text == null ? '' : String(text));
+    return next;
 }
 
 /**
@@ -34,7 +57,14 @@ export function setBlock(set, variableName, text) {
  * @returns {string} 缺失时返回 ''（需求：为空则为空）
  */
 export function getBlock(set, variableName) {
-    throw new Error('not implemented: getBlock');
+    if (!(set instanceof Map) || typeof variableName !== 'string') {
+        return '';
+    }
+    if (!set.has(variableName)) {
+        return '';
+    }
+    const v = set.get(variableName);
+    return v == null ? '' : String(v);
 }
 
 /**
@@ -42,5 +72,13 @@ export function getBlock(set, variableName) {
  * @returns {Readonly<Record<string, string>>} 只读快照，供日志/面板；非拼接
  */
 export function blockSetToRecord(set) {
-    throw new Error('not implemented: blockSetToRecord');
+    /** @type {Record<string, string>} */
+    const out = {};
+    if (!(set instanceof Map)) {
+        return Object.freeze(out);
+    }
+    for (const [k, v] of set) {
+        out[k] = v == null ? '' : String(v);
+    }
+    return Object.freeze(out);
 }
