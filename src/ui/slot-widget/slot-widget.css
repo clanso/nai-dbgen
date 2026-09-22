@@ -1,1 +1,220 @@
-/* L5 UI · slot 控件样式。归属：W2-G。W0 仅建空文件占位。 */
+/**
+ * L5 UI · slot 控件样式。归属：W2-G。
+ *
+ * §8.3 两个命名空间：
+ * - 唯一需要 custom- 前缀：挂载前骨架占位（过 DOMPurify）
+ * - 挂载后 JS 补的 .nd-slot* 类名未经净化，不加前缀
+ *
+ * 控件在气泡内、不在 #nai-dbgen-root 下 → 在 .nd-slot 上镜像 --nd-* 令牌。
+ * 硬化关键属性，抵御宿主消息内全局 p/img/button 规则泄漏。
+ */
+
+/* —— 唯一带 custom- 前缀：挂载完成前的占位，避免无样式闪烁 —— */
+.custom-nai-slot {
+    min-height: 34px;
+}
+
+/* —— 挂载后（JS 补类，未经净化） —— */
+.nd-slot {
+    /* 令牌镜像：气泡外无 #nai-dbgen-root 时仍可用 */
+    --nd-text: var(--SmartThemeBodyColor, #4b3040);
+    --nd-surface: var(--SmartThemeBlurTintColor, #fffdfd);
+    --nd-surface-2: var(--SmartThemeBotMesBlurTintColor, #fff0f6);
+    --nd-line: var(--SmartThemeBorderColor, rgba(123, 70, 96, 0.21));
+    --nd-muted: var(--SmartThemeEmColor, #7f5f70);
+    --nd-accent: #c13d75;
+    --nd-accent-deep: #aa2f65;
+    --nd-accent-soft: #f47eae;
+    --nd-danger: #d94f72;
+    --nd-on-accent: #ffffff;
+    --nd-control-radius: 10px;
+    --nd-h: 36px;
+    --nd-accent-wash: color-mix(in srgb, var(--nd-accent-soft) 18%, var(--nd-surface));
+    --nd-danger-wash: color-mix(in srgb, var(--nd-danger) 6%, var(--nd-surface));
+    --nd-danger-ring: color-mix(in srgb, var(--nd-danger) 22%, transparent);
+    --nd-line-strong: color-mix(in srgb, var(--nd-line) 70%, var(--nd-text));
+
+    container-type: inline-size;
+    container-name: nd-slot;
+    display: flex;
+    flex-direction: column;
+    align-items: stretch;
+    gap: 0.45em;
+    width: 100%;
+    max-width: 100%;
+    margin: 0.55em 0;
+    padding: 0;
+    box-sizing: border-box;
+    font-family: Aptos, "Microsoft YaHei UI", "PingFang SC", system-ui, sans-serif;
+    font-size: var(--mainFontSize, 15px);
+    color: var(--nd-text);
+    line-height: 1.35;
+}
+
+.nd-slot *,
+.nd-slot *::before,
+.nd-slot *::after {
+    box-sizing: border-box;
+}
+
+/* 硬化：宿主 mes_text 内 button / img / p 全局规则 */
+.nd-slot .nd-slot__btn {
+    appearance: none;
+    -webkit-appearance: none;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    align-self: flex-start;
+    height: var(--nd-h);
+    min-height: var(--nd-h);
+    max-width: 100%;
+    margin: 0;
+    padding: 0 14px;
+    border: 1px solid var(--nd-accent);
+    border-radius: var(--nd-control-radius);
+    background: var(--nd-accent);
+    color: var(--nd-on-accent);
+    font: inherit;
+    font-size: 0.8em;
+    font-weight: 700;
+    line-height: 1.2;
+    letter-spacing: normal;
+    text-transform: none;
+    text-decoration: none;
+    white-space: nowrap;
+    cursor: pointer;
+    float: none;
+    position: relative;
+    z-index: 1;
+}
+
+.nd-slot .nd-slot__btn:hover:not(:disabled) {
+    background: var(--nd-accent-deep);
+    border-color: var(--nd-accent-deep);
+}
+
+.nd-slot .nd-slot__btn:disabled {
+    opacity: 0.65;
+    cursor: wait;
+}
+
+.nd-slot .nd-slot__btn:focus-visible {
+    outline: 2px solid var(--nd-accent-deep);
+    outline-offset: 2px;
+}
+
+.nd-slot--done .nd-slot__btn,
+.nd-slot--error .nd-slot__btn {
+    background: var(--nd-surface-2);
+    border-color: var(--nd-line);
+    color: var(--nd-text);
+}
+
+.nd-slot--done .nd-slot__btn:hover:not(:disabled),
+.nd-slot--error .nd-slot__btn:hover:not(:disabled) {
+    background: var(--nd-accent-wash);
+    border-color: var(--nd-line-strong);
+}
+
+.nd-slot .nd-slot__status {
+    margin: 0;
+    padding: 0;
+    font-size: 0.73em;
+    color: var(--nd-muted);
+    min-height: 0;
+}
+
+.nd-slot .nd-slot__status:empty {
+    display: none;
+}
+
+.nd-slot .nd-slot__img {
+    display: block;
+    width: 100%;
+    max-width: 100%;
+    margin: 0;
+    padding: 0;
+    border: 0;
+    background: transparent;
+    float: none;
+    clear: both;
+}
+
+.nd-slot .nd-slot__img:empty {
+    display: none;
+}
+
+.nd-slot .nd-slot__thumb {
+    display: block;
+    width: 100%;
+    max-width: min(100%, 28rem);
+    height: auto;
+    margin: 0;
+    padding: 0;
+    border: 1px solid var(--nd-line);
+    border-radius: var(--nd-control-radius);
+    background: var(--nd-surface);
+    object-fit: contain;
+    cursor: zoom-in;
+    float: none;
+}
+
+.nd-slot .nd-slot__error {
+    margin: 0;
+    padding: 0.55em 0.7em;
+    border: 1px solid var(--nd-danger-ring);
+    border-radius: var(--nd-control-radius);
+    background: var(--nd-danger-wash);
+    color: var(--nd-danger);
+    font-size: 0.73em;
+    line-height: 1.4;
+}
+
+.nd-slot .nd-slot__error[hidden] {
+    display: none !important;
+}
+
+.nd-slot .nd-slot__error-msg {
+    margin: 0;
+    padding: 0;
+    color: var(--nd-danger);
+    font-weight: 600;
+}
+
+.nd-slot .nd-slot__error-trace {
+    margin: 0.35em 0 0;
+    padding: 0;
+    color: var(--nd-muted);
+    font-weight: 400;
+    word-break: break-all;
+}
+
+/* 窄容器：按钮可换行满宽 */
+@container nd-slot (max-width: 220px) {
+    .nd-slot .nd-slot__btn {
+        align-self: stretch;
+        width: 100%;
+        white-space: normal;
+    }
+}
+
+/* 查看器（弹窗内，通常在 #nai-dbgen-root） */
+.nd-slot-viewer {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    width: 100%;
+    max-width: 100%;
+    padding: 0.5em;
+}
+
+.nd-slot-viewer__img {
+    display: block;
+    max-width: 100%;
+    max-height: min(80vh, 900px);
+    width: auto;
+    height: auto;
+    object-fit: contain;
+    margin: 0;
+    border-radius: var(--nd-control-radius, 10px);
+}

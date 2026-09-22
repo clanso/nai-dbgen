@@ -1,1 +1,25 @@
-/* L5 UI · 抽屉样式。归属：W2-H。W0 占位。 */
+/* L5 UI · 抽屉样式。归属：W2-H。全部挂 #nai-dbgen-root */
+
+#nai-dbgen-root.nd-drawer,
+#nai-dbgen-root .nd-drawer {
+    display: grid;
+    gap: 12px;
+    padding: 8px 0 12px;
+}
+
+#nai-dbgen-root .nd-drawer__title {
+    margin: 0;
+    font-family: var(--nd-serif);
+    font-size: 1.05em;
+    color: var(--nd-text);
+}
+
+#nai-dbgen-root .nd-drawer__pickers {
+    display: grid;
+    gap: 10px;
+}
+
+#nai-dbgen-root .nd-drawer__picker {
+    display: grid;
+    gap: 4px;
+}

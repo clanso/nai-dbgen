@@ -1,0 +1,396 @@
+import { describe, it } from 'node:test';
+import assert from 'node:assert/strict';
+import { isOk, Ok } from '../../src/infra/result.js';
+import { ARTIST_PREVIEW_SIZE } from '../../src/domain/model/nai-params.js';
+import { stripSlotTokens } from '../../src/domain/slot/slot-token.js';
+import { createContextCollector } from '../../src/application/context-collector.js';
+import { createWorldInfoResolver } from '../../src/application/worldinfo-resolver.js';
+import {
+    buildPipeline,
+    createFakeHost,
+    baseSettings,
+    makeCaption,
+} from './_fakes.js';
+
+describe('context-collector', () => {
+    it('strips <IMG> slots from window text', () => {
+        const host = createFakeHost({
+            aiMessages: [{
+                messageId: 1,
+                name: 'Bot',
+                text: 'Hello <IMG>\n3\n</IMG> world',
+                isUser: false,
+                isSystem: false,
+            }],
+        });
+        const collector = createContextCollector({
+            host,
+            loadSettings: () => baseSettings({ contextWindowSize: 5 }),
+        });
+        const win = collector.collect();
+        assert.equal(win.messages.length, 1);
+        assert.equal(win.messages[0].text.includes('<IMG>'), false);
+        assert.equal(win.text.includes('<IMG>'), false);
+        assert.match(win.text, /Hello\s+world/);
+    });
+
+    it('uses PluginSettings.contextWindowSize', () => {
+        const host = createFakeHost({
+            aiMessages: [
+                { messageId: 3, name: 'B', text: 'a', isUser: false, isSystem: false },
+                { messageId: 2, name: 'B', text: 'b', isUser: false, isSystem: false },
+                { messageId: 1, name: 'B', text: 'c', isUser: false, isSystem: false },
+            ],
+        });
+        let nCalls = 0;
+        const orig = host.getRecentAiMessages.bind(host);
+        host.getRecentAiMessages = (n) => {
+            nCalls += 1;
+            assert.equal(n, 2);
+            return orig(n);
+        };
+        const collector = createContextCollector({
+            host,
+            loadSettings: () => baseSettings({ contextWindowSize: 2 }),
+        });
+        collector.collect();
+        assert.equal(nCalls, 1);
+    });
+});
+
+describe('generateSlots seven-step pipeline', () => {
+    it('runs end-to-end with fake ports and writes slot', async () => {
+        const p = buildPipeline();
+        const r = await p.generateSlots.execute(2);
+        assert.equal(isOk(r), true, r.ok ? '' : r.error?.message);
+        assert.equal(r.value.traceId, 'trace-fixed');
+        assert.equal(r.value.llmCallCount, 2);
+        assert.equal(r.value.records.length, 1);
+        assert.equal(r.value.records[0].slotId, 1);
+
+        const mes = p.host.getMessage(2);
+        assert.ok(mes.text.includes('<IMG>'));
+        assert.ok(mes.text.includes('1'));
+        assert.equal(mes.text.includes('a garden scene'), false);
+
+        const stored = await p.slotRepo.get(2, 1);
+        assert.equal(isOk(stored) && stored.value != null, true);
+    });
+
+    it('derives all four blocks from the same contextWindow', async () => {
+        const p = buildPipeline();
+        const r = await p.generateSlots.execute(2);
+        assert.equal(isOk(r), true);
+
+        // 世界书只被要了一次窗口
+        assert.equal(p.host.resolveWorldInfoCalls.length, 1);
+        const wiWindow = p.host.resolveWorldInfoCalls[0];
+        assert.ok(Array.isArray(wiWindow));
+        assert.ok(wiWindow.every((m) => !String(m.text).includes('<IMG>')));
+
+        // 召回与提示词 LLM 看到的上下文同源（剥 slot 后）
+        assert.equal(p.llmCalls.length, 2);
+        const recallMsg = p.llmCalls[0].messages.map((m) => m.content).join('\n');
+        const promptMsg = p.llmCalls[1].messages.map((m) => m.content).join('\n');
+        assert.ok(recallMsg.includes('Alice walked into the garden.'));
+        assert.ok(!recallMsg.includes('<IMG>'));
+        assert.ok(promptMsg.includes('Alice walked into the garden.'));
+        assert.ok(promptMsg.includes('WORLD_INFO_TEXT'));
+        assert.ok(promptMsg.includes('Alice：') || promptMsg.includes('black hair'));
+        assert.ok(promptMsg.includes('flower garden'));
+        // 未激活组角色不得出现
+        assert.equal(promptMsg.includes('should-not-appear'), false);
+        // 未激活库不得进入召回候选
+        assert.equal(recallMsg.includes('night'), false);
+    });
+
+    it('threads one traceId through both LLM calls', async () => {
+        const p = buildPipeline();
+        const r = await p.generateSlots.execute(2, { traceId: 'my-trace' });
+        assert.equal(isOk(r), true);
+        assert.equal(r.value.traceId, 'my-trace');
+        assert.equal(p.llmCalls.length, 2);
+        assert.equal(p.llmCalls[0].traceId, 'my-trace');
+        assert.equal(p.llmCalls[1].traceId, 'my-trace');
+        assert.equal(p.llmCalls[0].config.id, 'llm-recall');
+        assert.equal(p.llmCalls[1].config.id, 'llm-prompt');
+    });
+
+    it('degrades when worldinfo fails but continues other blocks', async () => {
+        const p = buildPipeline({
+            hostOpts: { worldInfoFail: true },
+        });
+
+        const r = await p.generateSlots.execute(2);
+        assert.equal(isOk(r), true, r.ok ? '' : r.error?.message);
+        assert.equal(p.llmCalls.length, 2);
+        const promptMsg = p.llmCalls[1].messages.map((m) => m.content).join('\n');
+        // 世界书空，但角色/标签/上下文仍在
+        assert.ok(promptMsg.includes('Alice walked into the garden.'));
+        assert.ok(promptMsg.includes('flower garden') || promptMsg.includes('black hair'));
+        assert.equal(promptMsg.includes('WORLD_INFO_TEXT'), false);
+    });
+});
+
+describe('renderSlot + imageGen', () => {
+    it('renders with replaceCharacterKeywords=false always', async () => {
+        const p = buildPipeline();
+        const gen = await p.generateSlots.execute(2);
+        assert.equal(isOk(gen), true);
+
+        const r = await p.renderSlot.execute(2, 1);
+        assert.equal(isOk(r), true);
+        assert.ok(r.value.traceId);
+        // 出图用独立 trace，不强制等于 generate 的
+        assert.equal(p.naiCalls.length, 1);
+        // 装配后不应做关键字替换：caption 保持模型原文（画师串会前置）
+        const input = p.naiCalls[0].payload.input;
+        assert.ok(typeof input === 'string');
+        assert.ok(r.value.record.images.length >= 1);
+    });
+
+    it('replaceCharacterKeywords both modes; never inferred from caption source', async () => {
+        const p = buildPipeline();
+
+        // 显式 false
+        let r = await p.imageGen.generate({
+            caption: makeCaption('Alice in garden'),
+            replaceCharacterKeywords: false,
+        });
+        assert.equal(isOk(r), true);
+        const payloadOff = p.naiCalls[p.naiCalls.length - 1].payload;
+        assert.ok(String(payloadOff.input).includes('Alice'));
+
+        // 显式 true：关键字换固定特征
+        r = await p.imageGen.generate({
+            caption: makeCaption('Alice in garden'),
+            replaceCharacterKeywords: true,
+        });
+        assert.equal(isOk(r), true);
+        const payloadOn = p.naiCalls[p.naiCalls.length - 1].payload;
+        assert.ok(String(payloadOn.input).includes('black hair'));
+        assert.equal(String(payloadOn.input).includes('Alice'), false);
+
+        // 缺省布尔 → 抛编程错误（绝不推断）
+        await assert.rejects(
+            async () => p.imageGen.generate({
+                caption: makeCaption('hand-filled Alice'),
+                // @ts-expect-error intentional
+                replaceCharacterKeywords: undefined,
+            }),
+            /replaceCharacterKeywords/,
+        );
+    });
+});
+
+describe('artist preview', () => {
+    it('uses the editing artist string not the global active one; size 832×1216', async () => {
+        const p = buildPipeline();
+        const r = await p.artistPreview.preview({
+            artistId: 'artist-editing',
+            promptText: 'preview prompt',
+            saveAsPreview: true,
+        });
+        assert.equal(isOk(r), true, r.ok ? '' : r.error?.message);
+        assert.equal(p.naiCalls.length, 1);
+        const { payload } = p.naiCalls[0];
+        assert.equal(payload.parameters.width, ARTIST_PREVIEW_SIZE.width);
+        assert.equal(payload.parameters.height, ARTIST_PREVIEW_SIZE.height);
+        assert.equal(ARTIST_PREVIEW_SIZE.width, 832);
+        assert.equal(ARTIST_PREVIEW_SIZE.height, 1216);
+        // 正在编辑串前置，而非激活串
+        assert.ok(String(payload.input).startsWith('EDIT_POS'));
+        assert.equal(String(payload.input).includes('ACTIVE_POS'), false);
+        // 未改全局激活
+        assert.equal(p.loadSettings().activeArtistId, 'artist-active');
+        assert.ok(r.value.imageRef);
+    });
+});
+
+describe('workbench', () => {
+    it('writePrompt does not call NAI and does not touch replace switch', async () => {
+        const p = buildPipeline({
+            llmComplete: async (req) => {
+                if (req.config.id === 'llm-recall') {
+                    return Ok({ text: '[]', json: ['garden'] });
+                }
+                return Ok({
+                    text: '{}',
+                    json: makeCaption('workbench scene'),
+                });
+            },
+        });
+        const beforeArtist = p.loadSettings().activeArtistId;
+        const r = await p.workbench.writePrompt({
+            naturalLanguage: 'Alice in a garden',
+            libraryIds: ['lib1'],
+        });
+        assert.equal(isOk(r), true, r.ok ? '' : r.error?.message);
+        assert.equal(r.value.caption.v4_prompt.caption.base_caption, 'workbench scene');
+        assert.ok(Array.isArray(r.value.unmatchedKeys));
+        assert.equal(p.naiCalls.length, 0);
+        assert.equal(p.loadSettings().activeArtistId, beforeArtist);
+    });
+
+    it('generateImage passes explicit replaceCharacterKeywords through', async () => {
+        const p = buildPipeline();
+        const rFalse = await p.workbench.generateImage({
+            caption: makeCaption('Alice'),
+            replaceCharacterKeywords: false,
+        });
+        assert.equal(isOk(rFalse), true);
+        const rTrue = await p.workbench.generateImage({
+            caption: makeCaption('Alice'),
+            replaceCharacterKeywords: true,
+        });
+        assert.equal(isOk(rTrue), true);
+        await assert.rejects(
+            async () => p.workbench.generateImage({
+                caption: makeCaption('x'),
+                // @ts-expect-error
+                replaceCharacterKeywords: undefined,
+            }),
+            /replaceCharacterKeywords/,
+        );
+    });
+});
+
+describe('D31 unmatchedKeys observability', () => {
+    it('propagates unmatched from tagRecall to generateSlots result and events', async () => {
+        const p = buildPipeline({
+            llmComplete: async (req) => {
+                if (req.config.id === 'llm-recall') {
+                    // garden 命中；fabricated / Night 未命中（大小写也不行）
+                    return Ok({ text: '[]', json: ['garden', 'fabricated', 'Night'] });
+                }
+                return Ok({
+                    text: '[]',
+                    json: [{
+                        slotid: 1,
+                        生成点: 'Alice walked into the garden.',
+                        生图内容: makeCaption('a garden scene'),
+                    }],
+                });
+            },
+        });
+
+        /** @type {any[]} */
+        const unmatchedEvents = [];
+        /** @type {any[]} */
+        const writtenEvents = [];
+        p.bus.on('tag-recall:unmatched', (payload) => unmatchedEvents.push(payload));
+        p.bus.on('slots:written', (payload) => writtenEvents.push(payload));
+
+        const r = await p.generateSlots.execute(2);
+        assert.equal(isOk(r), true, r.ok ? '' : r.error?.message);
+        assert.deepEqual(r.value.unmatchedKeys, ['fabricated', 'Night']);
+
+        assert.equal(unmatchedEvents.length, 1);
+        assert.deepEqual(unmatchedEvents[0].unmatchedKeys, ['fabricated', 'Night']);
+        assert.equal(unmatchedEvents[0].traceId, 'trace-fixed');
+
+        assert.equal(writtenEvents.length, 1);
+        assert.deepEqual(writtenEvents[0].unmatchedKeys, ['fabricated', 'Night']);
+
+        // 注入块仍只用 matched：提示词应含 garden value，不含 fabricated
+        const promptMsg = p.llmCalls[1].messages.map((m) => m.content).join('\n');
+        assert.ok(promptMsg.includes('flower garden'));
+        assert.equal(promptMsg.includes('fabricated'), false);
+    });
+});
+
+describe('auto-trigger idempotency', () => {
+    it('D32: autoRender only + manual generate uses slots:written event (no execute wrap)', async () => {
+        const p = buildPipeline();
+        p.patchSettings({ autoWriteSlots: false, autoRenderSlots: true });
+        p.autoTrigger.start();
+
+        // 证明 execute 未被包装：引用应仍是原始函数形状（可直接调用）
+        const executeRef = p.generateSlots.execute;
+        const r = await executeRef(2);
+        assert.equal(isOk(r), true);
+        await new Promise((resolve) => setTimeout(resolve, 40));
+
+        assert.ok(p.naiCalls.length >= 1, 'auto-render via bus after manual generate');
+        const rec = await p.slotRepo.get(2, 1);
+        assert.ok(rec.ok && latestHasImage(rec.value));
+    });
+
+    it('D32: already-rendered slots skip; duplicate slots:written does not re-bill', async () => {
+        const p = buildPipeline();
+        p.patchSettings({ autoWriteSlots: false, autoRenderSlots: true });
+        p.autoTrigger.start();
+
+        const gen = await p.generateSlots.execute(2);
+        assert.equal(isOk(gen), true);
+        await new Promise((resolve) => setTimeout(resolve, 40));
+        const naiAfterFirst = p.naiCalls.length;
+        assert.ok(naiAfterFirst >= 1);
+
+        const slotBefore = await p.slotRepo.get(2, 1);
+        assert.ok(slotBefore.ok && latestHasImage(slotBefore.value));
+
+        // 重复发同一事件，不得再计费
+        p.bus.emit('slots:written', {
+            messageId: 2,
+            records: [slotBefore.value],
+            traceId: 'dup',
+            unmatchedKeys: [],
+        });
+        await new Promise((resolve) => setTimeout(resolve, 40));
+        assert.equal(p.naiCalls.length, naiAfterFirst, 'duplicate slots:written must not re-bill');
+
+        // settled 仅 autoRender 路径同样跳过已生图
+        p.host.emitSettled(2);
+        await new Promise((resolve) => setTimeout(resolve, 40));
+        assert.equal(p.naiCalls.length, naiAfterFirst, 'settled must not re-bill rendered slots');
+    });
+
+    it('autoWriteSlots only writes; both on writes then renders via event', async () => {
+        const p = buildPipeline();
+        p.patchSettings({ autoWriteSlots: true, autoRenderSlots: false });
+        p.autoTrigger.start();
+        p.host.emitSettled(2);
+        await new Promise((r) => setTimeout(r, 50));
+        const slots = await p.slotRepo.getByMessage(2);
+        assert.equal(isOk(slots) && slots.value.length >= 1, true);
+        assert.equal(p.naiCalls.length, 0);
+
+        const p2 = buildPipeline();
+        p2.patchSettings({ autoWriteSlots: true, autoRenderSlots: true });
+        p2.autoTrigger.start();
+        p2.host.emitSettled(2);
+        await new Promise((r) => setTimeout(r, 80));
+        assert.ok(p2.naiCalls.length >= 1);
+        const rec = await p2.slotRepo.get(2, 1);
+        assert.ok(rec.ok && latestHasImage(rec.value));
+    });
+});
+
+describe('worldinfo-resolver', () => {
+    it('forwards the exact contextWindow to host', async () => {
+        const host = createFakeHost();
+        const resolver = createWorldInfoResolver({ host });
+        const window = [
+            { messageId: 1, name: 'B', text: 'stripped', isUser: false, isSystem: false },
+        ];
+        const r = await resolver.resolve({ contextWindow: window, messageId: 9 });
+        assert.equal(isOk(r), true);
+        assert.equal(host.resolveWorldInfoCalls.length, 1);
+        assert.strictEqual(host.resolveWorldInfoCalls[0], window);
+        assert.equal(r.value.source, 'host');
+    });
+});
+
+describe('slot strip helper sanity', () => {
+    it('stripSlotTokens removes markers', () => {
+        assert.equal(stripSlotTokens('a<IMG>\n2\n</IMG>b'), 'ab');
+    });
+});
+
+/**
+ * @param {any} record
+ */
+function latestHasImage(record) {
+    return Array.isArray(record?.images) && record.images.length > 0;
+}

@@ -7,6 +7,12 @@
  * world_info_include_names，本层不传该开关。
  */
 
+import { Ok } from '../infra/result.js';
+import { createLogger } from '../infra/logger.js';
+import { formatWorldInfoBlock } from '../domain/blocks/worldinfo.block.js';
+
+const log = createLogger('application/worldinfo-resolver');
+
 /**
  * @typedef {object} WorldInfoResolverDeps
  * @property {import('../ports/host.port.js').HostPort} host
@@ -30,5 +36,29 @@
  * @returns {{ resolve: (input: WorldInfoResolveInput) => Promise<import('../infra/result.js').Ok<WorldInfoResolveResult>|import('../infra/result.js').Err<import('../infra/errors.js').AppError>> }}
  */
 export function createWorldInfoResolver(deps) {
-    throw new Error('not implemented: createWorldInfoResolver');
+    return {
+        /**
+         * @param {WorldInfoResolveInput} input
+         */
+        async resolve(input) {
+            const window = Array.isArray(input?.contextWindow) ? input.contextWindow : [];
+            const hostResult = await deps.host.resolveWorldInfo({
+                contextWindow: window,
+                messageId: input?.messageId,
+            });
+            if (!hostResult.ok) {
+                // 降级为空：四块同源原则下世界书失败不应拖死整条链路
+                log.warn('resolveWorldInfo failed; degrading to empty', {
+                    messageId: input?.messageId,
+                    code: hostResult.error?.code,
+                });
+                return Ok({ text: '', source: 'degraded' });
+            }
+            const text = formatWorldInfoBlock(hostResult.value ?? '');
+            return Ok({
+                text,
+                source: text ? 'host' : 'empty',
+            });
+        },
+    };
 }

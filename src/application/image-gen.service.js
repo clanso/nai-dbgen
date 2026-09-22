@@ -4,6 +4,15 @@
  * 归属：W2-F 用例代理实现。W0 仅冻结签名。
  */
 
+import { Ok, Err } from '../infra/result.js';
+import { configError } from '../infra/errors.js';
+import { assembleNaiPayload } from '../domain/nai/payload-assembler.js';
+import {
+    abortErrIfNeeded,
+    attachTraceId,
+    loadAllCharacters,
+} from './_helpers.js';
+
 /**
  * @typedef {import('../domain/model/nai-params.js').NaiCaption} NaiCaption
  * @typedef {import('../domain/model/nai-params.js').NaiParams} NaiParams
@@ -47,5 +56,126 @@
  * @returns {ImageGenService}
  */
 export function createImageGenService(deps) {
-    throw new Error('not implemented: createImageGenService');
+    /**
+     * @returns {Promise<ArtistString|null>}
+     */
+    async function getActiveArtist() {
+        const settings = deps.loadSettings();
+        if (!settings.activeArtistId) {
+            return null;
+        }
+        const r = await deps.artistRepo.get(settings.activeArtistId);
+        if (!r.ok || !r.value) {
+            return null;
+        }
+        return r.value;
+    }
+
+    return {
+        getActiveArtist,
+
+        /**
+         * @param {ImageGenRequest} req
+         */
+        async generate(req) {
+            if (!req || typeof req !== 'object') {
+                throw new Error('invalid argument: req');
+            }
+            // 必填、无默认：绝不根据提示词来源推断（验收 #13 / #14）
+            if (typeof req.replaceCharacterKeywords !== 'boolean') {
+                throw new Error('invalid argument: replaceCharacterKeywords');
+            }
+
+            const traceId = req.traceId ?? deps.newTraceId();
+            const aborted = abortErrIfNeeded(req.signal, traceId);
+            if (aborted) {
+                return aborted;
+            }
+
+            const settings = deps.loadSettings();
+            if (!settings.activeNaiConfigId) {
+                return Err(configError({
+                    code: 'NAI_CONFIG_UNSET',
+                    message: '未选择 NAI API 配置',
+                    hint: '请在 NAI API 库中激活一条配置',
+                    traceId,
+                }));
+            }
+
+            const naiCfgR = await deps.naiConfigRepo.get(settings.activeNaiConfigId);
+            if (!naiCfgR.ok) {
+                return attachTraceId(naiCfgR, traceId);
+            }
+            if (!naiCfgR.value) {
+                return Err(configError({
+                    code: 'NAI_CONFIG_MISSING',
+                    message: '当前 NAI 配置不存在',
+                    hint: '请重新选择 NAI API 配置',
+                    traceId,
+                    context: { id: settings.activeNaiConfigId },
+                }));
+            }
+
+            // 画师串三态（D9）
+            /** @type {ArtistString|null} */
+            let artist = null;
+            if (req.artist === undefined) {
+                artist = await getActiveArtist();
+            } else if (req.artist === null) {
+                artist = null;
+            } else {
+                artist = req.artist;
+            }
+
+            /** @type {import('../domain/model/character.js').CharacterGroup[]} */
+            let groups = [];
+            /** @type {import('../domain/model/character.js').Character[]} */
+            let characters = [];
+            if (req.replaceCharacterKeywords) {
+                if (!deps.characterRepo) {
+                    return Err(configError({
+                        code: 'CHARACTER_REPO_REQUIRED',
+                        message: '替换角色关键字需要角色库',
+                        hint: '请检查插件装配是否注入了 characterRepo',
+                        traceId,
+                    }));
+                }
+                const bundle = await loadAllCharacters(deps.characterRepo);
+                if (!bundle.ok) {
+                    return attachTraceId(bundle, traceId);
+                }
+                groups = bundle.value.groups;
+                characters = bundle.value.characters;
+            }
+
+            const baseParams = settings.naiParams;
+            /** @type {Record<string, unknown>} */
+            const overrides = (req.params && typeof req.params === 'object')
+                ? { ...req.params }
+                : {};
+
+            const payload = assembleNaiPayload({
+                caption: req.caption,
+                params: baseParams,
+                paramOverrides: overrides,
+                replaceCharacterKeywords: req.replaceCharacterKeywords,
+                artist,
+                groups,
+                characters,
+                matchGlobals: settings.matchDefaults,
+            });
+
+            const aborted2 = abortErrIfNeeded(req.signal, traceId);
+            if (aborted2) {
+                return aborted2;
+            }
+
+            const genR = await deps.imageGenPort.generate(payload, {
+                signal: req.signal,
+                config: naiCfgR.value,
+                traceId,
+            });
+            return attachTraceId(genR, traceId);
+        },
+    };
 }

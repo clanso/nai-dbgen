@@ -1,1 +1,136 @@
-/* L5 UI · 工作台样式。归属：W2-I。W0 占位。 */
+/**
+ * L5 UI · 工作台样式。归属：W2-I。
+ * 全部选择器挂 #nai-dbgen-root；颜色只走 --nd-*。
+ */
+
+#nai-dbgen-root .nd-workbench {
+    display: flex;
+    flex-direction: column;
+    gap: 1.1em;
+    padding: 0.4em 0 1.2em;
+    color: var(--nd-text);
+}
+
+#nai-dbgen-root .nd-wb-header {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.6em 1em;
+}
+
+#nai-dbgen-root .nd-wb-title {
+    margin: 0;
+    font-family: var(--nd-serif);
+    font-size: 1.15em;
+    font-weight: 600;
+    color: var(--nd-text);
+}
+
+#nai-dbgen-root .nd-wb-header .nd-muted {
+    flex: 1 1 100%;
+    margin: 0;
+    font-size: 0.8em;
+    color: var(--nd-muted);
+}
+
+#nai-dbgen-root .nd-wb-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5em;
+    margin-top: 0.4em;
+}
+
+#nai-dbgen-root .nd-wb-libraries {
+    display: flex;
+    flex-direction: column;
+    gap: 0.35em;
+    margin: 0.4em 0;
+}
+
+#nai-dbgen-root .nd-wb-unmatched {
+    margin-top: 0.5em;
+    padding: 0.55em 0.75em;
+    border-radius: var(--nd-control-radius);
+    border: 1px solid var(--nd-danger-ring);
+    background: var(--nd-danger-wash);
+    color: var(--nd-danger);
+    font-size: 0.8em;
+}
+
+#nai-dbgen-root .nd-wb-caption-mount {
+    width: 100%;
+}
+
+#nai-dbgen-root .nd-wb-caption {
+    display: flex;
+    flex-direction: column;
+    gap: 0.75em;
+}
+
+#nai-dbgen-root .nd-wb-caption__chars-head {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.5em;
+}
+
+#nai-dbgen-root .nd-wb-caption__chars {
+    display: flex;
+    flex-direction: column;
+    gap: 0.65em;
+}
+
+#nai-dbgen-root .nd-wb-caption__char {
+    padding: 0.7em 0.8em;
+    border-radius: var(--nd-control-radius);
+    border: 1px solid var(--nd-line);
+    background: var(--nd-surface-2);
+}
+
+#nai-dbgen-root .nd-wb-caption__char-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.5em;
+    margin-bottom: 0.45em;
+}
+
+#nai-dbgen-root .nd-wb-caption__coords {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 0.5em;
+}
+
+#nai-dbgen-root .nd-wb-preview {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.75em;
+    margin-top: 0.6em;
+    min-height: 3em;
+}
+
+#nai-dbgen-root .nd-wb-preview__card {
+    display: flex;
+    flex-direction: column;
+    gap: 0.45em;
+    max-width: 280px;
+    padding: 0.5em;
+    border-radius: var(--nd-control-radius);
+    border: 1px solid var(--nd-line);
+    background: var(--nd-surface);
+}
+
+#nai-dbgen-root .nd-wb-preview__img {
+    display: block;
+    width: 100%;
+    max-height: 360px;
+    object-fit: contain;
+    border-radius: calc(var(--nd-control-radius) - 2px);
+    background: var(--nd-surface-2);
+}
+
+#nai-dbgen-root .nd-workbench .nd-button:disabled {
+    opacity: 0.55;
+    cursor: not-allowed;
+}
