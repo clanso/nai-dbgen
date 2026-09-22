@@ -1,13 +1,13 @@
 /**
- * L5 UI · 控件配方。全部选择器挂 #nai-dbgen-root；类名 nd-。
+ * L5 UI · 控件配方。全部选择器挂 :is(#nai-dbgen-root, .nd-root)（D52：作用域根用 class .nd-root；id 仅过渡兼容）；类名 nd-。
  * 颜色只走 --nd-*；字号用 em；控件高度用 px 令牌。
  */
 
 /* —— 基础控件继承加固（R-11） —— */
-#nai-dbgen-root .nd-button,
-#nai-dbgen-root .nd-icon-button,
-#nai-dbgen-root .nd-text-button,
-#nai-dbgen-root .nd-chip {
+:is(#nai-dbgen-root, .nd-root) .nd-button,
+:is(#nai-dbgen-root, .nd-root) .nd-icon-button,
+:is(#nai-dbgen-root, .nd-root) .nd-text-button,
+:is(#nai-dbgen-root, .nd-root) .nd-chip {
     font-family: inherit;
     font-size: inherit;
     line-height: 1.2;
@@ -18,21 +18,21 @@
     -webkit-appearance: none;
 }
 
-#nai-dbgen-root .nd-button:focus-visible,
-#nai-dbgen-root .nd-icon-button:focus-visible,
-#nai-dbgen-root .nd-text-button:focus-visible,
-#nai-dbgen-root .nd-chip:focus-visible,
-#nai-dbgen-root .nd-input:focus-visible,
-#nai-dbgen-root .nd-select:focus-visible,
-#nai-dbgen-root .nd-textarea:focus-visible,
-#nai-dbgen-root .nd-range:focus-visible,
-#nai-dbgen-root .nd-picker-option:focus-visible,
-#nai-dbgen-root .nd-details > summary:focus-visible {
+:is(#nai-dbgen-root, .nd-root) .nd-button:focus-visible,
+:is(#nai-dbgen-root, .nd-root) .nd-icon-button:focus-visible,
+:is(#nai-dbgen-root, .nd-root) .nd-text-button:focus-visible,
+:is(#nai-dbgen-root, .nd-root) .nd-chip:focus-visible,
+:is(#nai-dbgen-root, .nd-root) .nd-input:focus-visible,
+:is(#nai-dbgen-root, .nd-root) .nd-select:focus-visible,
+:is(#nai-dbgen-root, .nd-root) .nd-textarea:focus-visible,
+:is(#nai-dbgen-root, .nd-root) .nd-range:focus-visible,
+:is(#nai-dbgen-root, .nd-root) .nd-picker-option:focus-visible,
+:is(#nai-dbgen-root, .nd-root) .nd-details > summary:focus-visible {
     outline: 2px solid var(--nd-accent-deep);
     outline-offset: 2px;
 }
 
-#nai-dbgen-root .nd-button {
+:is(#nai-dbgen-root, .nd-root) .nd-button {
     height: var(--nd-h);
     min-height: var(--nd-h);
     display: inline-flex;
@@ -48,12 +48,12 @@
     color: var(--nd-text);
 }
 
-#nai-dbgen-root .nd-button:hover:not(:disabled) {
+:is(#nai-dbgen-root, .nd-root) .nd-button:hover:not(:disabled) {
     background: var(--nd-accent-wash);
     border-color: var(--nd-line-strong);
 }
 
-#nai-dbgen-root .nd-button--primary {
+:is(#nai-dbgen-root, .nd-root) .nd-button--primary {
     height: var(--nd-h-primary);
     min-height: var(--nd-h-primary);
     background: var(--nd-accent);
@@ -61,40 +61,40 @@
     color: var(--nd-on-accent);
 }
 
-#nai-dbgen-root .nd-button--primary:hover:not(:disabled) {
+:is(#nai-dbgen-root, .nd-root) .nd-button--primary:hover:not(:disabled) {
     background: var(--nd-accent-deep);
     border-color: var(--nd-accent-deep);
 }
 
-#nai-dbgen-root .nd-button--ghost {
+:is(#nai-dbgen-root, .nd-root) .nd-button--ghost {
     background: var(--nd-surface-2);
     border: 1px solid var(--nd-line);
     color: var(--nd-text);
 }
 
-#nai-dbgen-root .nd-button--ghost:hover:not(:disabled) {
+:is(#nai-dbgen-root, .nd-root) .nd-button--ghost:hover:not(:disabled) {
     background: var(--nd-accent-wash);
     border-color: var(--nd-line-strong);
 }
 
-#nai-dbgen-root .nd-button--danger {
+:is(#nai-dbgen-root, .nd-root) .nd-button--danger {
     background: var(--nd-danger);
     border-color: var(--nd-danger);
     color: var(--nd-on-accent);
 }
 
-#nai-dbgen-root .nd-button--danger:hover:not(:disabled) {
+:is(#nai-dbgen-root, .nd-root) .nd-button--danger:hover:not(:disabled) {
     filter: brightness(0.94);
 }
 
-#nai-dbgen-root .nd-button:disabled,
-#nai-dbgen-root .nd-icon-button:disabled,
-#nai-dbgen-root .nd-chip:disabled {
+:is(#nai-dbgen-root, .nd-root) .nd-button:disabled,
+:is(#nai-dbgen-root, .nd-root) .nd-icon-button:disabled,
+:is(#nai-dbgen-root, .nd-root) .nd-chip:disabled {
     opacity: 0.35;
     cursor: default;
 }
 
-#nai-dbgen-root .nd-icon-button {
+:is(#nai-dbgen-root, .nd-root) .nd-icon-button {
     height: var(--nd-h-icon);
     min-height: var(--nd-h-icon);
     display: inline-flex;
@@ -108,12 +108,12 @@
     font-size: 0.73em;
 }
 
-#nai-dbgen-root .nd-icon-button:hover:not(:disabled) {
+:is(#nai-dbgen-root, .nd-root) .nd-icon-button:hover:not(:disabled) {
     background: var(--nd-accent-ring);
     border-color: var(--nd-line-strong);
 }
 
-#nai-dbgen-root .nd-text-button {
+:is(#nai-dbgen-root, .nd-root) .nd-text-button {
     min-height: var(--nd-h-micro);
     display: inline-flex;
     align-items: center;
@@ -123,15 +123,15 @@
     font-size: 0.73em;
 }
 
-#nai-dbgen-root .nd-text-button:hover:not(:disabled) {
+:is(#nai-dbgen-root, .nd-root) .nd-text-button:hover:not(:disabled) {
     color: var(--nd-text);
 }
 
-#nai-dbgen-root .nd-text-button--danger:hover:not(:disabled) {
+:is(#nai-dbgen-root, .nd-root) .nd-text-button--danger:hover:not(:disabled) {
     color: var(--nd-danger);
 }
 
-#nai-dbgen-root .nd-chip {
+:is(#nai-dbgen-root, .nd-root) .nd-chip {
     min-height: var(--nd-h-micro);
     display: inline-flex;
     align-items: center;
@@ -143,12 +143,12 @@
     font-size: 0.67em;
 }
 
-#nai-dbgen-root .nd-chip:hover:not(:disabled) {
+:is(#nai-dbgen-root, .nd-root) .nd-chip:hover:not(:disabled) {
     color: var(--nd-text);
     border-color: var(--nd-line-strong);
 }
 
-#nai-dbgen-root .nd-chip.is-active {
+:is(#nai-dbgen-root, .nd-root) .nd-chip.is-active {
     border-color: var(--nd-accent);
     background: var(--nd-accent-wash);
     color: var(--nd-accent-deep);
@@ -156,7 +156,7 @@
 }
 
 /* —— 表单字段 —— */
-#nai-dbgen-root .nd-field {
+:is(#nai-dbgen-root, .nd-root) .nd-field {
     display: grid;
     gap: 0.45em;
     margin: 0 0 0.9em;
@@ -164,7 +164,7 @@
     font-size: 0.67em;
 }
 
-#nai-dbgen-root .nd-field__label {
+:is(#nai-dbgen-root, .nd-root) .nd-field__label {
     display: flex;
     align-items: center;
     justify-content: space-between;
@@ -173,22 +173,22 @@
     color: var(--nd-soft);
 }
 
-#nai-dbgen-root .nd-field-group {
+:is(#nai-dbgen-root, .nd-root) .nd-field-group {
     display: grid;
     gap: 0.55em;
     margin: 0 0 1em;
 }
 
-#nai-dbgen-root .nd-field-group__title {
+:is(#nai-dbgen-root, .nd-root) .nd-field-group__title {
     margin: 0;
     color: var(--nd-soft);
     font-size: 0.73em;
     font-weight: 800;
 }
 
-#nai-dbgen-root .nd-input,
-#nai-dbgen-root .nd-select,
-#nai-dbgen-root .nd-textarea {
+:is(#nai-dbgen-root, .nd-root) .nd-input,
+:is(#nai-dbgen-root, .nd-root) .nd-select,
+:is(#nai-dbgen-root, .nd-root) .nd-textarea {
     width: 100%;
     min-width: 0;
     font-family: inherit;
@@ -201,35 +201,35 @@
     -webkit-appearance: none;
 }
 
-#nai-dbgen-root .nd-input,
-#nai-dbgen-root .nd-select {
+:is(#nai-dbgen-root, .nd-root) .nd-input,
+:is(#nai-dbgen-root, .nd-root) .nd-select {
     height: var(--nd-h-primary);
     min-height: var(--nd-h-primary);
     padding: 0 12px;
 }
 
-#nai-dbgen-root .nd-textarea {
+:is(#nai-dbgen-root, .nd-root) .nd-textarea {
     min-height: 88px;
     padding: 10px 12px;
     line-height: 1.55;
     resize: vertical;
 }
 
-#nai-dbgen-root .nd-input:hover,
-#nai-dbgen-root .nd-select:hover,
-#nai-dbgen-root .nd-textarea:hover {
+:is(#nai-dbgen-root, .nd-root) .nd-input:hover,
+:is(#nai-dbgen-root, .nd-root) .nd-select:hover,
+:is(#nai-dbgen-root, .nd-root) .nd-textarea:hover {
     border-color: var(--nd-line-strong);
 }
 
-#nai-dbgen-root .nd-input:focus,
-#nai-dbgen-root .nd-select:focus,
-#nai-dbgen-root .nd-textarea:focus {
+:is(#nai-dbgen-root, .nd-root) .nd-input:focus,
+:is(#nai-dbgen-root, .nd-root) .nd-select:focus,
+:is(#nai-dbgen-root, .nd-root) .nd-textarea:focus {
     border-color: var(--nd-accent-soft);
     box-shadow: 0 0 0 3px var(--nd-accent-ring);
     outline: none;
 }
 
-#nai-dbgen-root .nd-checkbox-row {
+:is(#nai-dbgen-root, .nd-root) .nd-checkbox-row {
     display: flex;
     align-items: center;
     gap: 0.55em;
@@ -239,7 +239,7 @@
     cursor: pointer;
 }
 
-#nai-dbgen-root .nd-checkbox-row input {
+:is(#nai-dbgen-root, .nd-root) .nd-checkbox-row input {
     -webkit-appearance: none;
     -moz-appearance: none;
     appearance: none;
@@ -261,7 +261,7 @@
     transform: none;
 }
 
-#nai-dbgen-root .nd-checkbox-row input::before {
+:is(#nai-dbgen-root, .nd-root) .nd-checkbox-row input::before {
     content: "";
     width: 0.65em;
     height: 0.65em;
@@ -271,17 +271,17 @@
     transition: transform 0.12s ease-in-out;
 }
 
-#nai-dbgen-root .nd-checkbox-row input:checked::before {
+:is(#nai-dbgen-root, .nd-root) .nd-checkbox-row input:checked::before {
     transform: scale(1);
 }
 
-#nai-dbgen-root .nd-checkbox-row input:disabled {
+:is(#nai-dbgen-root, .nd-root) .nd-checkbox-row input:disabled {
     opacity: 0.45;
     cursor: default;
 }
 
 /* —— toggle-row（CSS 兄弟选择器套路） —— */
-#nai-dbgen-root .nd-toggle-row {
+:is(#nai-dbgen-root, .nd-root) .nd-toggle-row {
     position: relative;
     min-height: 46px;
     display: flex;
@@ -292,30 +292,30 @@
     color: var(--nd-text);
 }
 
-#nai-dbgen-root .nd-toggle-row__text {
+:is(#nai-dbgen-root, .nd-root) .nd-toggle-row__text {
     display: grid;
     gap: 2px;
     min-width: 0;
 }
 
-#nai-dbgen-root .nd-toggle-row__text strong {
+:is(#nai-dbgen-root, .nd-root) .nd-toggle-row__text strong {
     color: var(--nd-soft);
     font-size: 0.67em;
     font-weight: 700;
 }
 
-#nai-dbgen-root .nd-toggle-row__text small {
+:is(#nai-dbgen-root, .nd-root) .nd-toggle-row__text small {
     color: var(--nd-muted);
     font-size: 0.53em;
 }
 
-#nai-dbgen-root .nd-toggle-row input {
+:is(#nai-dbgen-root, .nd-root) .nd-toggle-row input {
     position: absolute;
     opacity: 0;
     pointer-events: none;
 }
 
-#nai-dbgen-root .nd-toggle-row i {
+:is(#nai-dbgen-root, .nd-root) .nd-toggle-row i {
     position: relative;
     flex: 0 0 35px;
     height: 19px;
@@ -325,7 +325,7 @@
     transition: 0.2s;
 }
 
-#nai-dbgen-root .nd-toggle-row i::after {
+:is(#nai-dbgen-root, .nd-root) .nd-toggle-row i::after {
     content: "";
     position: absolute;
     top: 2px;
@@ -337,46 +337,46 @@
     transition: 0.2s;
 }
 
-#nai-dbgen-root .nd-toggle-row input:focus-visible + i {
+:is(#nai-dbgen-root, .nd-root) .nd-toggle-row input:focus-visible + i {
     outline: 2px solid var(--nd-accent-soft);
     outline-offset: 3px;
 }
 
-#nai-dbgen-root .nd-toggle-row input:checked + i {
+:is(#nai-dbgen-root, .nd-root) .nd-toggle-row input:checked + i {
     background: var(--nd-accent);
     border-color: var(--nd-accent);
 }
 
-#nai-dbgen-root .nd-toggle-row input:checked + i::after {
+:is(#nai-dbgen-root, .nd-root) .nd-toggle-row input:checked + i::after {
     left: 18px;
     background: var(--nd-on-accent);
 }
 
-#nai-dbgen-root .nd-toggle-row.is-disabled {
+:is(#nai-dbgen-root, .nd-root) .nd-toggle-row.is-disabled {
     opacity: 0.42;
     pointer-events: none;
 }
 
 /* —— range —— */
-#nai-dbgen-root .nd-range-label {
+:is(#nai-dbgen-root, .nd-root) .nd-range-label {
     display: grid;
     gap: 8px;
     margin-bottom: 15px;
 }
 
-#nai-dbgen-root .nd-range-label > span {
+:is(#nai-dbgen-root, .nd-root) .nd-range-label > span {
     display: flex;
     justify-content: space-between;
     color: var(--nd-muted);
     font-size: 0.67em;
 }
 
-#nai-dbgen-root .nd-range-label output {
+:is(#nai-dbgen-root, .nd-root) .nd-range-label output {
     color: var(--nd-text);
     font-variant-numeric: tabular-nums;
 }
 
-#nai-dbgen-root .nd-range {
+:is(#nai-dbgen-root, .nd-root) .nd-range {
     -webkit-appearance: none;
     appearance: none;
     width: 100%;
@@ -394,7 +394,7 @@
     font: inherit;
 }
 
-#nai-dbgen-root .nd-range::-webkit-slider-thumb {
+:is(#nai-dbgen-root, .nd-root) .nd-range::-webkit-slider-thumb {
     -webkit-appearance: none;
     appearance: none;
     width: 15px;
@@ -406,7 +406,7 @@
     cursor: grab;
 }
 
-#nai-dbgen-root .nd-range::-moz-range-thumb {
+:is(#nai-dbgen-root, .nd-root) .nd-range::-moz-range-thumb {
     width: 15px;
     height: 15px;
     border-radius: 50%;
@@ -416,14 +416,14 @@
     cursor: grab;
 }
 
-#nai-dbgen-root .nd-range::-moz-range-track {
+:is(#nai-dbgen-root, .nd-root) .nd-range::-moz-range-track {
     height: 5px;
     border-radius: 999px;
     background: var(--nd-toggle-track);
 }
 
 /* —— details 折叠 —— */
-#nai-dbgen-root .nd-details {
+:is(#nai-dbgen-root, .nd-root) .nd-details {
     margin: 0 0 0.9em;
     padding: 0.7em 0.85em;
     border: 1px solid var(--nd-line);
@@ -431,7 +431,7 @@
     background: var(--nd-accent-wash);
 }
 
-#nai-dbgen-root .nd-details > summary {
+:is(#nai-dbgen-root, .nd-root) .nd-details > summary {
     cursor: pointer;
     color: var(--nd-soft);
     font-size: 0.73em;
@@ -439,16 +439,16 @@
     list-style: none;
 }
 
-#nai-dbgen-root .nd-details > summary::-webkit-details-marker {
+:is(#nai-dbgen-root, .nd-root) .nd-details > summary::-webkit-details-marker {
     display: none;
 }
 
-#nai-dbgen-root .nd-details__body {
+:is(#nai-dbgen-root, .nd-root) .nd-details__body {
     margin-top: 0.7em;
 }
 
 /* —— 空状态 / 徽章 / 内联错误 —— */
-#nai-dbgen-root .nd-empty {
+:is(#nai-dbgen-root, .nd-root) .nd-empty {
     position: relative;
     max-width: 420px;
     margin: 0 auto;
@@ -456,7 +456,7 @@
     text-align: center;
 }
 
-#nai-dbgen-root .nd-empty__title {
+:is(#nai-dbgen-root, .nd-root) .nd-empty__title {
     margin: 0;
     font-family: var(--nd-serif);
     font-size: 1.6em;
@@ -464,7 +464,7 @@
     color: var(--nd-text);
 }
 
-#nai-dbgen-root .nd-empty__desc {
+:is(#nai-dbgen-root, .nd-root) .nd-empty__desc {
     max-width: 390px;
     margin: 0.7em auto 1.1em;
     color: var(--nd-muted);
@@ -472,7 +472,7 @@
     line-height: 1.7;
 }
 
-#nai-dbgen-root .nd-empty-lab {
+:is(#nai-dbgen-root, .nd-root) .nd-empty-lab {
     min-height: 180px;
     display: grid;
     place-items: center;
@@ -485,7 +485,7 @@
     padding: 1.2em;
 }
 
-#nai-dbgen-root .nd-status-pill {
+:is(#nai-dbgen-root, .nd-root) .nd-status-pill {
     min-width: 96px;
     display: inline-flex;
     align-items: center;
@@ -498,27 +498,27 @@
     background: var(--nd-surface);
 }
 
-#nai-dbgen-root .nd-status-pill i {
+:is(#nai-dbgen-root, .nd-root) .nd-status-pill i {
     width: 7px;
     height: 7px;
     border-radius: 50%;
     background: var(--nd-status-idle);
 }
 
-#nai-dbgen-root .nd-status-pill.is-online {
+:is(#nai-dbgen-root, .nd-root) .nd-status-pill.is-online {
     color: var(--nd-soft);
 }
 
-#nai-dbgen-root .nd-status-pill.is-online i {
+:is(#nai-dbgen-root, .nd-root) .nd-status-pill.is-online i {
     background: var(--nd-accent-deep);
     box-shadow: 0 0 10px var(--nd-accent-ring);
 }
 
-#nai-dbgen-root .nd-status-pill.is-error i {
+:is(#nai-dbgen-root, .nd-root) .nd-status-pill.is-error i {
     background: var(--nd-danger);
 }
 
-#nai-dbgen-root .nd-inline-error {
+:is(#nai-dbgen-root, .nd-root) .nd-inline-error {
     min-height: 15px;
     margin-top: 8px;
     color: var(--nd-danger);
@@ -526,7 +526,7 @@
     line-height: 1.5;
 }
 
-#nai-dbgen-root .nd-parse-warnings {
+:is(#nai-dbgen-root, .nd-root) .nd-parse-warnings {
     display: grid;
     gap: 5px;
     margin: 0 0 10px;
@@ -539,12 +539,12 @@
     line-height: 1.5;
 }
 
-#nai-dbgen-root .nd-hidden {
+:is(#nai-dbgen-root, .nd-root) .nd-hidden {
     display: none !important;
 }
 
 /* —— 库管理范式 —— */
-#nai-dbgen-root .nd-library-toolbar {
+:is(#nai-dbgen-root, .nd-root) .nd-library-toolbar {
     display: flex;
     flex-wrap: wrap;
     align-items: center;
@@ -555,7 +555,7 @@
     background: var(--nd-surface);
 }
 
-#nai-dbgen-root .nd-search-field {
+:is(#nai-dbgen-root, .nd-root) .nd-search-field {
     flex: 1 1 200px;
     min-width: 0;
     display: flex;
@@ -568,7 +568,7 @@
     background: var(--nd-input-bg);
 }
 
-#nai-dbgen-root .nd-search-field input {
+:is(#nai-dbgen-root, .nd-root) .nd-search-field input {
     width: 100%;
     min-width: 0;
     height: 100%;
@@ -580,18 +580,18 @@
     font-size: 0.8em;
 }
 
-#nai-dbgen-root .nd-library-toolbar .nd-select {
+:is(#nai-dbgen-root, .nd-root) .nd-library-toolbar .nd-select {
     flex: 0 1 140px;
     height: var(--nd-h-primary);
 }
 
-#nai-dbgen-root .nd-style-grid {
+:is(#nai-dbgen-root, .nd-root) .nd-style-grid {
     display: grid;
     grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
     gap: 16px;
 }
 
-#nai-dbgen-root .nd-style-card {
+:is(#nai-dbgen-root, .nd-root) .nd-style-card {
     position: relative;
     display: flex;
     flex-direction: column;
@@ -603,19 +603,19 @@
     transition: box-shadow 0.2s ease, border-color 0.2s ease;
 }
 
-#nai-dbgen-root .nd-style-card:hover {
+:is(#nai-dbgen-root, .nd-root) .nd-style-card:hover {
     border-color: var(--nd-line-strong);
     box-shadow: var(--nd-shadow);
 }
 
-#nai-dbgen-root .nd-style-card.is-active,
-#nai-dbgen-root .nd-style-card.is-selected {
+:is(#nai-dbgen-root, .nd-root) .nd-style-card.is-active,
+:is(#nai-dbgen-root, .nd-root) .nd-style-card.is-selected {
     border-color: var(--nd-accent);
     outline: 2px solid var(--nd-accent-ring);
     background: var(--nd-accent-wash);
 }
 
-#nai-dbgen-root .nd-style-card__cover {
+:is(#nai-dbgen-root, .nd-root) .nd-style-card__cover {
     width: 100%;
     aspect-ratio: 4 / 3;
     display: grid;
@@ -627,45 +627,45 @@
     font: 600 1.4em var(--nd-serif);
 }
 
-#nai-dbgen-root .nd-style-card__cover img {
+:is(#nai-dbgen-root, .nd-root) .nd-style-card__cover img {
     width: 100%;
     height: 100%;
     object-fit: contain;
 }
 
-#nai-dbgen-root .nd-style-card__body {
+:is(#nai-dbgen-root, .nd-root) .nd-style-card__body {
     display: grid;
     gap: 8px;
     padding: 12px 14px 14px;
 }
 
-#nai-dbgen-root .nd-style-card__body h3 {
+:is(#nai-dbgen-root, .nd-root) .nd-style-card__body h3 {
     margin: 0;
     font-size: 0.93em;
     color: var(--nd-text);
 }
 
-#nai-dbgen-root .nd-style-card__subtitle {
+:is(#nai-dbgen-root, .nd-root) .nd-style-card__subtitle {
     margin: 0;
     color: var(--nd-muted);
     font-size: 0.67em;
     line-height: 1.45;
 }
 
-#nai-dbgen-root .nd-style-card__actions {
+:is(#nai-dbgen-root, .nd-root) .nd-style-card__actions {
     display: flex;
     flex-wrap: wrap;
     gap: 6px;
 }
 
 /* —— 当前项选择器（按 styles.css 重写，不照抄破损文件） —— */
-#nai-dbgen-root .nd-picker {
+:is(#nai-dbgen-root, .nd-root) .nd-picker {
     position: relative;
     display: grid;
     gap: 8px;
 }
 
-#nai-dbgen-root .nd-picker__control {
+:is(#nai-dbgen-root, .nd-root) .nd-picker__control {
     display: grid;
     grid-template-columns: 40px minmax(0, 1fr) auto;
     align-items: center;
@@ -676,7 +676,7 @@
     background: var(--nd-surface);
 }
 
-#nai-dbgen-root .nd-picker__control input {
+:is(#nai-dbgen-root, .nd-root) .nd-picker__control input {
     min-width: 0;
     border: 0;
     outline: 0;
@@ -685,7 +685,7 @@
     font-size: 0.73em;
 }
 
-#nai-dbgen-root .nd-picker__clear {
+:is(#nai-dbgen-root, .nd-root) .nd-picker__clear {
     display: inline-grid;
     place-items: center;
     width: 22px;
@@ -702,12 +702,12 @@
     line-height: 1;
 }
 
-#nai-dbgen-root .nd-picker__clear:hover {
+:is(#nai-dbgen-root, .nd-root) .nd-picker__clear:hover {
     background: var(--nd-accent-wash);
     color: var(--nd-text);
 }
 
-#nai-dbgen-root .nd-picker__results {
+:is(#nai-dbgen-root, .nd-root) .nd-picker__results {
     position: absolute;
     z-index: 30;
     top: calc(100% + 5px);
@@ -724,7 +724,7 @@
     scrollbar-width: thin;
 }
 
-#nai-dbgen-root .nd-picker-option {
+:is(#nai-dbgen-root, .nd-root) .nd-picker-option {
     position: relative;
     width: 100%;
     height: 76px;
@@ -744,13 +744,13 @@
     font: inherit;
 }
 
-#nai-dbgen-root .nd-picker-option:hover,
-#nai-dbgen-root .nd-picker-option.is-active {
+:is(#nai-dbgen-root, .nd-root) .nd-picker-option:hover,
+:is(#nai-dbgen-root, .nd-root) .nd-picker-option.is-active {
     border-color: var(--nd-line-strong);
     background: var(--nd-accent-wash);
 }
 
-#nai-dbgen-root .nd-mini-cover {
+:is(#nai-dbgen-root, .nd-root) .nd-mini-cover {
     width: 48px;
     height: 60px;
     display: grid;
@@ -762,7 +762,7 @@
     font: 600 1em var(--nd-serif);
 }
 
-#nai-dbgen-root .nd-picker__cover {
+:is(#nai-dbgen-root, .nd-root) .nd-picker__cover {
     width: 40px;
     height: 40px;
     border-radius: 10px;
@@ -774,20 +774,20 @@
     font: 600 1.1em var(--nd-serif);
 }
 
-#nai-dbgen-root .nd-mini-cover img,
-#nai-dbgen-root .nd-picker__cover img {
+:is(#nai-dbgen-root, .nd-root) .nd-mini-cover img,
+:is(#nai-dbgen-root, .nd-root) .nd-picker__cover img {
     width: 100%;
     height: 100%;
     object-fit: contain;
 }
 
-#nai-dbgen-root .nd-picker-option__meta {
+:is(#nai-dbgen-root, .nd-root) .nd-picker-option__meta {
     min-width: 0;
     display: grid;
     gap: 5px;
 }
 
-#nai-dbgen-root .nd-picker-option__meta strong {
+:is(#nai-dbgen-root, .nd-root) .nd-picker-option__meta strong {
     overflow: hidden;
     color: var(--nd-text);
     font-size: 0.73em;
@@ -796,7 +796,7 @@
     white-space: nowrap;
 }
 
-#nai-dbgen-root .nd-picker-option__meta small {
+:is(#nai-dbgen-root, .nd-root) .nd-picker-option__meta small {
     display: -webkit-box;
     overflow: hidden;
     -webkit-box-orient: vertical;
@@ -808,18 +808,18 @@
 }
 
 /* —— 导入导出 —— */
-#nai-dbgen-root .nd-import {
+:is(#nai-dbgen-root, .nd-root) .nd-import {
     display: grid;
     gap: 16px;
 }
 
-#nai-dbgen-root .nd-import__grid {
+:is(#nai-dbgen-root, .nd-root) .nd-import__grid {
     display: grid;
     grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
     gap: 16px;
 }
 
-#nai-dbgen-root .nd-dropzone {
+:is(#nai-dbgen-root, .nd-root) .nd-dropzone {
     text-align: center;
     padding: 24px 18px;
     border: 1px dashed var(--nd-line-strong);
@@ -827,19 +827,19 @@
     background: var(--nd-surface);
 }
 
-#nai-dbgen-root .nd-dropzone.is-dragging {
+:is(#nai-dbgen-root, .nd-root) .nd-dropzone.is-dragging {
     outline: 3px solid var(--nd-accent-ring);
     background: var(--nd-accent-wash);
 }
 
-#nai-dbgen-root .nd-dropzone__icon {
+:is(#nai-dbgen-root, .nd-root) .nd-dropzone__icon {
     display: block;
     margin-bottom: 0.3em;
     color: var(--nd-accent);
     font: 2.4em var(--nd-serif);
 }
 
-#nai-dbgen-root .nd-dropzone p {
+:is(#nai-dbgen-root, .nd-root) .nd-dropzone p {
     margin: 0.5em auto 1em;
     max-width: 36em;
     color: var(--nd-muted);
@@ -847,12 +847,12 @@
     line-height: 1.7;
 }
 
-#nai-dbgen-root .nd-dropzone .nd-textarea {
+:is(#nai-dbgen-root, .nd-root) .nd-dropzone .nd-textarea {
     margin: 12px 0 8px;
     text-align: left;
 }
 
-#nai-dbgen-root .nd-import__export {
+:is(#nai-dbgen-root, .nd-root) .nd-import__export {
     display: grid;
     gap: 10px;
     padding: 24px 18px;
@@ -861,22 +861,22 @@
     background: var(--nd-surface);
 }
 
-#nai-dbgen-root .nd-import__export h3,
-#nai-dbgen-root .nd-import-preview h3 {
+:is(#nai-dbgen-root, .nd-root) .nd-import__export h3,
+:is(#nai-dbgen-root, .nd-root) .nd-import-preview h3 {
     margin: 0;
     font-family: var(--nd-serif);
     font-size: 1.35em;
     font-weight: 500;
 }
 
-#nai-dbgen-root .nd-import__export p {
+:is(#nai-dbgen-root, .nd-root) .nd-import__export p {
     margin: 0;
     color: var(--nd-muted);
     font-size: 0.73em;
     line-height: 1.6;
 }
 
-#nai-dbgen-root .nd-import-preview {
+:is(#nai-dbgen-root, .nd-root) .nd-import-preview {
     display: grid;
     gap: 12px;
     padding: 16px;
@@ -885,7 +885,7 @@
     background: var(--nd-surface);
 }
 
-#nai-dbgen-root .nd-import-preview__toolbar {
+:is(#nai-dbgen-root, .nd-root) .nd-import-preview__toolbar {
     display: flex;
     flex-wrap: wrap;
     align-items: flex-end;
@@ -893,25 +893,25 @@
     gap: 12px;
 }
 
-#nai-dbgen-root .nd-import-preview__toolbar p {
+:is(#nai-dbgen-root, .nd-root) .nd-import-preview__toolbar p {
     margin: 0.35em 0 0;
     color: var(--nd-muted);
     font-size: 0.6em;
 }
 
-#nai-dbgen-root .nd-table-scroll {
+:is(#nai-dbgen-root, .nd-root) .nd-table-scroll {
     overflow: auto;
     max-height: 360px;
 }
 
-#nai-dbgen-root .nd-table-scroll table {
+:is(#nai-dbgen-root, .nd-root) .nd-table-scroll table {
     width: 100%;
     border-collapse: collapse;
     font-size: 0.6em;
 }
 
-#nai-dbgen-root .nd-table-scroll th,
-#nai-dbgen-root .nd-table-scroll td {
+:is(#nai-dbgen-root, .nd-root) .nd-table-scroll th,
+:is(#nai-dbgen-root, .nd-root) .nd-table-scroll td {
     padding: 10px;
     border-bottom: 1px solid var(--nd-line);
     text-align: left;
@@ -919,7 +919,7 @@
     color: var(--nd-text);
 }
 
-#nai-dbgen-root .nd-table-scroll .nd-input {
+:is(#nai-dbgen-root, .nd-root) .nd-table-scroll .nd-input {
     height: var(--nd-h-icon);
     min-height: var(--nd-h-icon);
     font-size: 1em;
@@ -927,7 +927,7 @@
 }
 
 /* —— 虚拟列表 —— */
-#nai-dbgen-root .nd-virtual-list {
+:is(#nai-dbgen-root, .nd-root) .nd-virtual-list {
     position: relative;
     overflow: auto;
     border: 1px solid var(--nd-line);
@@ -935,19 +935,19 @@
     background: var(--nd-surface);
 }
 
-#nai-dbgen-root .nd-virtual-list__spacer {
+:is(#nai-dbgen-root, .nd-root) .nd-virtual-list__spacer {
     position: relative;
     width: 100%;
 }
 
-#nai-dbgen-root .nd-virtual-list__window {
+:is(#nai-dbgen-root, .nd-root) .nd-virtual-list__window {
     position: absolute;
     left: 0;
     right: 0;
     will-change: transform;
 }
 
-#nai-dbgen-root .nd-virtual-list__row {
+:is(#nai-dbgen-root, .nd-root) .nd-virtual-list__row {
     display: flex;
     align-items: center;
     padding: 0 10px;
@@ -958,19 +958,19 @@
 }
 
 /* —— 模态内容壳（宿主 Popup 内） —— */
-#nai-dbgen-root.nd-modal-root,
-#nai-dbgen-root .nd-modal-root {
+:is(#nai-dbgen-root, .nd-root).nd-modal-root,
+:is(#nai-dbgen-root, .nd-root) .nd-modal-root {
     color: var(--nd-text);
 }
 
-#nai-dbgen-root .nd-modal-title {
+:is(#nai-dbgen-root, .nd-root) .nd-modal-title {
     margin: 0 0 0.7em;
     font-family: var(--nd-serif);
     font-size: 1.45em;
     font-weight: 500;
 }
 
-#nai-dbgen-root .nd-modal-actions {
+:is(#nai-dbgen-root, .nd-root) .nd-modal-actions {
     display: flex;
     flex-wrap: wrap;
     justify-content: flex-end;
@@ -978,12 +978,12 @@
     margin-top: 18px;
 }
 
-/* —— 原生 dialog 兜底（内容必须在 #nai-dbgen-root 内，D30） —— */
-#nai-dbgen-root .nd-native-dialog__shell {
+/* —— 原生 dialog 兜底（内容必须在 :is(#nai-dbgen-root, .nd-root) 内，D30） —— */
+:is(#nai-dbgen-root, .nd-root) .nd-native-dialog__shell {
     position: relative;
 }
 
-#nai-dbgen-root .nd-native-dialog__card {
+:is(#nai-dbgen-root, .nd-root) .nd-native-dialog__card {
     padding: 22px;
     border: 1px solid var(--nd-line);
     border-radius: var(--nd-radius);
@@ -994,7 +994,7 @@
     overflow: auto;
 }
 
-#nai-dbgen-root .nd-native-dialog__close {
+:is(#nai-dbgen-root, .nd-root) .nd-native-dialog__close {
     position: absolute;
     z-index: 2;
     top: 10px;
@@ -1010,23 +1010,23 @@
 }
 
 /* —— 两层列表（组→角色 / 库→条目） —— */
-#nai-dbgen-root .nd-nested-list {
+:is(#nai-dbgen-root, .nd-root) .nd-nested-list {
     display: grid;
     gap: 10px;
 }
 
-#nai-dbgen-root .nd-nested-list__parent {
+:is(#nai-dbgen-root, .nd-root) .nd-nested-list__parent {
     border: 1px solid var(--nd-line);
     border-radius: 14px;
     background: var(--nd-surface);
     overflow: hidden;
 }
 
-#nai-dbgen-root .nd-nested-list__parent.is-disabled {
+:is(#nai-dbgen-root, .nd-root) .nd-nested-list__parent.is-disabled {
     opacity: 0.72;
 }
 
-#nai-dbgen-root .nd-nested-list__header {
+:is(#nai-dbgen-root, .nd-root) .nd-nested-list__header {
     display: flex;
     flex-wrap: wrap;
     align-items: center;
@@ -1036,7 +1036,7 @@
     background: var(--nd-surface-2);
 }
 
-#nai-dbgen-root .nd-nested-list__expand {
+:is(#nai-dbgen-root, .nd-root) .nd-nested-list__expand {
     width: var(--nd-h-micro);
     height: var(--nd-h-micro);
     min-height: var(--nd-h-micro);
@@ -1052,14 +1052,14 @@
     font-size: 0.8em;
 }
 
-#nai-dbgen-root .nd-nested-list__title {
+:is(#nai-dbgen-root, .nd-root) .nd-nested-list__title {
     min-width: 0;
     flex: 1 1 auto;
     color: var(--nd-text);
     font-size: 0.87em;
 }
 
-#nai-dbgen-root .nd-nested-list__meta {
+:is(#nai-dbgen-root, .nd-root) .nd-nested-list__meta {
     display: flex;
     flex-wrap: wrap;
     gap: 6px;
@@ -1067,17 +1067,17 @@
     font-size: 0.67em;
 }
 
-#nai-dbgen-root .nd-nested-list__enable {
+:is(#nai-dbgen-root, .nd-root) .nd-nested-list__enable {
     flex: 0 0 auto;
     min-height: var(--nd-h-icon);
 }
 
-#nai-dbgen-root .nd-nested-list__children {
+:is(#nai-dbgen-root, .nd-root) .nd-nested-list__children {
     display: grid;
     gap: 0;
 }
 
-#nai-dbgen-root .nd-nested-list__child {
+:is(#nai-dbgen-root, .nd-root) .nd-nested-list__child {
     display: flex;
     align-items: center;
     gap: 8px;
@@ -1088,16 +1088,16 @@
     box-sizing: border-box;
 }
 
-#nai-dbgen-root .nd-nested-list__child:last-child {
+:is(#nai-dbgen-root, .nd-root) .nd-nested-list__child:last-child {
     border-bottom: 0;
 }
 
-#nai-dbgen-root .nd-nested-list__empty {
+:is(#nai-dbgen-root, .nd-root) .nd-nested-list__empty {
     padding: 14px 12px;
     color: var(--nd-muted);
     font-size: 0.73em;
 }
 
-#nai-dbgen-root .nd-nested-list__virtual {
+:is(#nai-dbgen-root, .nd-root) .nd-nested-list__virtual {
     overflow: hidden;
 }

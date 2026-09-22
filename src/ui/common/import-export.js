@@ -268,9 +268,14 @@ function downloadJson(data, filename) {
 }
 
 /**
- * @returns {boolean}
+ * @param {number} count
+ * @param {((count: number) => boolean|Promise<boolean>)|null|undefined} custom
+ * @returns {Promise<boolean>}
  */
-function confirmOverwrite(count) {
+async function resolveOverwriteConfirm(count, custom) {
+    if (typeof custom === 'function') {
+        return Boolean(await custom(count));
+    }
     const message = t('import.overwriteConfirm', { count });
     if (typeof globalThis.confirm === 'function') {
         return Boolean(globalThis.confirm(message));
@@ -283,6 +288,7 @@ function confirmOverwrite(count) {
  * @param {object} deps
  * @param {(data: object, strategy: string) => Promise<object>} deps.importJson
  * @param {() => Promise<object>} deps.exportJson
+ * @param {(count: number) => boolean|Promise<boolean>} [deps.confirmOverwrite] D53：宿主弹窗确认；未传退回 window.confirm
  * @returns {{ destroy: () => void }}
  */
 export function mountImportExport(root, deps) {
@@ -291,6 +297,9 @@ export function mountImportExport(root, deps) {
     }
     const importJson = typeof deps?.importJson === 'function' ? deps.importJson : null;
     const exportJson = typeof deps?.exportJson === 'function' ? deps.exportJson : null;
+    const confirmOverwriteCb = typeof deps?.confirmOverwrite === 'function'
+        ? deps.confirmOverwrite
+        : null;
 
     const shell = document.createElement('div');
     shell.className = 'nd-import';
@@ -522,7 +531,8 @@ export function mountImportExport(root, deps) {
             const mode = strategySelect.value || 'skip';
             if (mode === 'overwrite') {
                 const count = checked.filter(Boolean).length;
-                if (!confirmOverwrite(count)) {
+                const ok = await resolveOverwriteConfirm(count, confirmOverwriteCb);
+                if (!ok) {
                     setError(t('import.overwriteCancelled'));
                     return;
                 }

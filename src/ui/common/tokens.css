@@ -1,10 +1,10 @@
 /**
  * L5 UI · 设计令牌（架构文档 §8.2）。W0 必须定死，后续代理不得改名。
- * 全部定义在 #nai-dbgen-root 下，绝不碰 :root / html / body。
+ * 全部定义在 :is(#nai-dbgen-root, .nd-root) 下（D52：以 .nd-root 为准；id 仅过渡），绝不碰 :root / html / body。
  * 归属：W0 契约冻结（tokens）；样式消费归 W1-E / W2-*。
  */
 
-#nai-dbgen-root {
+:is(#nai-dbgen-root, .nd-root) {
     /* 表层：跟随酒馆主题，保证在任何主题下都不突兀。均带兜底值 */
     --nd-text: var(--SmartThemeBodyColor, #4b3040);
     --nd-surface: var(--SmartThemeBlurTintColor, #fffdfd);
@@ -52,8 +52,8 @@
     box-sizing: border-box;
 }
 
-#nai-dbgen-root *,
-#nai-dbgen-root *::before,
-#nai-dbgen-root *::after {
+:is(#nai-dbgen-root, .nd-root) *,
+:is(#nai-dbgen-root, .nd-root) *::before,
+:is(#nai-dbgen-root, .nd-root) *::after {
     box-sizing: inherit;
 }

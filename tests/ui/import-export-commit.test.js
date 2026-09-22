@@ -173,4 +173,59 @@ describe('ui/common/import-export commitImport (D44)', () => {
         assert.equal(called, 1);
         handle.destroy();
     });
+
+    it('confirmOverwrite callback false skips; no window.confirm', async () => {
+        const root = document.createElement('div');
+        document.body.appendChild(root);
+        let called = 0;
+        let winConfirm = 0;
+        globalThis.confirm = () => {
+            winConfirm += 1;
+            return true;
+        };
+        let cbCount = 0;
+
+        const handle = mountImportExport(root, {
+            importJson: async () => {
+                called += 1;
+                return {};
+            },
+            exportJson: async () => ({}),
+            confirmOverwrite: async (count) => {
+                cbCount = count;
+                return false;
+            },
+        });
+
+        const { paste, parseBtn, commitBtn, strategySelect } = findControls(root);
+        paste.value = JSON.stringify({ items: [{ id: 'a' }, { id: 'b' }] });
+        await click(parseBtn);
+        strategySelect.value = 'overwrite';
+        await click(commitBtn);
+
+        assert.equal(cbCount, 2);
+        assert.equal(winConfirm, 0);
+        assert.equal(called, 0);
+
+        // flip callback to allow
+        handle.destroy();
+        const root2 = document.createElement('div');
+        document.body.appendChild(root2);
+        const handle2 = mountImportExport(root2, {
+            importJson: async () => {
+                called += 1;
+                return {};
+            },
+            exportJson: async () => ({}),
+            confirmOverwrite: async () => true,
+        });
+        const c2 = findControls(root2);
+        c2.paste.value = JSON.stringify({ items: [{ id: 'a' }] });
+        await click(c2.parseBtn);
+        c2.strategySelect.value = 'overwrite';
+        await click(c2.commitBtn);
+        assert.equal(called, 1);
+        assert.equal(winConfirm, 0);
+        handle2.destroy();
+    });
 });

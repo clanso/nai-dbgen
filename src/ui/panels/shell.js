@@ -40,9 +40,8 @@ const TABS = [
 export async function openPanelShell(deps, initialTab) {
     const shell = document.createElement('div');
     shell.className = 'nd-shell nd-root';
-    // D48：抽屉用 #nai-dbgen-drawer；管理台内容挂到唯一的 #nai-dbgen-root
+    // D52：作用域根用 class .nd-root，不再赋 #nai-dbgen-root id
     const root = document.createElement('div');
-    root.id = 'nai-dbgen-root';
     root.className = 'nd-root';
     root.appendChild(shell);
 

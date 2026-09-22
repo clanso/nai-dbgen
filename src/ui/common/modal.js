@@ -5,6 +5,9 @@
  * 策略：优先走 HostPort.openModal（W1-B 已接 callGenericPopup / Popup.DISPLAY）；
  * 宿主无弹窗能力时降级为原生 <dialog>，保证管理台仍可打开。
  * destroy 只关本实例持有的 dialog（裁决 D30），不盲猜最后一个 open dialog。
+ *
+ * D52：作用域根用 class `.nd-root`，禁止用 id 全局查找作用域根。
+ * 定位本弹窗：从调用方传入的 `element` 做 closest('dialog')——元素引用唯一，不会拿错实例。
  */
 
 import { t } from '../i18n/zh-CN.js';
@@ -15,8 +18,7 @@ import { t } from '../i18n/zh-CN.js';
  */
 function buildRoot(opts) {
     const wrap = document.createElement('div');
-    wrap.id = 'nai-dbgen-root';
-    wrap.className = 'nd-modal-root';
+    wrap.className = 'nd-root nd-modal-root';
     if (opts?.title) {
         const h = document.createElement('h3');
         h.className = 'nd-modal-title';
@@ -62,8 +64,8 @@ function closeOwnedDialog(dlg) {
 }
 
 /**
- * 原生兜底：dialog 内必须挂 #nai-dbgen-root，令牌才生效（D30）。
- * @param {HTMLElement} contentRoot 已是 #nai-dbgen-root
+ * 原生兜底：dialog 内必须挂 .nd-root，令牌才生效（D30 / D52）。
+ * @param {HTMLElement} contentRoot 已是 .nd-root
  * @param {string} title
  * @returns {{ destroy: () => void, dialog: HTMLDialogElement }}
  */
@@ -155,10 +157,9 @@ export async function openModal(deps, opts) {
             setTimeout(resolve, 0);
         });
 
-        // 持有本实例内容所在 dialog，禁止盲猜最后一个 open（D30）
-        const rooted = document.getElementById('nai-dbgen-root');
+        // D52：从本实例 element 向上找 dialog，不用 getElementById（多根会拿错）
         /** @type {HTMLDialogElement|null} */
-        let ownedDialog = closestDialog(rooted) || closestDialog(element);
+        let ownedDialog = closestDialog(element);
 
         let destroyed = false;
         const destroy = () => {
@@ -171,7 +172,7 @@ export async function openModal(deps, opts) {
 
         Promise.resolve(pending).catch(() => {});
 
-        if (!ownedDialog && !rooted) {
+        if (!ownedDialog) {
             const wrap = buildRoot({ title, element });
             const native = openNativeDialog(wrap, title);
             ownedDialog = native.dialog;

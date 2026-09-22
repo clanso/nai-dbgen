@@ -101,6 +101,7 @@ export function installFakeDom() {
             this.rel = '';
             this.alt = '';
             this.src = '';
+            this.id = '';
 
             const self = this;
             this.classList = {
@@ -226,10 +227,16 @@ export function installFakeDom() {
         click() {}
 
         /**
-         * @param {string} _sel
-         * @returns {null}
+         * @param {string} sel
+         * @returns {FakeElement|null}
          */
-        closest(_sel) {
+        closest(sel) {
+            /** @type {FakeElement|null} */
+            let node = this;
+            while (node) {
+                if (matchesSelector(node, sel)) return node;
+                node = /** @type {FakeElement|null} */ (node.parentNode);
+            }
             return null;
         }
 
@@ -249,6 +256,22 @@ export function installFakeDom() {
             node.parentNode = this.parentNode;
             siblings.splice(i + 1, 0, node);
         }
+    }
+
+    /**
+     * @param {FakeElement} el
+     * @param {string} sel
+     * @returns {boolean}
+     */
+    function matchesSelector(el, sel) {
+        const s = String(sel || '');
+        if (s.startsWith('.')) {
+            return el.classList.contains(s.slice(1));
+        }
+        if (s.startsWith('#')) {
+            return el.id === s.slice(1);
+        }
+        return el.tagName === s.toUpperCase();
     }
 
     const prev = {

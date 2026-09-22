@@ -1,6 +1,6 @@
-/* L5 UI · 面板 / 管理台外壳。全部挂 #nai-dbgen-root；色值只走 --nd-* */
+/* L5 UI · 面板 / 管理台外壳。全部挂 :is(#nai-dbgen-root, .nd-root)（D52）；色值只走 --nd-* */
 
-#nai-dbgen-root .nd-shell {
+:is(#nai-dbgen-root, .nd-root) .nd-shell {
     display: flex;
     flex-direction: column;
     gap: 12px;
@@ -8,7 +8,7 @@
     max-height: min(80vh, 900px);
 }
 
-#nai-dbgen-root .nd-shell__tabs {
+:is(#nai-dbgen-root, .nd-root) .nd-shell__tabs {
     display: flex;
     flex-wrap: wrap;
     gap: 6px;
@@ -16,77 +16,77 @@
     border-bottom: 1px solid var(--nd-line);
 }
 
-#nai-dbgen-root .nd-shell__tab.is-active {
+:is(#nai-dbgen-root, .nd-root) .nd-shell__tab.is-active {
     background: var(--nd-accent);
     border-color: var(--nd-accent);
     color: var(--nd-on-accent);
 }
 
-#nai-dbgen-root .nd-shell__body,
-#nai-dbgen-root .nd-shell__panel,
-#nai-dbgen-root .nd-panel {
+:is(#nai-dbgen-root, .nd-root) .nd-shell__body,
+:is(#nai-dbgen-root, .nd-root) .nd-shell__panel,
+:is(#nai-dbgen-root, .nd-root) .nd-panel {
     min-width: 0;
     flex: 1;
 }
 
-#nai-dbgen-root .nd-panel {
+:is(#nai-dbgen-root, .nd-root) .nd-panel {
     display: flex;
     flex-direction: column;
     gap: 12px;
 }
 
-#nai-dbgen-root .nd-panel__list {
+:is(#nai-dbgen-root, .nd-root) .nd-panel__list {
     min-height: 200px;
     max-height: min(60vh, 640px);
     overflow: auto;
 }
 
-#nai-dbgen-root .nd-library-view__status {
+:is(#nai-dbgen-root, .nd-root) .nd-library-view__status {
     color: var(--nd-muted);
     font-size: 0.73em;
 }
 
-#nai-dbgen-root .nd-row-actions {
+:is(#nai-dbgen-root, .nd-root) .nd-row-actions {
     display: flex;
     flex-wrap: wrap;
     gap: 4px;
     margin-left: auto;
 }
 
-#nai-dbgen-root .nd-muted {
+:is(#nai-dbgen-root, .nd-root) .nd-muted {
     color: var(--nd-muted);
     font-size: 0.73em;
 }
 
-#nai-dbgen-root .nd-form,
-#nai-dbgen-root .nd-form-modal,
-#nai-dbgen-root .nd-import-modal {
+:is(#nai-dbgen-root, .nd-root) .nd-form,
+:is(#nai-dbgen-root, .nd-root) .nd-form-modal,
+:is(#nai-dbgen-root, .nd-root) .nd-import-modal {
     display: grid;
     gap: 12px;
 }
 
-#nai-dbgen-root .nd-form__actions,
-#nai-dbgen-root .nd-confirm__actions {
+:is(#nai-dbgen-root, .nd-root) .nd-form__actions,
+:is(#nai-dbgen-root, .nd-root) .nd-confirm__actions {
     display: flex;
     flex-wrap: wrap;
     gap: 8px;
     justify-content: flex-end;
 }
 
-#nai-dbgen-root .nd-confirm {
+:is(#nai-dbgen-root, .nd-root) .nd-confirm {
     display: grid;
     gap: 12px;
     max-width: 420px;
 }
 
-#nai-dbgen-root .nd-var-features,
-#nai-dbgen-root .nd-preset-prompts {
+:is(#nai-dbgen-root, .nd-root) .nd-var-features,
+:is(#nai-dbgen-root, .nd-root) .nd-preset-prompts {
     display: grid;
     gap: 10px;
 }
 
-#nai-dbgen-root .nd-var-feature,
-#nai-dbgen-root .nd-preset-prompt {
+:is(#nai-dbgen-root, .nd-root) .nd-var-feature,
+:is(#nai-dbgen-root, .nd-root) .nd-preset-prompt {
     display: grid;
     gap: 8px;
     padding: 10px;
@@ -95,17 +95,17 @@
     background: var(--nd-surface-2);
 }
 
-#nai-dbgen-root .nd-subtabs {
+:is(#nai-dbgen-root, .nd-root) .nd-subtabs {
     display: flex;
     gap: 6px;
 }
 
-#nai-dbgen-root .nd-subtabs .nd-button.is-active {
+:is(#nai-dbgen-root, .nd-root) .nd-subtabs .nd-button.is-active {
     background: var(--nd-accent-wash);
     border-color: var(--nd-accent);
 }
 
-#nai-dbgen-root .nd-artist-preview-cover {
+:is(#nai-dbgen-root, .nd-root) .nd-artist-preview-cover {
     width: 120px;
     aspect-ratio: 832 / 1216;
     display: grid;
@@ -119,25 +119,25 @@
     color: var(--nd-muted);
 }
 
-#nai-dbgen-root .nd-artist-preview-cover img {
+:is(#nai-dbgen-root, .nd-root) .nd-artist-preview-cover img {
     width: 100%;
     height: 100%;
     object-fit: contain;
 }
 
-#nai-dbgen-root .nd-prompts-list {
+:is(#nai-dbgen-root, .nd-root) .nd-prompts-list {
     display: grid;
     gap: 12px;
 }
 
-#nai-dbgen-root .nd-prompt-card {
+:is(#nai-dbgen-root, .nd-root) .nd-prompt-card {
     padding: 12px;
     border: 1px solid var(--nd-line);
     border-radius: var(--nd-control-radius);
     background: var(--nd-surface);
 }
 
-#nai-dbgen-root .nd-code {
+:is(#nai-dbgen-root, .nd-root) .nd-code {
     margin: 0;
     padding: 10px;
     overflow: auto;
@@ -150,7 +150,7 @@
     word-break: break-word;
 }
 
-#nai-dbgen-root .nd-nested-list__child {
+:is(#nai-dbgen-root, .nd-root) .nd-nested-list__child {
     display: flex;
     flex-wrap: wrap;
     align-items: center;

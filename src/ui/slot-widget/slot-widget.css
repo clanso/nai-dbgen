@@ -5,7 +5,7 @@
  * - 唯一需要 custom- 前缀：挂载前骨架占位（过 DOMPurify）
  * - 挂载后 JS 补的 .nd-slot* 类名未经净化，不加前缀
  *
- * 控件在气泡内、不在 #nai-dbgen-root 下 → 在 .nd-slot 上镜像 --nd-* 令牌。
+ * 控件在气泡内、不在 .nd-root 下 → 在 .nd-slot 上镜像 --nd-* 令牌。
  * 硬化关键属性，抵御宿主消息内全局 p/img/button 规则泄漏。
  */
 
@@ -16,7 +16,7 @@
 
 /* —— 挂载后（JS 补类，未经净化） —— */
 .nd-slot {
-    /* 令牌镜像：气泡外无 #nai-dbgen-root 时仍可用 */
+    /* 令牌镜像：气泡外无 .nd-root 时仍可用 */
     --nd-text: var(--SmartThemeBodyColor, #4b3040);
     --nd-surface: var(--SmartThemeBlurTintColor, #fffdfd);
     --nd-surface-2: var(--SmartThemeBotMesBlurTintColor, #fff0f6);
@@ -198,7 +198,7 @@
     }
 }
 
-/* 查看器（弹窗内，通常在 #nai-dbgen-root） */
+/* 查看器（弹窗内，通常在 .nd-root） */
 .nd-slot-viewer {
     display: flex;
     justify-content: center;

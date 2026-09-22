@@ -10,15 +10,14 @@ import { openModal } from '../common/modal.js';
 import { t } from '../i18n/zh-CN.js';
 
 /**
- * 构建查看器内容根（带 #nai-dbgen-root，令牌生效）。
+ * 构建查看器内容根（带 .nd-root，令牌生效；D52 不用 id）。
  * @param {string} safeUrl 已过白名单
  * @param {string} [alt]
  * @returns {HTMLElement}
  */
 export function buildImageViewerElement(safeUrl, alt) {
     const root = document.createElement('div');
-    root.id = 'nai-dbgen-root';
-    root.className = 'nd-slot-viewer';
+    root.className = 'nd-root nd-slot-viewer';
 
     const img = document.createElement('img');
     img.className = 'nd-slot-viewer__img';
