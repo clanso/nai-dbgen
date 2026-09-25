@@ -173,6 +173,24 @@ describe('ui/workbench mountWorkbench', () => {
      * @param {string} label
      * @param {boolean} checked
      */
+    /**
+     * @param {any} node
+     * @returns {string}
+     */
+    function deepText(node) {
+        if (!node) return '';
+        const own = String(node._text || node.textContent || '');
+        const kids = Array.isArray(node.childNodes)
+            ? node.childNodes.map((c) => deepText(c)).join('')
+            : '';
+        return own + kids;
+    }
+
+    /**
+     * @param {Element} root
+     * @param {string} label
+     * @param {boolean} checked
+     */
     function setCheckboxByLabel(root, label, checked) {
         /** @type {any[]} */
         const stack = [root];
@@ -180,20 +198,28 @@ describe('ui/workbench mountWorkbench', () => {
             const node = stack.pop();
             if (!node) continue;
             const cls = String(node.className || '');
-            if (cls.includes('nd-checkbox-row') || cls.includes('nd-toggle-row')) {
-                const text = [...(node.childNodes || [])]
-                    .map((c) => String(c.textContent || ''))
-                    .join('');
-                if (text.includes(label)) {
-                    const input = (node.childNodes || []).find(
-                        (c) => c && String(c.tagName).toUpperCase() === 'INPUT',
-                    );
-                    assert.ok(input, `checkbox input missing for ${label}`);
-                    input.checked = checked;
-                    const change = (input._listeners || []).find((l) => l.type === 'change');
-                    change?.fn();
-                    return;
+            const isRow = /(^|\s)nd-checkbox-row(\s|$)/.test(cls)
+                || /(^|\s)nd-toggle-row(\s|$)/.test(cls);
+            if (isRow && deepText(node).includes(label)) {
+                /** @type {any[]} */
+                const inner = [node];
+                let input = null;
+                while (inner.length) {
+                    const n = inner.pop();
+                    if (!n) continue;
+                    if (String(n.tagName).toUpperCase() === 'INPUT') {
+                        input = n;
+                        break;
+                    }
+                    if (Array.isArray(n.childNodes)) {
+                        for (const c of n.childNodes) inner.push(c);
+                    }
                 }
+                assert.ok(input, `checkbox input missing for ${label}`);
+                input.checked = checked;
+                const change = (input._listeners || []).find((l) => l.type === 'change');
+                change?.fn();
+                return;
             }
             if (Array.isArray(node.childNodes)) {
                 for (const c of node.childNodes) stack.push(c);
@@ -314,7 +340,7 @@ describe('ui/workbench mountWorkbench', () => {
             }
         }
         assert.match(unmatchedText, /fabricated-key/);
-        assert.match(unmatchedText, /未命中标签 key/);
+        assert.match(unmatchedText, /未匹配的构图标签/);
         ctx.handle.destroy();
     });
 
@@ -337,30 +363,7 @@ describe('ui/workbench mountWorkbench', () => {
 
     it('开关拨开后，无论 caption 如何，透传 true', async () => {
         const ctx = mount();
-        // 找到「是否替换角色关键字」toggle 的 checkbox 并勾上
-        /** @type {any[]} */
-        const stack = [ctx.root];
-        let toggleInput = null;
-        while (stack.length) {
-            const node = stack.pop();
-            if (!node) continue;
-            if (String(node.className || '').includes('nd-toggle-row')) {
-                const input = (node.childNodes || []).find(
-                    (c) => c && String(c.tagName).toUpperCase() === 'INPUT',
-                );
-                if (input) {
-                    toggleInput = input;
-                    break;
-                }
-            }
-            if (Array.isArray(node.childNodes)) {
-                for (const c of node.childNodes) stack.push(c);
-            }
-        }
-        assert.ok(toggleInput);
-        toggleInput.checked = true;
-        const change = (toggleInput._listeners || []).find((l) => l.type === 'change');
-        change?.fn();
+        setCheckboxByLabel(ctx.root, '替换角色关键字', true);
 
         await clickButton(ctx.root, '出图');
         await new Promise((r) => setTimeout(r, 0));
@@ -435,23 +438,37 @@ describe('ui/workbench mountWorkbench', () => {
         ctx2.handle.destroy();
     });
 
-    it('D47: Variety / 透明底 / qualityStrategy 经 readParams 透传给出图', async () => {
+    it('D47: Variety / 透明底经 readParams 透传给出图', async () => {
         const ctx = mount();
-        setCheckboxByLabel(ctx.root, '启用 Variety（skip_cfg_above_sigma）', true);
-        setNumberByLabel(ctx.root, 'skip_cfg_above_sigma', 19);
-        setCheckboxByLabel(ctx.root, 'tag_hint_transparent_background', true);
-        setSelectByLabel(ctx.root, 'qualityStrategy', 'caption');
+        // Variety：4.5 开关；值由程序按尺寸计算
+        setCheckboxByLabel(ctx.root, 'Variety', true);
+        // 透明底：仅 V5 显示
+        setSelectByLabel(ctx.root, '模型', 'nai-diffusion-5-full');
+        setCheckboxByLabel(ctx.root, '透明底', true);
 
         await clickButton(ctx.root, '出图');
         await new Promise((r) => setTimeout(r, 0));
 
         assert.equal(ctx.genCalls.length, 1);
         const params = ctx.genCalls[0].params;
-        assert.equal(params.skip_cfg_above_sigma, 19);
+        // 切到 V5 后 Variety 被 coerce 关掉
+        assert.equal(params.skip_cfg_above_sigma, null);
         assert.equal(params.tag_hint_transparent_background, true);
-        assert.equal(params.qualityStrategy, 'caption');
+        assert.equal(params.straight_alpha, true);
         assert.equal(params.n_samples, defaultNaiParams().n_samples);
-        assert.equal(params.model, defaultNaiParams().model);
+        assert.equal(params.model, 'nai-diffusion-5-full');
+        ctx.handle.destroy();
+    });
+
+    it('D47b: 4.5 开启 Variety 按尺寸写入 skip_cfg_above_sigma', async () => {
+        const ctx = mount();
+        setCheckboxByLabel(ctx.root, 'Variety', true);
+        await clickButton(ctx.root, '出图');
+        await new Promise((r) => setTimeout(r, 0));
+        const params = ctx.genCalls[0].params;
+        assert.equal(params.model, 'nai-diffusion-4-5-full');
+        assert.equal(params.skip_cfg_above_sigma, 58);
+        assert.equal(params.tag_hint_qt, params.qualityToggle);
         ctx.handle.destroy();
     });
 
@@ -465,4 +482,217 @@ describe('ui/workbench mountWorkbench', () => {
         a.handle.destroy();
         b.handle.destroy();
     });
+
+    it('粘贴提示词：填充场景/角色/位置，并匹配切换画师串', async () => {
+        /** @type {object[]} */
+        const saved = [];
+        /** @type {string[]} */
+        const clipboard = [[
+            '画师串',
+            '正面：artist:match',
+            '负面：neg-match',
+            '',
+            '场景',
+            '正面：pasted-scene',
+            '负面：pasted-neg',
+            '',
+            '角色1',
+            '正面：char-a',
+            '负面：char-a-n',
+            '位置：0.42, 0.58',
+        ].join('\n')];
+
+        const navDesc = Object.getOwnPropertyDescriptor(globalThis, 'navigator');
+        Object.defineProperty(globalThis, 'navigator', {
+            configurable: true,
+            writable: true,
+            value: {
+                clipboard: {
+                    async readText() {
+                        return clipboard[0];
+                    },
+                },
+            },
+        });
+
+        try {
+            const ctx = mount({
+                deps: {
+                    loadSettings: () => ({
+                        naiParams: defaultNaiParams(),
+                        activeArtistId: 'old',
+                    }),
+                    saveSettings: (s) => { saved.push(s); },
+                    artistRepo: {
+                        async list() {
+                            return {
+                                ok: true,
+                                value: [
+                                    {
+                                        id: 'art-hit',
+                                        name: '命中串',
+                                        positivePrompt: 'artist:match',
+                                        negativePrompt: 'neg-match',
+                                    },
+                                ],
+                            };
+                        },
+                    },
+                },
+            });
+
+            assert.ok(findButton(ctx.root, '粘贴提示词'));
+            await clickButton(ctx.root, '粘贴提示词');
+            await new Promise((r) => setTimeout(r, 0));
+
+            const caption = readCaptionFromEditor(ctx.root);
+            assert.equal(caption.v4_prompt.caption.base_caption, 'pasted-scene');
+            assert.equal(caption.v4_negative_prompt.caption.base_caption, 'pasted-neg');
+            assert.equal(caption.v4_prompt.caption.char_captions[0].char_caption, 'char-a');
+            assert.deepEqual(
+                caption.v4_prompt.caption.char_captions[0].centers,
+                [{ x: 0.42, y: 0.58 }],
+            );
+            assert.ok(ctx.toasts.some((t) => t[0] === 'success' && t[1] === '已粘贴'));
+            assert.ok(ctx.toasts.some((t) => t[0] === 'success' && String(t[1]).includes('已切换画师串：命中串')));
+            assert.equal(saved[0]?.activeArtistId, 'art-hit');
+            ctx.handle.destroy();
+        } finally {
+            if (navDesc) {
+                Object.defineProperty(globalThis, 'navigator', navDesc);
+            } else {
+                delete globalThis.navigator;
+            }
+        }
+    });
+
+    it('粘贴提示词：画师串不匹配时不切换', async () => {
+        /** @type {object[]} */
+        const saved = [];
+        const navDesc = Object.getOwnPropertyDescriptor(globalThis, 'navigator');
+        Object.defineProperty(globalThis, 'navigator', {
+            configurable: true,
+            writable: true,
+            value: {
+                clipboard: {
+                    async readText() {
+                        return [
+                            '画师串',
+                            '正面：unknown',
+                            '负面：x',
+                            '',
+                            '场景',
+                            '正面：only-scene',
+                        ].join('\n');
+                    },
+                },
+            },
+        });
+
+        try {
+            const ctx = mount({
+                deps: {
+                    loadSettings: () => ({
+                        naiParams: defaultNaiParams(),
+                        activeArtistId: 'keep-me',
+                    }),
+                    saveSettings: (s) => { saved.push(s); },
+                    artistRepo: {
+                        async list() {
+                            return {
+                                ok: true,
+                                value: [{
+                                    id: 'a1',
+                                    name: 'A',
+                                    positivePrompt: 'p',
+                                    negativePrompt: 'n',
+                                }],
+                            };
+                        },
+                    },
+                },
+            });
+            await clickButton(ctx.root, '粘贴提示词');
+            await new Promise((r) => setTimeout(r, 0));
+            assert.equal(saved.length, 0);
+            assert.ok(ctx.toasts.some((t) => String(t[1]).includes('画师串库里没有这一串')));
+            ctx.handle.destroy();
+        } finally {
+            if (navDesc) {
+                Object.defineProperty(globalThis, 'navigator', navDesc);
+            } else {
+                delete globalThis.navigator;
+            }
+        }
+    });
 });
+
+/**
+ * 从假 DOM 的 caption 编辑器读出当前值（按 label 找 textarea / number）。
+ * @param {Element} root
+ * @returns {import('../../src/domain/model/nai-params.js').NaiCaption}
+ */
+function readCaptionFromEditor(root) {
+    /**
+     * @param {string} label
+     * @returns {any}
+     */
+    function fieldByLabel(label) {
+        /** @type {any[]} */
+        const stack = [root];
+        while (stack.length) {
+            const node = stack.pop();
+            if (!node) continue;
+            const parts = String(node.className || '').split(/\s+/);
+            if (parts.includes('nd-field')) {
+                const lab = (node.childNodes || []).find((c) => {
+                    const p = String(c.className || '').split(/\s+/);
+                    return p.includes('nd-field__label') && c.textContent === label;
+                });
+                if (lab) {
+                    const control = (node.childNodes || []).find((c) => (
+                        c.tagName === 'TEXTAREA' || c.tagName === 'INPUT'
+                    ));
+                    return control;
+                }
+            }
+            if (Array.isArray(node.childNodes)) {
+                for (const c of node.childNodes) stack.push(c);
+            }
+        }
+        return null;
+    }
+
+    const posBase = fieldByLabel('场景 · 正面');
+    const negBase = fieldByLabel('场景 · 负面');
+    const charPos = fieldByLabel('正面');
+    const charNeg = fieldByLabel('负面');
+    const x = fieldByLabel('位置 X');
+    const y = fieldByLabel('位置 Y');
+    return {
+        v4_prompt: {
+            caption: {
+                base_caption: String(posBase?.value ?? ''),
+                char_captions: charPos ? [{
+                    char_caption: String(charPos.value ?? ''),
+                    centers: [{
+                        x: Number(x?.value),
+                        y: Number(y?.value),
+                    }],
+                }] : [],
+            },
+        },
+        v4_negative_prompt: {
+            caption: {
+                base_caption: String(negBase?.value ?? ''),
+                char_captions: charNeg ? [{
+                    char_caption: String(charNeg.value ?? ''),
+                    centers: [{
+                        x: Number(x?.value),
+                        y: Number(y?.value),
+                    }],
+                }] : [],
+            },
+        },
+    };
+}

@@ -1,21 +1,122 @@
 /**
  * L5 UI · 控件配方。全部选择器挂 :is(#nai-dbgen-root, .nd-root)（D52：作用域根用 class .nd-root；id 仅过渡兼容）；类名 nd-。
  * 颜色只走 --nd-*；字号用 em；控件高度用 px 令牌。
+ *
+ * D61：在自己的作用域内，对关键属性使用 !important，抵御宿主全局皮（写法对齐 slot-widget.css）。
+ * 白名单：appearance / box-sizing / font-family / font-size / line-height / color /
+ * background / border / border-radius / padding / width / height / min-height /
+ * box-shadow / overflow（D70）/ min-width（滚动条滑块）。
+ * 禁止污染 :root、body、.mes、#chat 等宿主选择器。
  */
+
+/*
+ * 滚动条：压过酒馆 style.css 无作用域 ::-webkit-scrollbar（0.7rem + 灰滑块 + track hover 灰底）。
+ * Firefox：scrollbar-width / scrollbar-color；WebKit：伪元素 + --nd-scroll-* token。
+ * 故意不用 scrollbar-gutter:stable，避免内容不足一屏时留出空槽。
+ */
+:is(#nai-dbgen-root, .nd-root),
+:is(#nai-dbgen-root, .nd-root) * {
+    scrollbar-width: thin;
+    scrollbar-color: var(--nd-scroll-thumb) var(--nd-scroll-track);
+    /* 禁止预留空槽（曾用 stable 导致内容不足一屏仍见深灰条） */
+    scrollbar-gutter: auto;
+}
+
+:is(#nai-dbgen-root, .nd-root)::-webkit-scrollbar,
+:is(#nai-dbgen-root, .nd-root) *::-webkit-scrollbar {
+    width: var(--nd-scroll-size) !important;
+    height: var(--nd-scroll-size) !important;
+}
+
+:is(#nai-dbgen-root, .nd-root)::-webkit-scrollbar-track,
+:is(#nai-dbgen-root, .nd-root) *::-webkit-scrollbar-track,
+:is(#nai-dbgen-root, .nd-root)::-webkit-scrollbar-track:hover,
+:is(#nai-dbgen-root, .nd-root) *::-webkit-scrollbar-track:hover {
+    background: var(--nd-scroll-track) !important;
+    box-shadow: none !important;
+}
+
+:is(#nai-dbgen-root, .nd-root)::-webkit-scrollbar-thumb,
+:is(#nai-dbgen-root, .nd-root) *::-webkit-scrollbar-thumb,
+:is(#nai-dbgen-root, .nd-root)::-webkit-scrollbar-thumb:vertical,
+:is(#nai-dbgen-root, .nd-root) *::-webkit-scrollbar-thumb:vertical,
+:is(#nai-dbgen-root, .nd-root)::-webkit-scrollbar-thumb:horizontal,
+:is(#nai-dbgen-root, .nd-root) *::-webkit-scrollbar-thumb:horizontal {
+    background: var(--nd-scroll-thumb) !important;
+    border-radius: var(--nd-radius-pill) !important;
+    /* 透明边 + content-box：滑块与容器边缘留空隙，不贴死弹窗圆角 */
+    border: 2px solid transparent !important;
+    /* 必须写在 background 简写之后，否则简写会重置 clip */
+    background-clip: content-box;
+    box-shadow: none !important;
+    min-height: 28px !important;
+    min-width: 28px !important;
+}
+
+:is(#nai-dbgen-root, .nd-root)::-webkit-scrollbar-thumb:hover,
+:is(#nai-dbgen-root, .nd-root) *::-webkit-scrollbar-thumb:hover {
+    background: var(--nd-scroll-thumb-hover) !important;
+    background-clip: content-box;
+}
+
+:is(#nai-dbgen-root, .nd-root)::-webkit-scrollbar-thumb:active,
+:is(#nai-dbgen-root, .nd-root) *::-webkit-scrollbar-thumb:active {
+    background: var(--nd-scroll-thumb-active) !important;
+    background-clip: content-box;
+}
+
+:is(#nai-dbgen-root, .nd-root)::-webkit-scrollbar-corner,
+:is(#nai-dbgen-root, .nd-root) *::-webkit-scrollbar-corner {
+    background: transparent !important;
+}
+
+/* —— D61：原生控件全量硬化（含无 class 的裸 input/button/select/textarea） —— */
+:is(#nai-dbgen-root, .nd-root) button,
+:is(#nai-dbgen-root, .nd-root) input,
+:is(#nai-dbgen-root, .nd-root) select,
+:is(#nai-dbgen-root, .nd-root) textarea {
+    box-sizing: border-box !important;
+    appearance: none !important;
+    -webkit-appearance: none !important;
+    font-family: inherit !important;
+}
+
+:is(#nai-dbgen-root, .nd-root) button {
+    font-size: inherit !important;
+    line-height: 1.2 !important;
+    color: var(--nd-text) !important;
+    background: var(--nd-surface-2) !important;
+    border: 1px solid var(--nd-line) !important;
+    border-radius: var(--nd-radius-sm) !important;
+    padding: 0 14px !important;
+    min-height: var(--nd-h-micro) !important;
+}
+
+:is(#nai-dbgen-root, .nd-root) input,
+:is(#nai-dbgen-root, .nd-root) select,
+:is(#nai-dbgen-root, .nd-root) textarea {
+    font-size: inherit !important;
+    line-height: 1.2 !important;
+    color: var(--nd-text) !important;
+    background: var(--nd-input-bg) !important;
+    border: 1px solid var(--nd-line) !important;
+    border-radius: var(--nd-radius-sm) !important;
+    padding: 0 12px !important;
+}
 
 /* —— 基础控件继承加固（R-11） —— */
 :is(#nai-dbgen-root, .nd-root) .nd-button,
 :is(#nai-dbgen-root, .nd-root) .nd-icon-button,
 :is(#nai-dbgen-root, .nd-root) .nd-text-button,
 :is(#nai-dbgen-root, .nd-root) .nd-chip {
-    font-family: inherit;
-    font-size: inherit;
-    line-height: 1.2;
-    color: inherit;
-    border: 0;
+    font-family: inherit !important;
+    font-size: inherit !important;
+    line-height: 1.2 !important;
+    color: inherit !important;
+    border: 0 !important;
     cursor: pointer;
-    appearance: none;
-    -webkit-appearance: none;
+    appearance: none !important;
+    -webkit-appearance: none !important;
 }
 
 :is(#nai-dbgen-root, .nd-root) .nd-button:focus-visible,
@@ -33,54 +134,55 @@
 }
 
 :is(#nai-dbgen-root, .nd-root) .nd-button {
-    height: var(--nd-h);
-    min-height: var(--nd-h);
+    height: var(--nd-h) !important;
+    min-height: var(--nd-h) !important;
     display: inline-flex;
     align-items: center;
     justify-content: center;
     gap: 0.4em;
-    padding: 0 14px;
-    border-radius: var(--nd-control-radius);
-    font-size: 0.8em;
+    padding: 0 14px !important;
+    border-radius: var(--nd-radius-sm) !important;
+    font-size: var(--nd-fs-md) !important;
+    line-height: 1.2 !important;
     font-weight: 700;
-    background: var(--nd-surface-2);
-    border: 1px solid var(--nd-line);
-    color: var(--nd-text);
+    background: var(--nd-surface-2) !important;
+    border: 1px solid var(--nd-line) !important;
+    color: var(--nd-text) !important;
 }
 
 :is(#nai-dbgen-root, .nd-root) .nd-button:hover:not(:disabled) {
-    background: var(--nd-accent-wash);
-    border-color: var(--nd-line-strong);
+    background: var(--nd-ghost-hover) !important;
+    border-color: var(--nd-line-strong) !important;
 }
 
 :is(#nai-dbgen-root, .nd-root) .nd-button--primary {
-    height: var(--nd-h-primary);
-    min-height: var(--nd-h-primary);
-    background: var(--nd-accent);
-    border-color: var(--nd-accent);
-    color: var(--nd-on-accent);
+    height: var(--nd-h-primary) !important;
+    min-height: var(--nd-h-primary) !important;
+    background: var(--nd-accent) !important;
+    border-color: var(--nd-accent) !important;
+    color: var(--nd-on-accent) !important;
 }
 
 :is(#nai-dbgen-root, .nd-root) .nd-button--primary:hover:not(:disabled) {
-    background: var(--nd-accent-deep);
-    border-color: var(--nd-accent-deep);
+    background: var(--nd-accent-deep) !important;
+    border-color: var(--nd-accent-deep) !important;
 }
 
 :is(#nai-dbgen-root, .nd-root) .nd-button--ghost {
-    background: var(--nd-surface-2);
-    border: 1px solid var(--nd-line);
-    color: var(--nd-text);
+    background: var(--nd-surface-2) !important;
+    border: 1px solid var(--nd-line) !important;
+    color: var(--nd-text) !important;
 }
 
 :is(#nai-dbgen-root, .nd-root) .nd-button--ghost:hover:not(:disabled) {
-    background: var(--nd-accent-wash);
-    border-color: var(--nd-line-strong);
+    background: var(--nd-ghost-hover) !important;
+    border-color: var(--nd-line-strong) !important;
 }
 
 :is(#nai-dbgen-root, .nd-root) .nd-button--danger {
-    background: var(--nd-danger);
-    border-color: var(--nd-danger);
-    color: var(--nd-on-accent);
+    background: var(--nd-danger) !important;
+    border-color: var(--nd-danger) !important;
+    color: var(--nd-on-accent) !important;
 }
 
 :is(#nai-dbgen-root, .nd-root) .nd-button--danger:hover:not(:disabled) {
@@ -95,63 +197,72 @@
 }
 
 :is(#nai-dbgen-root, .nd-root) .nd-icon-button {
-    height: var(--nd-h-icon);
-    min-height: var(--nd-h-icon);
+    height: var(--nd-h-icon) !important;
+    min-height: var(--nd-h-icon) !important;
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    padding: 0 10px;
-    border: 1px solid var(--nd-line);
-    border-radius: var(--nd-control-radius);
-    background: transparent;
-    color: var(--nd-soft);
-    font-size: 0.73em;
+    padding: 0 10px !important;
+    border: 1px solid var(--nd-line) !important;
+    border-radius: var(--nd-radius-sm) !important;
+    background: transparent !important;
+    color: var(--nd-soft) !important;
+    font-size: var(--nd-fs-sm) !important;
+    line-height: 1.2 !important;
 }
 
 :is(#nai-dbgen-root, .nd-root) .nd-icon-button:hover:not(:disabled) {
-    background: var(--nd-accent-ring);
-    border-color: var(--nd-line-strong);
+    background: var(--nd-accent-ring) !important;
+    border-color: var(--nd-line-strong) !important;
 }
 
 :is(#nai-dbgen-root, .nd-root) .nd-text-button {
-    min-height: var(--nd-h-micro);
+    height: auto !important;
+    min-height: var(--nd-h-micro) !important;
     display: inline-flex;
     align-items: center;
-    padding: 0;
-    background: transparent;
-    color: var(--nd-muted);
-    font-size: 0.73em;
+    padding: 0 !important;
+    border-radius: 0 !important;
+    background: transparent !important;
+    border: 0 !important;
+    color: var(--nd-muted) !important;
+    font-size: var(--nd-fs-sm) !important;
+    line-height: 1.2 !important;
+    white-space: nowrap;
 }
 
 :is(#nai-dbgen-root, .nd-root) .nd-text-button:hover:not(:disabled) {
-    color: var(--nd-text);
+    color: var(--nd-text) !important;
 }
 
 :is(#nai-dbgen-root, .nd-root) .nd-text-button--danger:hover:not(:disabled) {
-    color: var(--nd-danger);
+    color: var(--nd-danger) !important;
 }
 
 :is(#nai-dbgen-root, .nd-root) .nd-chip {
-    min-height: var(--nd-h-micro);
+    height: auto !important;
+    min-height: var(--nd-h-micro) !important;
     display: inline-flex;
     align-items: center;
-    padding: 0 10px;
-    border-radius: 8px;
-    border: 1px solid var(--nd-line);
-    background: transparent;
-    color: var(--nd-muted);
-    font-size: 0.67em;
+    padding: 0 10px !important;
+    border-radius: var(--nd-radius-sm) !important;
+    border: 1px solid var(--nd-line) !important;
+    background: transparent !important;
+    color: var(--nd-muted) !important;
+    font-size: var(--nd-fs-xs) !important;
+    line-height: 1.2 !important;
 }
 
 :is(#nai-dbgen-root, .nd-root) .nd-chip:hover:not(:disabled) {
-    color: var(--nd-text);
-    border-color: var(--nd-line-strong);
+    color: var(--nd-text) !important;
+    border-color: var(--nd-line-strong) !important;
 }
 
-:is(#nai-dbgen-root, .nd-root) .nd-chip.is-active {
-    border-color: var(--nd-accent);
-    background: var(--nd-accent-wash);
-    color: var(--nd-accent-deep);
+:is(#nai-dbgen-root, .nd-root) .nd-chip.is-active,
+:is(#nai-dbgen-root, .nd-root) .nd-chip.is-active:hover:not(:disabled) {
+    border-color: var(--nd-accent) !important;
+    background: var(--nd-accent-wash) !important;
+    color: var(--nd-accent-deep) !important;
     font-weight: 800;
 }
 
@@ -161,7 +272,7 @@
     gap: 0.45em;
     margin: 0 0 0.9em;
     color: var(--nd-soft);
-    font-size: 0.67em;
+    font-size: var(--nd-fs-xs);
 }
 
 :is(#nai-dbgen-root, .nd-root) .nd-field__label {
@@ -182,49 +293,52 @@
 :is(#nai-dbgen-root, .nd-root) .nd-field-group__title {
     margin: 0;
     color: var(--nd-soft);
-    font-size: 0.73em;
+    font-size: var(--nd-fs-sm);
     font-weight: 800;
 }
 
 :is(#nai-dbgen-root, .nd-root) .nd-input,
 :is(#nai-dbgen-root, .nd-root) .nd-select,
 :is(#nai-dbgen-root, .nd-root) .nd-textarea {
-    width: 100%;
+    width: 100% !important;
     min-width: 0;
-    font-family: inherit;
-    font-size: 1.1em;
-    color: var(--nd-text);
-    background: var(--nd-input-bg);
-    border: 1px solid var(--nd-line);
-    border-radius: 9px;
-    appearance: none;
-    -webkit-appearance: none;
+    font-family: inherit !important;
+    font-size: var(--nd-fs-md) !important;
+    color: var(--nd-text) !important;
+    background: var(--nd-input-bg) !important;
+    border: 1px solid var(--nd-line) !important;
+    border-radius: var(--nd-radius-sm) !important;
+    appearance: none !important;
+    -webkit-appearance: none !important;
 }
 
 :is(#nai-dbgen-root, .nd-root) .nd-input,
 :is(#nai-dbgen-root, .nd-root) .nd-select {
-    height: var(--nd-h-primary);
-    min-height: var(--nd-h-primary);
-    padding: 0 12px;
+    height: var(--nd-h-primary) !important;
+    min-height: var(--nd-h-primary) !important;
+    padding: 0 12px !important;
+    line-height: 1.2 !important;
 }
 
+/* textarea：不定死 height，保留 resize:vertical 可拖大 */
 :is(#nai-dbgen-root, .nd-root) .nd-textarea {
-    min-height: 88px;
-    padding: 10px 12px;
-    line-height: 1.55;
+    height: auto !important;
+    min-height: 88px !important;
+    padding: 10px 12px !important;
+    line-height: 1.55 !important;
     resize: vertical;
 }
 
 :is(#nai-dbgen-root, .nd-root) .nd-input:hover,
 :is(#nai-dbgen-root, .nd-root) .nd-select:hover,
 :is(#nai-dbgen-root, .nd-root) .nd-textarea:hover {
-    border-color: var(--nd-line-strong);
+    border-color: var(--nd-line-strong) !important;
 }
 
 :is(#nai-dbgen-root, .nd-root) .nd-input:focus,
 :is(#nai-dbgen-root, .nd-root) .nd-select:focus,
 :is(#nai-dbgen-root, .nd-root) .nd-textarea:focus {
-    border-color: var(--nd-accent-soft);
+    border-color: var(--nd-accent-soft) !important;
     box-shadow: 0 0 0 3px var(--nd-accent-ring);
     outline: none;
 }
@@ -235,28 +349,33 @@
     gap: 0.55em;
     min-height: var(--nd-h);
     color: var(--nd-soft);
-    font-size: 0.73em;
+    font-size: var(--nd-fs-sm);
     cursor: pointer;
 }
 
 :is(#nai-dbgen-root, .nd-root) .nd-checkbox-row input {
-    -webkit-appearance: none;
-    -moz-appearance: none;
-    appearance: none;
-    width: 16px;
-    height: 16px;
+    -webkit-appearance: none !important;
+    -moz-appearance: none !important;
+    appearance: none !important;
+    box-sizing: border-box !important;
+    width: 16px !important;
+    height: 16px !important;
+    min-height: 0 !important;
     margin: 0;
+    padding: 0 !important;
     flex-shrink: 0;
     display: inline-grid;
     place-content: center;
-    border: 1px solid var(--nd-line-strong);
-    border-radius: 3px;
-    background: var(--nd-input-bg);
+    border: 1px solid var(--nd-line-strong) !important;
+    border-radius: var(--nd-radius-xs) !important;
+    background: var(--nd-input-bg) !important;
     box-shadow: inset 0 0 2px var(--nd-shadow-c);
     accent-color: var(--nd-accent);
     cursor: pointer;
-    color: inherit;
-    font: inherit;
+    color: inherit !important;
+    font-family: inherit !important;
+    font-size: inherit !important;
+    line-height: 1 !important;
     filter: none;
     transform: none;
 }
@@ -300,26 +419,43 @@
 
 :is(#nai-dbgen-root, .nd-root) .nd-toggle-row__text strong {
     color: var(--nd-soft);
-    font-size: 0.67em;
+    font-size: var(--nd-fs-xs);
     font-weight: 700;
 }
 
 :is(#nai-dbgen-root, .nd-root) .nd-toggle-row__text small {
     color: var(--nd-muted);
-    font-size: 0.53em;
+    font-size: var(--nd-fs-xs);
 }
 
 :is(#nai-dbgen-root, .nd-root) .nd-toggle-row input {
+    /* D61：裸 checkbox 必须硬化；position/opacity 挡住视觉，width/height 挡住宿主 48×48 */
     position: absolute;
     opacity: 0;
     pointer-events: none;
+    appearance: none !important;
+    -webkit-appearance: none !important;
+    box-sizing: border-box !important;
+    width: 35px !important;
+    height: 19px !important;
+    min-height: 0 !important;
+    margin: 0;
+    padding: 0 !important;
+    border: 0 !important;
+    border-radius: 0 !important;
+    background: transparent !important;
+    color: transparent !important;
+    font-family: inherit !important;
+    font-size: inherit !important;
+    line-height: 1 !important;
 }
 
 :is(#nai-dbgen-root, .nd-root) .nd-toggle-row i {
     position: relative;
     flex: 0 0 35px;
+    width: 35px;
     height: 19px;
-    border-radius: 999px;
+    border-radius: var(--nd-radius-pill);
     background: var(--nd-toggle-track);
     border: 1px solid var(--nd-line);
     transition: 0.2s;
@@ -338,7 +474,7 @@
 }
 
 :is(#nai-dbgen-root, .nd-root) .nd-toggle-row input:focus-visible + i {
-    outline: 2px solid var(--nd-accent-soft);
+    outline: 2px solid var(--nd-accent-deep);
     outline-offset: 3px;
 }
 
@@ -368,7 +504,7 @@
     display: flex;
     justify-content: space-between;
     color: var(--nd-muted);
-    font-size: 0.67em;
+    font-size: var(--nd-fs-xs);
 }
 
 :is(#nai-dbgen-root, .nd-root) .nd-range-label output {
@@ -377,21 +513,25 @@
 }
 
 :is(#nai-dbgen-root, .nd-root) .nd-range {
-    -webkit-appearance: none;
-    appearance: none;
-    width: 100%;
-    height: 5px;
+    -webkit-appearance: none !important;
+    appearance: none !important;
+    box-sizing: border-box !important;
+    width: 100% !important;
+    height: 5px !important;
+    min-height: 0 !important;
     margin: 0;
-    padding: 0;
-    border: 0;
-    border-radius: 999px;
-    background: var(--nd-toggle-track);
+    padding: 0 !important;
+    border: 0 !important;
+    border-radius: var(--nd-radius-pill) !important;
+    background: var(--nd-toggle-track) !important;
+    color: inherit !important;
+    font-family: inherit !important;
+    font-size: inherit !important;
+    line-height: 1 !important;
     box-shadow: inset 0 0 2px var(--nd-shadow-c);
     accent-color: var(--nd-accent);
     cursor: ew-resize;
     filter: none;
-    color: inherit;
-    font: inherit;
 }
 
 :is(#nai-dbgen-root, .nd-root) .nd-range::-webkit-slider-thumb {
@@ -418,7 +558,7 @@
 
 :is(#nai-dbgen-root, .nd-root) .nd-range::-moz-range-track {
     height: 5px;
-    border-radius: 999px;
+    border-radius: var(--nd-radius-pill);
     background: var(--nd-toggle-track);
 }
 
@@ -427,14 +567,14 @@
     margin: 0 0 0.9em;
     padding: 0.7em 0.85em;
     border: 1px solid var(--nd-line);
-    border-radius: 13px;
+    border-radius: var(--nd-radius-md);
     background: var(--nd-accent-wash);
 }
 
 :is(#nai-dbgen-root, .nd-root) .nd-details > summary {
     cursor: pointer;
     color: var(--nd-soft);
-    font-size: 0.73em;
+    font-size: var(--nd-fs-sm);
     font-weight: 800;
     list-style: none;
 }
@@ -459,7 +599,7 @@
 :is(#nai-dbgen-root, .nd-root) .nd-empty__title {
     margin: 0;
     font-family: var(--nd-serif);
-    font-size: 1.6em;
+    font-size: var(--nd-fs-display);
     font-weight: 400;
     color: var(--nd-text);
 }
@@ -468,7 +608,7 @@
     max-width: 390px;
     margin: 0.7em auto 1.1em;
     color: var(--nd-muted);
-    font-size: 0.8em;
+    font-size: var(--nd-fs-md);
     line-height: 1.7;
 }
 
@@ -477,10 +617,10 @@
     display: grid;
     place-items: center;
     border: 1px dashed var(--nd-line-strong);
-    border-radius: 24px;
+    border-radius: var(--nd-radius-lg);
     color: var(--nd-muted);
     background: color-mix(in srgb, var(--nd-surface) 40%, transparent);
-    font-size: 0.8em;
+    font-size: var(--nd-fs-md);
     text-align: center;
     padding: 1.2em;
 }
@@ -492,9 +632,9 @@
     gap: 7px;
     padding: 8px 11px;
     border: 1px solid var(--nd-line);
-    border-radius: 999px;
+    border-radius: var(--nd-radius-pill);
     color: var(--nd-muted);
-    font-size: 0.73em;
+    font-size: var(--nd-fs-sm);
     background: var(--nd-surface);
 }
 
@@ -522,7 +662,7 @@
     min-height: 15px;
     margin-top: 8px;
     color: var(--nd-danger);
-    font-size: 0.67em;
+    font-size: var(--nd-fs-xs);
     line-height: 1.5;
 }
 
@@ -532,130 +672,437 @@
     margin: 0 0 10px;
     padding: 9px 11px;
     border: 1px solid var(--nd-danger-ring);
-    border-radius: 9px;
+    border-radius: var(--nd-radius-sm);
     background: var(--nd-danger-wash);
     color: var(--nd-danger);
-    font-size: 0.6em;
+    font-size: var(--nd-fs-xs);
     line-height: 1.5;
 }
 
 :is(#nai-dbgen-root, .nd-root) .nd-hidden {
-    display: none !important;
+    display: none;
 }
 
-/* —— 库管理范式 —— */
+/* —— 库管理范式（D68；工具栏不套框，D70 精神） —— */
 :is(#nai-dbgen-root, .nd-root) .nd-library-toolbar {
     display: flex;
     flex-wrap: wrap;
     align-items: center;
     gap: 10px;
-    padding: 13px;
-    border: 1px solid var(--nd-line);
-    border-radius: var(--nd-radius);
-    background: var(--nd-surface);
+    min-width: 0;
+    /* 不套第二层盒子：无 background / border / border-radius / box-shadow / 外包 padding */
+    padding: 0;
+    border: 0;
+    border-radius: 0;
+    background: transparent;
+    box-shadow: none;
 }
 
-:is(#nai-dbgen-root, .nd-root) .nd-search-field {
+:is(#nai-dbgen-root, .nd-root) .nd-library-toolbar .nd-search-field {
     flex: 1 1 200px;
+    min-width: 0;
+}
+
+:is(#nai-dbgen-root, .nd-root) .nd-library-toolbar .nd-select {
+    flex: 0 0 150px;
+    width: 150px !important;
+    min-width: 0;
+    height: var(--nd-h-primary) !important;
+}
+
+:is(#nai-dbgen-root, .nd-root) .nd-library-toolbar__actions {
+    display: flex;
+    flex-wrap: nowrap;
+    align-items: center;
+    gap: 10px;
+    flex: 0 0 auto;
+    min-width: 0;
+}
+
+:is(#nai-dbgen-root, .nd-root) .nd-library-toolbar__actions > .nd-button {
+    flex: 0 0 auto;
+    white-space: nowrap;
+    height: var(--nd-h-primary) !important;
+    min-height: var(--nd-h-primary) !important;
+}
+
+/* D68：.search-field → radius 10px / padding 0 11px / border #edd3df / 高 38px */
+:is(#nai-dbgen-root, .nd-root) .nd-search-field {
     min-width: 0;
     display: flex;
     align-items: center;
     gap: 8px;
-    height: var(--nd-h-primary);
-    padding: 0 13px;
-    border: 1px solid var(--nd-line);
-    border-radius: 12px;
+    height: 38px !important;
+    min-height: 38px !important;
+    padding: 0 11px;
+    border: 1px solid #edd3df;
+    border-radius: var(--nd-radius-sm);
     background: var(--nd-input-bg);
 }
 
 :is(#nai-dbgen-root, .nd-root) .nd-search-field input {
-    width: 100%;
+    width: 100% !important;
     min-width: 0;
-    height: 100%;
-    border: 0;
+    height: auto !important;
+    min-height: 0 !important;
+    padding: 0 !important;
+    border: 0 !important;
+    border-radius: 0 !important;
     outline: 0;
-    background: transparent;
-    color: var(--nd-text);
-    font: inherit;
-    font-size: 0.8em;
-}
-
-:is(#nai-dbgen-root, .nd-root) .nd-library-toolbar .nd-select {
-    flex: 0 1 140px;
-    height: var(--nd-h-primary);
+    background: transparent !important;
+    color: var(--nd-text) !important;
+    font-family: inherit !important;
+    font-size: var(--nd-fs-md) !important;
+    line-height: 1.2 !important;
 }
 
 :is(#nai-dbgen-root, .nd-root) .nd-style-grid {
     display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+    /* 库卡固定列宽 150–180px，不随容器 1fr 拉伸；~960px 约 5 列 */
+    grid-template-columns: repeat(auto-fill, minmax(150px, 180px));
+    justify-content: start;
+    align-items: start;
     gap: 16px;
+}
+
+/* 无图类型：紧凑文字列表卡，不要 4:5 封面栅格 */
+:is(#nai-dbgen-root, .nd-root) .nd-style-grid--text {
+    grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+    align-items: start;
 }
 
 :is(#nai-dbgen-root, .nd-root) .nd-style-card {
     position: relative;
+    min-height: 0;
+    height: auto;
+    align-self: start;
     display: flex;
     flex-direction: column;
     overflow: hidden;
-    border: 1px solid var(--nd-line);
-    border-radius: 22px 22px 10px 22px;
-    background: var(--nd-surface);
-    box-shadow: var(--nd-shadow-card);
-    transition: box-shadow 0.2s ease, border-color 0.2s ease;
+    border: 1px solid rgba(228, 183, 203, 0.8);
+    border-radius: var(--nd-radius-md);
+    background: #fff;
+    box-shadow: none;
+    transition: border-color 0.15s ease, background 0.15s ease;
+}
+
+:is(#nai-dbgen-root, .nd-root) .nd-style-card--no-cover {
+    border-radius: var(--nd-radius-md);
+    box-shadow: none;
+}
+
+:is(#nai-dbgen-root, .nd-root) .nd-style-card--no-cover:hover {
+    transform: none;
+}
+
+:is(#nai-dbgen-root, .nd-root) .nd-style-card--no-cover .nd-style-card__body {
+    flex-direction: column;
+    align-items: stretch;
+    padding: 10px 12px;
 }
 
 :is(#nai-dbgen-root, .nd-root) .nd-style-card:hover {
-    border-color: var(--nd-line-strong);
-    box-shadow: var(--nd-shadow);
+    transform: none;
+    box-shadow: none;
+    border-color: var(--nd-accent);
 }
 
 :is(#nai-dbgen-root, .nd-root) .nd-style-card.is-active,
 :is(#nai-dbgen-root, .nd-root) .nd-style-card.is-selected {
+    /* 选中/当前使用：同一层边框换主题色；不加 outline、不叠粉底、不偏移阴影 */
+    outline: none;
     border-color: var(--nd-accent);
-    outline: 2px solid var(--nd-accent-ring);
-    background: var(--nd-accent-wash);
+    background: #fff;
+    box-shadow: none;
 }
 
 :is(#nai-dbgen-root, .nd-root) .nd-style-card__cover {
-    width: 100%;
-    aspect-ratio: 4 / 3;
+    position: relative;
+    width: 100% !important;
+    height: auto !important;
+    /* 画师串 NAI 竖图 832×1216；贴满封面，不留渐变边 */
+    aspect-ratio: 832 / 1216;
+    min-height: 0 !important;
     display: grid;
     place-items: center;
     overflow: hidden;
-    border-bottom: 1px solid var(--nd-line);
-    background: linear-gradient(145deg, var(--nd-cover-grad-a), var(--nd-cover-grad-b));
-    color: var(--nd-accent);
-    font: 600 1.4em var(--nd-serif);
+    border: 0 !important;
+    border-bottom: 1px solid #f4e1e9 !important;
+    /* 顶角与卡片同半径，由卡片裁切封面 */
+    border-radius: var(--nd-radius-md) var(--nd-radius-md) 0 0 !important;
+    background: transparent !important;
+    color: inherit !important;
+    font-family: inherit !important;
+    font-size: inherit !important;
+    line-height: 1 !important;
+    cursor: pointer;
+    padding: 0 !important;
 }
 
 :is(#nai-dbgen-root, .nd-root) .nd-style-card__cover img {
+    position: absolute;
+    inset: 0;
     width: 100%;
     height: 100%;
-    object-fit: contain;
+    object-fit: cover;
+    object-position: center top;
+}
+
+/* 画师串无示例图：同比例浅底 + 居中小字（不用首字水印） */
+:is(#nai-dbgen-root, .nd-root) .nd-style-card__cover--empty {
+    background: var(--nd-surface-2) !important;
+    cursor: default;
+}
+
+:is(#nai-dbgen-root, .nd-root) .nd-style-card__cover-empty {
+    font-family: inherit;
+    font-size: var(--nd-fs-xs);
+    font-style: normal;
+    font-weight: 500;
+    color: var(--nd-muted);
+    line-height: 1.3;
+    text-align: center;
+    pointer-events: none;
+    user-select: none;
+}
+
+/* D65：斜体衬线 + 22% 透明度淡水印（不是实心亮粉巨字） */
+:is(#nai-dbgen-root, .nd-root) .nd-cover-monogram {
+    font: italic var(--nd-cover-mono-size) Georgia, serif;
+    color: rgba(186, 76, 125, 0.22);
+    line-height: 1;
+    pointer-events: none;
+    user-select: none;
+}
+
+/* 库卡封面缩小后水印约 48px；详情/FAB 仍用 --nd-cover-mono-size */
+:is(#nai-dbgen-root, .nd-root) .nd-style-card__cover .nd-cover-monogram {
+    font-size: 48px;
 }
 
 :is(#nai-dbgen-root, .nd-root) .nd-style-card__body {
-    display: grid;
-    gap: 8px;
-    padding: 12px 14px 14px;
+    flex: 1;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 10px 12px;
+    min-height: 0;
+    min-width: 0;
 }
 
-:is(#nai-dbgen-root, .nd-root) .nd-style-card__body h3 {
+:is(#nai-dbgen-root, .nd-root) .nd-style-card__text {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+
+/* 标题行：正文档、中等字重、主题正文色；超长省略 */
+:is(#nai-dbgen-root, .nd-root) .nd-style-card__title {
+    display: flex;
+    align-items: baseline;
+    gap: 6px;
+    width: 100%;
     margin: 0;
-    font-size: 0.93em;
+    font-family: inherit;
+    font-size: var(--nd-fs-base);
+    font-weight: 500;
     color: var(--nd-text);
+    line-height: 1.35;
+    white-space: normal;
+    overflow: visible;
+    text-overflow: unset;
 }
 
+:is(#nai-dbgen-root, .nd-root) .nd-style-card__title-text {
+    min-width: 0;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+:is(#nai-dbgen-root, .nd-root) .nd-style-card__title-badge {
+    flex: 0 0 auto;
+    font-weight: 400;
+    font-size: var(--nd-fs-xs);
+    color: var(--nd-muted);
+    white-space: nowrap;
+}
+
+:is(#nai-dbgen-root, .nd-root) .nd-style-card__body h3:not(.nd-style-card__title) {
+    width: 100%;
+    margin: 0;
+    font-family: inherit;
+    font-size: var(--nd-fs-base);
+    font-weight: 500;
+    color: var(--nd-text);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+/* 标题下一行副标题（其它库仍可用）；画师串卡不传 subtitle */
 :is(#nai-dbgen-root, .nd-root) .nd-style-card__subtitle {
     margin: 0;
+    min-width: 0;
     color: var(--nd-muted);
-    font-size: 0.67em;
-    line-height: 1.45;
+    font-size: var(--nd-fs-xs);
+    line-height: 1.3;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+/* 用途徽标 + Key 状态：可换行，不截断用途信息 */
+:is(#nai-dbgen-root, .nd-root) .nd-style-card__chips {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 4px 6px;
+    margin: 0;
+    min-width: 0;
+}
+
+:is(#nai-dbgen-root, .nd-root) .nd-style-card__chip {
+    display: inline-flex;
+    align-items: center;
+    max-width: 100%;
+    padding: 1px 7px;
+    border: 1px solid var(--nd-accent);
+    border-radius: var(--nd-radius-pill);
+    background: var(--nd-accent-wash);
+    color: var(--nd-accent-deep);
+    font-size: var(--nd-fs-xs);
+    font-weight: 600;
+    line-height: 1.4;
+    white-space: nowrap;
+}
+
+:is(#nai-dbgen-root, .nd-root) .nd-style-card__status {
+    color: var(--nd-muted);
+    font-size: var(--nd-fs-xs);
+    line-height: 1.4;
+    white-space: nowrap;
+}
+
+:is(#nai-dbgen-root, .nd-root) .nd-style-card__enable {
+    flex: 0 0 auto;
+    margin-left: auto;
+}
+
+:is(#nai-dbgen-root, .nd-root) .nd-style-card--no-cover .nd-style-card__enable {
+    margin-left: 0;
+    align-self: flex-start;
 }
 
 :is(#nai-dbgen-root, .nd-root) .nd-style-card__actions {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 6px;
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 4px;
+    padding: 8px 12px 12px;
+    border-top: 1px solid #f4e1e9;
+}
+
+/*
+ * 卡底小条 + 嵌套列表行内操作共用（改一处全改）。
+ * 删除仅红字，不用实心红底。卡片内再压满宽。
+ */
+:is(#nai-dbgen-root, .nd-root) .nd-mini-action {
+    height: 28px !important;
+    min-height: 28px !important;
+    padding: 0 3px !important;
+    border: 0 !important;
+    border-radius: var(--nd-radius-xs) !important;
+    background: #fff6fa !important;
+    color: #875d71 !important;
+    font-size: var(--nd-fs-xs) !important;
+    font-weight: 600;
+    line-height: 1.2 !important;
+}
+
+:is(#nai-dbgen-root, .nd-root) .nd-mini-action:hover:not(:disabled) {
+    background: #f9dbe8 !important;
+    color: #9f285b !important;
+    border: 0 !important;
+}
+
+:is(#nai-dbgen-root, .nd-root) .nd-mini-action--danger {
+    color: #aa455f !important;
+}
+
+:is(#nai-dbgen-root, .nd-root) .nd-mini-action--danger:hover:not(:disabled) {
+    background: #fff0f3 !important;
+    color: #933449 !important;
+}
+
+:is(#nai-dbgen-root, .nd-root) .nd-style-card__actions .nd-mini-action {
+    width: 100% !important;
+    min-width: 0;
+}
+
+/*
+ * D66：库/面板布局断点按**容器宽**（@container nd-root），禁止用视口宽断点控布局。
+ * 窄宽：按钮组整体换行，搜索仍伸缩，导出不被裁。
+ */
+@container nd-root (max-width: 720px) {
+    :is(#nai-dbgen-root, .nd-root) .nd-library-toolbar__actions {
+        flex: 1 1 100%;
+        justify-content: flex-end;
+    }
+}
+
+@container nd-root (max-width: 540px) {
+    :is(#nai-dbgen-root, .nd-root) .nd-library-toolbar .nd-select {
+        flex: 1 1 120px;
+        width: auto !important;
+    }
+
+    :is(#nai-dbgen-root, .nd-root) .nd-style-grid {
+        /* 窄档仍 2 列小卡，禁止单卡撑满整屏 */
+        grid-template-columns: repeat(2, minmax(0, 180px));
+        justify-content: start;
+        gap: 10px;
+    }
+
+    :is(#nai-dbgen-root, .nd-root) .nd-style-grid--text {
+        grid-template-columns: 1fr;
+    }
+
+    :is(#nai-dbgen-root, .nd-root) .nd-style-card {
+        min-height: 0;
+        border-radius: var(--nd-radius-md);
+    }
+
+    :is(#nai-dbgen-root, .nd-root) .nd-style-card__cover {
+        min-height: 0 !important;
+        aspect-ratio: 832 / 1216;
+    }
+
+    :is(#nai-dbgen-root, .nd-root) .nd-style-card__body {
+        padding: 10px 12px;
+    }
+
+    :is(#nai-dbgen-root, .nd-root) .nd-style-card__body h3 {
+        font-size: var(--nd-fs-base);
+    }
+
+    :is(#nai-dbgen-root, .nd-root) .nd-style-card__actions {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        padding: 0 12px 12px;
+    }
+}
+
+@container nd-root (max-width: 420px) {
+    :is(#nai-dbgen-root, .nd-root) .nd-style-grid {
+        grid-template-columns: repeat(2, minmax(0, 180px));
+        justify-content: start;
+        gap: 8px;
+    }
+
+    :is(#nai-dbgen-root, .nd-root) .nd-style-card {
+        border-radius: var(--nd-radius-md);
+    }
 }
 
 /* —— 当前项选择器（按 styles.css 重写，不照抄破损文件） —— */
@@ -672,39 +1119,53 @@
     gap: 8px;
     padding: 7px;
     border: 1px solid var(--nd-line);
-    border-radius: 13px;
-    background: var(--nd-surface);
+    border-radius: var(--nd-radius-md);
+    background: var(--nd-input-bg);
+}
+
+/* 无图类型：不留封面列，行高更紧凑 */
+:is(#nai-dbgen-root, .nd-root) .nd-picker__control--no-cover {
+    grid-template-columns: minmax(0, 1fr) auto;
+    padding: 5px 7px;
 }
 
 :is(#nai-dbgen-root, .nd-root) .nd-picker__control input {
     min-width: 0;
-    border: 0;
+    width: 100% !important;
+    height: auto !important;
+    min-height: 0 !important;
+    padding: 0 !important;
+    border: 0 !important;
+    border-radius: 0 !important;
     outline: 0;
-    background: transparent;
-    color: var(--nd-text);
-    font-size: 0.73em;
+    background: transparent !important;
+    color: var(--nd-text) !important;
+    font-family: inherit !important;
+    font-size: var(--nd-fs-sm) !important;
+    line-height: 1.2 !important;
 }
 
 :is(#nai-dbgen-root, .nd-root) .nd-picker__clear {
     display: inline-grid;
     place-items: center;
-    width: 22px;
+    width: 22px !important;
     min-width: 22px;
-    height: 22px;
-    min-height: 22px;
-    padding: 0;
-    border: 0;
-    border-radius: 999px;
-    background: transparent;
-    color: var(--nd-muted);
+    height: 22px !important;
+    min-height: 22px !important;
+    padding: 0 !important;
+    border: 0 !important;
+    border-radius: var(--nd-radius-pill) !important;
+    background: transparent !important;
+    color: #a6406c !important;
     cursor: pointer;
-    font-size: 0.9em;
-    line-height: 1;
+    font-family: inherit !important;
+    font-size: var(--nd-fs-lg) !important;
+    line-height: 1 !important;
 }
 
 :is(#nai-dbgen-root, .nd-root) .nd-picker__clear:hover {
-    background: var(--nd-accent-wash);
-    color: var(--nd-text);
+    background: var(--nd-surface-2) !important;
+    color: #a6406c !important;
 }
 
 :is(#nai-dbgen-root, .nd-root) .nd-picker__results {
@@ -718,60 +1179,75 @@
     overflow-x: hidden;
     padding: 7px;
     border: 1px solid var(--nd-line-strong);
-    border-radius: 14px;
+    border-radius: var(--nd-radius-md);
     background: var(--nd-surface);
     box-shadow: var(--nd-shadow);
-    scrollbar-width: thin;
 }
 
 :is(#nai-dbgen-root, .nd-root) .nd-picker-option {
     position: relative;
-    width: 100%;
-    height: 76px;
-    min-height: 76px;
+    width: 100% !important;
+    height: 76px !important;
+    min-height: 76px !important;
     display: grid;
     grid-template-columns: 48px minmax(0, 1fr);
     align-items: center;
     gap: 10px;
-    padding: 8px;
-    border: 1px solid transparent;
-    border-radius: 11px;
-    background: transparent;
+    padding: 8px !important;
+    border: 1px solid transparent !important;
+    border-radius: var(--nd-radius-sm) !important;
+    background: transparent !important;
     text-align: left;
     cursor: pointer;
     overflow: hidden;
-    color: var(--nd-text);
-    font: inherit;
+    color: var(--nd-text) !important;
+    font-family: inherit !important;
+    font-size: inherit !important;
+    line-height: 1.2 !important;
+}
+
+:is(#nai-dbgen-root, .nd-root) .nd-picker-option--no-cover {
+    height: auto !important;
+    min-height: 0 !important;
+    grid-template-columns: minmax(0, 1fr);
+    padding: 6px 8px !important;
 }
 
 :is(#nai-dbgen-root, .nd-root) .nd-picker-option:hover,
 :is(#nai-dbgen-root, .nd-root) .nd-picker-option.is-active {
-    border-color: var(--nd-line-strong);
-    background: var(--nd-accent-wash);
+    border-color: var(--nd-picker-hover-line) !important;
+    background: var(--nd-surface-2) !important;
 }
 
 :is(#nai-dbgen-root, .nd-root) .nd-mini-cover {
+    /* D68：.lab-style-picker-thumb = 48×60 竖版 / radius 9px / 渐变 #f9d7e6→#f0e2fa */
     width: 48px;
     height: 60px;
     display: grid;
     place-items: center;
     overflow: hidden;
-    border-radius: 9px;
-    background: linear-gradient(145deg, var(--nd-cover-grad-a), var(--nd-cover-grad-b));
-    color: var(--nd-accent);
-    font: 600 1em var(--nd-serif);
+    border-radius: var(--nd-radius-sm);
+    background: linear-gradient(145deg, #f9d7e6, #f0e2fa);
+    color: rgba(186, 76, 125, 0.45);
+    font: italic 28px Georgia, var(--nd-serif);
 }
 
 :is(#nai-dbgen-root, .nd-root) .nd-picker__cover {
+    /* 折叠态当前项：本来就方 40×40（current-style-picker.css:118），不要改成竖的 */
     width: 40px;
     height: 40px;
-    border-radius: 10px;
+    border-radius: var(--nd-radius-sm);
     display: grid;
     place-items: center;
     overflow: hidden;
-    background: linear-gradient(145deg, var(--nd-cover-grad-a), var(--nd-cover-grad-b));
-    color: var(--nd-accent);
-    font: 600 1.1em var(--nd-serif);
+    background: linear-gradient(
+        145deg,
+        var(--nd-cover-grad-a),
+        var(--nd-cover-grad-b) 55%,
+        var(--nd-cover-grad-c)
+    );
+    color: rgba(186, 76, 125, 0.45);
+    font: italic 22px Georgia, var(--nd-serif);
 }
 
 :is(#nai-dbgen-root, .nd-root) .nd-mini-cover img,
@@ -789,8 +1265,8 @@
 
 :is(#nai-dbgen-root, .nd-root) .nd-picker-option__meta strong {
     overflow: hidden;
-    color: var(--nd-text);
-    font-size: 0.73em;
+    color: #5f3d4d;
+    font-size: var(--nd-fs-sm);
     line-height: 1.35;
     text-overflow: ellipsis;
     white-space: nowrap;
@@ -802,7 +1278,7 @@
     -webkit-box-orient: vertical;
     -webkit-line-clamp: 2;
     color: var(--nd-muted);
-    font-size: 0.6em;
+    font-size: var(--nd-fs-xs);
     line-height: 1.45;
     overflow-wrap: anywhere;
 }
@@ -823,7 +1299,7 @@
     text-align: center;
     padding: 24px 18px;
     border: 1px dashed var(--nd-line-strong);
-    border-radius: 18px;
+    border-radius: var(--nd-radius-lg);
     background: var(--nd-surface);
 }
 
@@ -836,14 +1312,14 @@
     display: block;
     margin-bottom: 0.3em;
     color: var(--nd-accent);
-    font: 2.4em var(--nd-serif);
+    font: var(--nd-fs-display) var(--nd-serif);
 }
 
 :is(#nai-dbgen-root, .nd-root) .nd-dropzone p {
     margin: 0.5em auto 1em;
     max-width: 36em;
     color: var(--nd-muted);
-    font-size: 0.73em;
+    font-size: var(--nd-fs-sm);
     line-height: 1.7;
 }
 
@@ -857,7 +1333,7 @@
     gap: 10px;
     padding: 24px 18px;
     border: 1px solid var(--nd-line);
-    border-radius: 18px;
+    border-radius: var(--nd-radius-lg);
     background: var(--nd-surface);
 }
 
@@ -865,14 +1341,14 @@
 :is(#nai-dbgen-root, .nd-root) .nd-import-preview h3 {
     margin: 0;
     font-family: var(--nd-serif);
-    font-size: 1.35em;
+    font-size: var(--nd-fs-display);
     font-weight: 500;
 }
 
 :is(#nai-dbgen-root, .nd-root) .nd-import__export p {
     margin: 0;
     color: var(--nd-muted);
-    font-size: 0.73em;
+    font-size: var(--nd-fs-sm);
     line-height: 1.6;
 }
 
@@ -881,7 +1357,7 @@
     gap: 12px;
     padding: 16px;
     border: 1px solid var(--nd-line);
-    border-radius: 18px;
+    border-radius: var(--nd-radius-lg);
     background: var(--nd-surface);
 }
 
@@ -896,7 +1372,15 @@
 :is(#nai-dbgen-root, .nd-root) .nd-import-preview__toolbar p {
     margin: 0.35em 0 0;
     color: var(--nd-muted);
-    font-size: 0.6em;
+    font-size: var(--nd-fs-xs);
+}
+
+:is(#nai-dbgen-root, .nd-root) .nd-import-status {
+    flex: 1 1 100%;
+    margin: 0;
+    color: var(--nd-text);
+    font-size: var(--nd-fs-sm);
+    font-weight: 650;
 }
 
 :is(#nai-dbgen-root, .nd-root) .nd-table-scroll {
@@ -907,7 +1391,7 @@
 :is(#nai-dbgen-root, .nd-root) .nd-table-scroll table {
     width: 100%;
     border-collapse: collapse;
-    font-size: 0.6em;
+    font-size: var(--nd-fs-xs);
 }
 
 :is(#nai-dbgen-root, .nd-root) .nd-table-scroll th,
@@ -920,10 +1404,32 @@
 }
 
 :is(#nai-dbgen-root, .nd-root) .nd-table-scroll .nd-input {
-    height: var(--nd-h-icon);
-    min-height: var(--nd-h-icon);
-    font-size: 1em;
-    padding: 0 8px;
+    height: var(--nd-h-icon) !important;
+    min-height: var(--nd-h-icon) !important;
+    font-size: var(--nd-fs-base) !important;
+    padding: 0 8px !important;
+}
+
+/* 导入预览表内裸 checkbox（无 nd-checkbox-row） */
+:is(#nai-dbgen-root, .nd-root) .nd-table-scroll input[type="checkbox"],
+:is(#nai-dbgen-root, .nd-root) .nd-import input[type="checkbox"] {
+    -webkit-appearance: none !important;
+    -moz-appearance: none !important;
+    appearance: none !important;
+    box-sizing: border-box !important;
+    width: 16px !important;
+    height: 16px !important;
+    min-height: 0 !important;
+    margin: 0;
+    padding: 0 !important;
+    border: 1px solid var(--nd-line-strong) !important;
+    border-radius: var(--nd-radius-xs) !important;
+    background: var(--nd-input-bg) !important;
+    color: inherit !important;
+    font-family: inherit !important;
+    font-size: inherit !important;
+    line-height: 1 !important;
+    cursor: pointer;
 }
 
 /* —— 虚拟列表 —— */
@@ -931,7 +1437,7 @@
     position: relative;
     overflow: auto;
     border: 1px solid var(--nd-line);
-    border-radius: 12px;
+    border-radius: var(--nd-radius-md);
     background: var(--nd-surface);
 }
 
@@ -953,21 +1459,75 @@
     padding: 0 10px;
     border-bottom: 1px solid var(--nd-line);
     color: var(--nd-text);
-    font-size: 0.8em;
+    font-size: var(--nd-fs-md);
     box-sizing: border-box;
 }
 
 /* —— 模态内容壳（宿主 Popup 内） —— */
 :is(#nai-dbgen-root, .nd-root).nd-modal-root,
 :is(#nai-dbgen-root, .nd-root) .nd-modal-root {
+    display: flex;
+    flex-direction: column;
+    gap: var(--nd-space-stack);
+    width: 100%;
+    min-width: 0;
+    min-height: 0;
+    height: 100%;
+    max-height: 100%;
+    padding: var(--nd-space-panel);
+    box-sizing: border-box;
     color: var(--nd-text);
+    /* D70：嵌套 nd-root 不再铺第二层底色（外层 dialog 才是可见容器） */
+    background: transparent !important;
+    overflow: hidden;
+}
+
+:is(#nai-dbgen-root, .nd-root) .nd-popup-header {
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--nd-space-stack);
+    flex: 0 0 auto;
+    min-width: 0;
 }
 
 :is(#nai-dbgen-root, .nd-root) .nd-modal-title {
-    margin: 0 0 0.7em;
-    font-family: var(--nd-serif);
-    font-size: 1.45em;
-    font-weight: 500;
+    flex: 1 1 auto;
+    min-width: 0;
+    margin: 0;
+    padding: 0;
+    /* 与界面同一套无衬线；宿主 h1/h2/h3 衬线不得渗入 */
+    font-family: inherit !important;
+    font-size: var(--nd-fs-title) !important;
+    font-weight: 600;
+    font-style: normal;
+    line-height: 1.3 !important;
+    color: var(--nd-text) !important;
+    background: transparent !important;
+    border: 0 !important;
+}
+
+:is(#nai-dbgen-root, .nd-root) .nd-popup-scroll {
+    flex: 1 1 auto;
+    min-width: 0;
+    min-height: 0;
+    overflow: auto;
+}
+
+/* 管理台 shell 自管滚动：外层 scroll 不叠套滚动条 */
+:is(#nai-dbgen-root, .nd-root) .nd-popup-scroll:has(.nd-shell) {
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+}
+
+:is(#nai-dbgen-root, .nd-root) .nd-popup-scroll:has(.nd-shell) > .nd-root {
+    display: flex;
+    flex-direction: column;
+    flex: 1 1 auto;
+    min-height: 0;
+    min-width: 0;
 }
 
 :is(#nai-dbgen-root, .nd-root) .nd-modal-actions {
@@ -978,35 +1538,223 @@
     margin-top: 18px;
 }
 
-/* —— 原生 dialog 兜底（内容必须在 :is(#nai-dbgen-root, .nd-root) 内，D30） —— */
+/*
+ * D70：唯一可见弹层容器 = dialog.nd-popup（酒馆 .popup 或原生 .nd-native-dialog）。
+ * 背景 / 边框 / 圆角 / 阴影 / overflow 只画在这里；内层 shell/body/content 清掉视觉。
+ * box-shadow / overflow / min-height 用 !important 压过酒馆 popup.css：
+ * 宿主 `min-height: fit-content` 会盖过 max-height，把弹窗撑到内容全高 → 滚动链断裂。
+ */
+dialog.nd-popup.nd-root,
+dialog.nd-native-dialog.nd-root {
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    width: min(900px, 94vw);
+    max-width: 94vw;
+    /* 视口约束高度；禁止 fit-content 把弹窗撑成内容全高 */
+    max-height: min(90vh, 820px);
+    height: auto;
+    min-height: 0 !important;
+    margin: auto;
+    padding: 0 !important;
+    border: 1px solid var(--nd-line-strong) !important;
+    border-radius: var(--nd-radius-lg) !important;
+    background: #fffafd !important;
+    color: var(--nd-text) !important;
+    box-shadow: var(--nd-shadow) !important;
+    overflow: hidden !important;
+    box-sizing: border-box !important;
+}
+
+dialog.nd-popup.nd-root.large_dialogue_popup,
+dialog.nd-native-dialog.nd-root.large_dialogue_popup {
+    width: min(1080px, 94vw);
+    max-width: 94vw;
+    /* 定高：给内部 flex + overflow 一条可收缩的高度链 */
+    height: min(92vh, 960px);
+    max-height: min(92vh, 960px);
+    min-height: 0 !important;
+}
+
+dialog.nd-popup.nd-root::backdrop,
+dialog.nd-native-dialog.nd-root::backdrop {
+    background: rgba(52, 24, 38, 0.45);
+}
+
+/* 酒馆内层包裹：去掉背景/边框/圆角/padding，避免「方框里套圆角」 */
+dialog.nd-popup.nd-root .popup-body,
+dialog.nd-popup.nd-root .popup-content {
+    margin: 0;
+    padding: 0 !important;
+    background: transparent !important;
+    border: 0 !important;
+    border-radius: 0 !important;
+    box-shadow: none !important;
+    color: inherit;
+    max-height: none;
+    overflow: hidden;
+    flex: 1 1 auto;
+    min-height: 0;
+    width: 100%;
+    height: auto;
+    text-align: start;
+    display: flex;
+    flex-direction: column;
+}
+
+dialog.nd-popup.nd-root .popup-body > .popup-content {
+    flex: 1 1 auto;
+    min-height: 0;
+}
+
+dialog.nd-popup.nd-root .popup-content > .nd-root {
+    flex: 1 1 auto;
+    min-height: 0;
+}
+
+dialog.nd-popup.nd-root .popup-controls {
+    display: none;
+}
+
+dialog.nd-popup.nd-root .popup-input,
+dialog.nd-popup.nd-root .popup-inputs,
+dialog.nd-popup.nd-root .popup-crop-wrap,
+dialog.nd-popup.nd-root .popup-header {
+    display: none;
+}
+
+/* 内层 nd-root（内容根 / shell 子树）透明，避免叠第二层底 */
+dialog.nd-popup.nd-root .nd-root,
+dialog.nd-native-dialog.nd-root .nd-root {
+    background: transparent !important;
+}
+
+/* shell：只负责相对定位与撑满宽度，不再画容器皮 */
 :is(#nai-dbgen-root, .nd-root) .nd-native-dialog__shell {
     position: relative;
+    display: flex;
+    flex-direction: column;
+    width: 100%;
+    height: 100%;
+    min-height: 0;
+    border-radius: 0;
+    overflow: hidden;
+    background: transparent;
+    border: 0;
+    box-shadow: none;
 }
 
 :is(#nai-dbgen-root, .nd-root) .nd-native-dialog__card {
-    padding: 22px;
-    border: 1px solid var(--nd-line);
-    border-radius: var(--nd-radius);
-    background: var(--nd-surface);
+    display: flex;
+    flex-direction: column;
+    flex: 1 1 auto;
+    width: 100%;
+    min-height: 0;
+    box-sizing: border-box;
+    padding: 0;
+    border: 0;
+    border-radius: 0;
+    background: transparent;
     color: var(--nd-text);
-    box-shadow: var(--nd-shadow);
-    max-height: min(820px, calc(100% - 28px));
-    overflow: auto;
+    max-height: none;
+    overflow: hidden;
+}
+
+:is(#nai-dbgen-root, .nd-root) .nd-native-dialog__card > .nd-modal-root {
+    flex: 1 1 auto;
+    min-height: 0;
+}
+
+/* D68：详情大图容器（.detail-cover / .style-detail-layout / .modal-card 详情态） */
+:is(#nai-dbgen-root, .nd-root) .nd-detail-cover {
+    min-height: 0;
+    display: grid;
+    place-items: center;
+    overflow: hidden;
+    border: 1px solid var(--nd-line);
+    border-radius: var(--nd-radius-md);
+    background: linear-gradient(145deg, #fff2f7, #fff);
+}
+
+:is(#nai-dbgen-root, .nd-root) .nd-detail-cover img {
+    width: 100%;
+    height: 100%;
+    max-height: 72vh;
+    object-fit: contain;
+}
+
+:is(#nai-dbgen-root, .nd-root) .nd-detail-cover .nd-cover-monogram,
+:is(#nai-dbgen-root, .nd-root) .nd-detail-cover > span {
+    font: italic 100px Georgia, serif;
+    color: rgba(186, 76, 125, 0.2);
+    line-height: 1;
+    pointer-events: none;
+    user-select: none;
+}
+
+:is(#nai-dbgen-root, .nd-root) .nd-style-detail-layout {
+    display: grid;
+    grid-template-columns: minmax(340px, 1.1fr) minmax(300px, 0.9fr);
+    gap: 22px;
+}
+
+:is(#nai-dbgen-root, .nd-root) .nd-native-dialog__card--detail {
+    width: min(1080px, 94vw);
+    padding: 20px;
+}
+
+/* D68：.test-style-cover → 72px 宽 / 4/5 / radius 10px */
+:is(#nai-dbgen-root, .nd-root) .nd-test-style-cover {
+    width: 72px;
+    aspect-ratio: 4 / 5;
+    display: grid;
+    place-items: center;
+    overflow: hidden;
+    border: 1px solid #efd7e2;
+    border-radius: var(--nd-radius-sm);
+    background: linear-gradient(145deg, #fff0f6, #f5e9ff);
+    color: #dca5bd;
+    font: 34px Georgia, var(--nd-serif);
+}
+
+:is(#nai-dbgen-root, .nd-root) .nd-test-style-cover img {
+    width: 100%;
+    height: 100%;
+    object-fit: contain;
+    background: #fff8fb;
 }
 
 :is(#nai-dbgen-root, .nd-root) .nd-native-dialog__close {
-    position: absolute;
+    position: static;
     z-index: 2;
-    top: 10px;
-    right: 12px;
-    width: 30px;
-    height: 30px;
-    border: 0;
-    background: transparent;
-    color: var(--nd-muted);
-    font-size: 22px;
-    line-height: 1;
+    flex: 0 0 auto;
+    width: 32px !important;
+    height: 32px !important;
+    min-height: 32px !important;
+    display: inline-grid;
+    place-items: center;
+    border: 0 !important;
+    border-radius: var(--nd-radius-xs) !important;
+    background: color-mix(in srgb, var(--nd-surface-2) 88%, transparent) !important;
+    color: var(--nd-muted) !important;
+    font-family: inherit !important;
+    font-size: 20px !important;
+    line-height: 1 !important;
     cursor: pointer;
+    padding: 0 !important;
+}
+
+/* 找不到 header 时的兜底：仍绝对定位在容器右上，不占 flex 列 */
+:is(#nai-dbgen-root, .nd-root) .nd-native-dialog__shell > .nd-native-dialog__close,
+dialog.nd-popup.nd-root > .nd-native-dialog__close {
+    position: absolute;
+    top: var(--nd-space-panel);
+    right: var(--nd-space-panel);
+}
+
+:is(#nai-dbgen-root, .nd-root) .nd-native-dialog__close:hover {
+    background: var(--nd-ghost-hover) !important;
+    color: var(--nd-text) !important;
 }
 
 /* —— 两层列表（组→角色 / 库→条目） —— */
@@ -1017,7 +1765,7 @@
 
 :is(#nai-dbgen-root, .nd-root) .nd-nested-list__parent {
     border: 1px solid var(--nd-line);
-    border-radius: 14px;
+    border-radius: var(--nd-radius-md);
     background: var(--nd-surface);
     overflow: hidden;
 }
@@ -1037,34 +1785,36 @@
 }
 
 :is(#nai-dbgen-root, .nd-root) .nd-nested-list__expand {
-    width: var(--nd-h-micro);
-    height: var(--nd-h-micro);
-    min-height: var(--nd-h-micro);
+    width: var(--nd-h-micro) !important;
+    height: var(--nd-h-micro) !important;
+    min-height: var(--nd-h-micro) !important;
     display: inline-grid;
     place-items: center;
-    padding: 0;
-    border: 1px solid var(--nd-line);
-    border-radius: 8px;
-    background: var(--nd-surface);
-    color: var(--nd-soft);
+    padding: 0 !important;
+    border: 1px solid var(--nd-line) !important;
+    border-radius: var(--nd-radius-sm) !important;
+    background: var(--nd-surface) !important;
+    color: var(--nd-soft) !important;
     cursor: pointer;
-    font: inherit;
-    font-size: 0.8em;
+    font-family: inherit !important;
+    font-size: var(--nd-fs-md) !important;
+    line-height: 1 !important;
 }
 
 :is(#nai-dbgen-root, .nd-root) .nd-nested-list__title {
     min-width: 0;
     flex: 1 1 auto;
     color: var(--nd-text);
-    font-size: 0.87em;
+    font-size: var(--nd-fs-lg);
 }
 
 :is(#nai-dbgen-root, .nd-root) .nd-nested-list__meta {
     display: flex;
     flex-wrap: wrap;
+    align-items: center;
     gap: 6px;
     color: var(--nd-muted);
-    font-size: 0.67em;
+    font-size: var(--nd-fs-xs);
 }
 
 :is(#nai-dbgen-root, .nd-root) .nd-nested-list__enable {
@@ -1077,15 +1827,75 @@
     gap: 0;
 }
 
+:is(#nai-dbgen-root, .nd-root) .nd-nested-list__child.is-disabled {
+    opacity: 0.55;
+}
+
+:is(#nai-dbgen-root, .nd-root) .nd-nested-list__child .nd-nested-list__enable {
+    min-height: 0;
+}
+
+:is(#nai-dbgen-root, .nd-root) .nd-nested-list__child .nd-toggle-row {
+    min-height: 0;
+    gap: 0;
+}
+
+:is(#nai-dbgen-root, .nd-root) .nd-nested-list__child .nd-toggle-row__text {
+    display: none;
+}
+
 :is(#nai-dbgen-root, .nd-root) .nd-nested-list__child {
     display: flex;
+    flex-wrap: nowrap;
     align-items: center;
     gap: 8px;
+    height: var(--nd-nested-child-h);
+    min-height: var(--nd-nested-child-h);
+    max-height: var(--nd-nested-child-h);
     padding: 0 12px;
     border-bottom: 1px solid var(--nd-line);
     color: var(--nd-text);
-    font-size: 0.8em;
+    font-size: var(--nd-fs-md);
     box-sizing: border-box;
+    overflow: hidden;
+}
+
+:is(#nai-dbgen-root, .nd-root) .nd-nested-list__child-main {
+    flex: 1 1 auto;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    gap: 2px;
+    overflow: hidden;
+}
+
+:is(#nai-dbgen-root, .nd-root) .nd-nested-list__child-key,
+:is(#nai-dbgen-root, .nd-root) .nd-nested-list__child-value {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    line-height: 1.25;
+}
+
+:is(#nai-dbgen-root, .nd-root) .nd-nested-list__child-key {
+    font-weight: 600;
+    font-size: var(--nd-fs-md);
+    color: var(--nd-text);
+}
+
+:is(#nai-dbgen-root, .nd-root) .nd-nested-list__child-value {
+    font-weight: 400;
+    font-size: var(--nd-fs-sm);
+    color: var(--nd-muted);
+}
+
+:is(#nai-dbgen-root, .nd-root) .nd-nested-list__child > .nd-row-actions {
+    flex: 0 0 auto;
+    flex-wrap: nowrap;
+    align-items: center;
+    align-self: center;
+    margin-left: auto;
 }
 
 :is(#nai-dbgen-root, .nd-root) .nd-nested-list__child:last-child {
@@ -1095,9 +1905,88 @@
 :is(#nai-dbgen-root, .nd-root) .nd-nested-list__empty {
     padding: 14px 12px;
     color: var(--nd-muted);
-    font-size: 0.73em;
+    font-size: var(--nd-fs-sm);
 }
 
 :is(#nai-dbgen-root, .nd-root) .nd-nested-list__virtual {
     overflow: hidden;
 }
+
+/* 图片查看器：外框 dialog.nd-popup（lg）唯一画皮；内图 md + 内边距，不贴角叠双层 */
+.nd-slot-viewer {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    width: 100%;
+    max-width: 100%;
+    padding: 12px;
+    box-sizing: border-box;
+    background: transparent;
+}
+
+.nd-slot-viewer__img {
+    display: block;
+    max-width: 100%;
+    max-height: min(80vh, 900px);
+    width: auto;
+    height: auto;
+    object-fit: contain;
+    margin: 0;
+    border-radius: var(--nd-radius-md);
+    background: transparent;
+}
+
+/* —— 4.13 出图参数表单（运行配置 / 工作台共用） —— */
+:is(#nai-dbgen-root, .nd-root) .nd-nai-params {
+    display: grid;
+    gap: var(--nd-space-stack);
+    container-type: inline-size;
+    container-name: nd-nai-params;
+}
+
+:is(#nai-dbgen-root, .nd-root) .nd-nai-params__notice {
+    margin: 0;
+    padding: 0.55em 0.75em;
+    border-radius: var(--nd-radius-sm);
+    background: color-mix(in srgb, var(--nd-accent-soft) 16%, var(--nd-surface));
+    color: var(--nd-soft);
+    font-size: var(--nd-fs-xs);
+    line-height: 1.45;
+}
+
+:is(#nai-dbgen-root, .nd-root) .nd-nai-params__hint {
+    margin: -0.2em 0 0;
+    color: var(--nd-muted);
+    font-size: var(--nd-fs-xs);
+    line-height: 1.4;
+}
+
+:is(#nai-dbgen-root, .nd-root) .nd-nai-params__grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: var(--nd-space-stack) 1.25em;
+    align-items: start;
+}
+
+:is(#nai-dbgen-root, .nd-root) .nd-nai-params__grid > .nd-field-group {
+    margin: 0;
+    padding: 0;
+    border: 0;
+    background: transparent;
+}
+
+:is(#nai-dbgen-root, .nd-root) .nd-nai-params .nd-field.is-invalid .nd-input {
+    border-color: var(--nd-danger) !important;
+}
+
+:is(#nai-dbgen-root, .nd-root) .nd-nai-params .nd-field.is-disabled,
+:is(#nai-dbgen-root, .nd-root) .nd-nai-params .nd-field.is-disabled .nd-select {
+    opacity: 0.55;
+}
+
+@container nd-nai-params (max-width: 560px) {
+    :is(#nai-dbgen-root, .nd-root) .nd-nai-params__grid {
+        grid-template-columns: 1fr;
+    }
+}
+

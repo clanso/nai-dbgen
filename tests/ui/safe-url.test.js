@@ -1,6 +1,6 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { safeImageUrl, paintSafeCover, coverInitial } from '../../src/ui/common/safe-url.js';
+import { safeImageUrl, paintSafeCover } from '../../src/ui/common/safe-url.js';
 import { installFakeDom } from './fake-dom.js';
 
 describe('ui/common/safeImageUrl (D24)', () => {
@@ -58,6 +58,16 @@ describe('ui/common/safeImageUrl (D24)', () => {
         assert.equal(safeImageUrl('//evil.test/x.png'), null);
     });
 
+    it('allows same-origin /user/files/nai-dbgen_* (artist preview config)', () => {
+        assert.equal(
+            safeImageUrl('/user/files/nai-dbgen_artist-preview_a__deadbeef.png'),
+            '/user/files/nai-dbgen_artist-preview_a__deadbeef.png',
+        );
+        assert.ok(safeImageUrl('/user/files/nai-dbgen_artists.json?t=1'));
+        assert.equal(safeImageUrl('/user/files/other.png'), null);
+        assert.equal(safeImageUrl('/user/files/nai-dbgen_a b.png'), null);
+    });
+
     it('rejects vbscript / file / about', () => {
         assert.equal(safeImageUrl('vbscript:msgbox(1)'), null);
         assert.equal(safeImageUrl('file:///etc/passwd'), null);
@@ -68,27 +78,26 @@ describe('ui/common/safeImageUrl (D24)', () => {
         assert.ok(safeImageUrl('DATA:IMAGE/JPEG;BASE64,xx'));
     });
 
-    it('paintSafeCover falls back to initial when rejected', () => {
+    it('paintSafeCover falls back to empty mark when rejected', () => {
         const fake = installFakeDom();
         try {
             const el = document.createElement('div');
             const ok = paintSafeCover(el, 'javascript:evil', 'Alice');
             assert.equal(ok, false);
-            assert.equal(el.textContent, 'A');
-            assert.equal(el.childNodes.length, 0);
+            assert.ok(String(el.className).includes('nd-cover--empty'));
+            assert.equal(el.childNodes.length, 1);
+            assert.equal(el.childNodes[0].tagName, 'SPAN');
+            assert.equal(el.childNodes[0].className, 'nd-cover-empty-mark');
+            assert.equal(String(el.childNodes[0].textContent || '').trim(), '');
 
             const ok2 = paintSafeCover(el, 'https://cdn.example/x.png', 'Bob');
             assert.equal(ok2, true);
+            assert.equal(String(el.className).includes('nd-cover--empty'), false);
             assert.equal(el.childNodes.length, 1);
             assert.equal(el.childNodes[0].tagName, 'IMG');
             assert.equal(el.childNodes[0].src, 'https://cdn.example/x.png');
         } finally {
             fake.restore();
         }
-    });
-
-    it('coverInitial handles empty', () => {
-        assert.equal(coverInitial(''), '?');
-        assert.equal(coverInitial('  zed'), 'Z');
     });
 });

@@ -92,8 +92,8 @@ export function createStCorsProxyTransport(deps = {}) {
                 }
                 return Err(transportError({
                     code: 'NAI_PROXY_FAILED',
-                    message: '经酒馆 /proxy 转发失败',
-                    hint: '请确认 SillyTavern 已开启 enableCorsProxy，且本机可访问目标地址',
+                    message: '经酒馆 CORS 代理转发失败',
+                    hint: '请确认已在 config.yaml 开启 enableCorsProxy 并重启，且本机可访问目标地址',
                     retryable: true,
                     cause,
                     context: { transport: 'st-cors-proxy' },
@@ -121,7 +121,7 @@ function corsProxyDisabledError() {
     return transportError({
         code: 'NAI_CORS_PROXY_DISABLED',
         message: '酒馆 CORS 代理未开启',
-        hint: '请编辑 SillyTavern 安装目录下的 config.yaml，将 enableCorsProxy 设为 true 后重启；或用启动参数 --corsProxy。默认配置见 default/config.yaml 的 enableCorsProxy（默认 false）',
+        hint: '请编辑酒馆安装目录下的 config.yaml，将 enableCorsProxy 设为 true 后重启酒馆；或启动时加参数 --corsProxy',
         retryable: false,
         context: {
             transport: 'st-cors-proxy',
@@ -139,7 +139,7 @@ function corsProxyUnavailableError(cause) {
     return transportError({
         code: 'NAI_CORS_PROXY_UNAVAILABLE',
         message: '无法探测酒馆 CORS 代理',
-        hint: '请确认在酒馆页面内运行，且 config.yaml 中 enableCorsProxy: true',
+        hint: '请确认在酒馆页面内运行，且已在 config.yaml 开启 enableCorsProxy 并重启',
         retryable: true,
         cause,
         context: { transport: 'st-cors-proxy' },

@@ -1,0 +1,17 @@
+{
+  "schemaVersion": 1,
+  "kind": "llm-config",
+  "exportedAt": "2026-09-23T00:00:00.000Z",
+  "items": [
+    {
+      "schemaVersion": 1,
+      "id": "seed-llm-default-v1",
+      "name": "默认 LLM",
+      "baseUrl": "",
+      "secretId": null,
+      "model": "",
+      "createdAt": "2026-09-23T00:00:00.000Z",
+      "updatedAt": "2026-09-23T00:00:00.000Z"
+    }
+  ]
+}

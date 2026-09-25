@@ -11,9 +11,11 @@
  * 本文件不写 :root / body / #chat / .mes。
  */
 
-@import url('./src/ui/common/tokens.css');
-@import url('./src/ui/common/components.css');
-@import url('./src/ui/panels/panels.css');
-@import url('./src/ui/drawer/drawer.css');
-@import url('./src/ui/workbench/workbench.css');
-@import url('./src/ui/slot-widget/slot-widget.css');
+/* ?v= 打破浏览器对 @import 子表的强缓存（改子 CSS 后须 bump） */
+@import url('./src/ui/common/tokens.css?v=20260924a');
+@import url('./src/ui/common/components.css?v=20260925c');
+@import url('./src/ui/panels/panels.css?v=20260925h');
+@import url('./src/ui/drawer/drawer.css?v=20260924a');
+@import url('./src/ui/workbench/workbench.css?v=20260924a');
+@import url('./src/ui/slot-widget/slot-widget.css?v=20260925e');
+@import url('./src/ui/floating-ball/floating-ball.css?v=20260924a');

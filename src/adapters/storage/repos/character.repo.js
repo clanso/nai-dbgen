@@ -8,8 +8,6 @@ import { configError } from '../../../infra/errors.js';
 import { mapIdbError, IDB_STORES } from '../idb.js';
 import {
     CHARACTER_SCHEMA_VERSION,
-    migrateCharacter,
-    migrateCharacterGroup,
     validateCharacter,
     validateCharacterGroup,
 } from '../../../domain/model/character.js';
@@ -198,6 +196,14 @@ export function createCharacterRepo(deps) {
             const body = parsed.value.body;
             const groupsIn = Array.isArray(body.groups) ? body.groups : [];
             const charsIn = Array.isArray(body.characters) ? body.characters : [];
+            const total = groupsIn.length + charsIn.length;
+            let done = 0;
+            const report = (name) => {
+                done += 1;
+                if (typeof opts?.onProgress === 'function') {
+                    opts.onProgress({ index: done, total, name });
+                }
+            };
 
             let imported = 0;
             let skipped = 0;
@@ -205,19 +211,18 @@ export function createCharacterRepo(deps) {
             const errors = [];
             /** @type {Map<string, string>} 旧 groupId → 新 groupId（rename 时） */
             const groupIdMap = new Map();
+            /** @type {any[]} */
+            const groupPuts = [];
+            /** @type {any[]} */
+            const charPuts = [];
 
             try {
                 const existingGroups = await db.getAll(GROUPS);
                 const groupById = new Map(existingGroups.map((g) => [g.id, g]));
 
                 for (const raw of groupsIn) {
-                    const fromVersion = Number(raw?.schemaVersion) || parsed.value.schemaVersion;
-                    const migrated = migrateCharacterGroup(raw, fromVersion);
-                    if (!migrated.ok) {
-                        errors.push(migrated.error.message);
-                        continue;
-                    }
-                    const validated = validateCharacterGroup(migrated.value);
+                    report(raw?.name || raw?.id || '');
+                    const validated = validateCharacterGroup(raw);
                     if (!validated.ok) {
                         errors.push(validated.error.message);
                         continue;
@@ -233,7 +238,7 @@ export function createCharacterRepo(deps) {
                         groupIdMap.set(validated.value.id, validated.value.id);
                         continue;
                     }
-                    await db.put(GROUPS, decision.entity);
+                    groupPuts.push(decision.entity);
                     groupIdMap.set(validated.value.id, decision.entity.id);
                     groupById.set(decision.entity.id, decision.entity);
                     imported += 1;
@@ -243,15 +248,10 @@ export function createCharacterRepo(deps) {
                 const charById = new Map(existingChars.map((c) => [c.id, c]));
 
                 for (const raw of charsIn) {
-                    const fromVersion = Number(raw?.schemaVersion) || parsed.value.schemaVersion;
-                    const migrated = migrateCharacter(raw, fromVersion);
-                    if (!migrated.ok) {
-                        errors.push(migrated.error.message);
-                        continue;
-                    }
-                    const mappedGroupId = groupIdMap.get(migrated.value.groupId) || migrated.value.groupId;
+                    report(raw?.name || raw?.id || '');
+                    const mappedGroupId = groupIdMap.get(raw?.groupId) || raw?.groupId;
                     const validated = validateCharacter({
-                        ...migrated.value,
+                        ...raw,
                         groupId: mappedGroupId,
                     });
                     if (!validated.ok) {
@@ -273,14 +273,29 @@ export function createCharacterRepo(deps) {
                         ...decision.entity,
                         groupId: mappedGroupId,
                     };
-                    const groupExists = await db.get(GROUPS, entity.groupId);
+                    const groupExists = groupById.has(entity.groupId);
                     if (!groupExists) {
                         errors.push(`角色 ${entity.name || entity.id} 缺少所属组`);
                         continue;
                     }
-                    await db.put(CHARS, entity);
+                    charPuts.push(entity);
                     charById.set(entity.id, entity);
                     imported += 1;
+                }
+
+                if (groupPuts.length || charPuts.length) {
+                    if (typeof opts?.onProgress === 'function') {
+                        opts.onProgress({ index: total || 1, total: total || 1, name: '正在写入文件' });
+                    }
+                    if (typeof db.runTransaction === 'function') {
+                        await db.runTransaction([GROUPS, CHARS], 'readwrite', (stores) => {
+                            for (const row of groupPuts) stores[GROUPS].put(row);
+                            for (const row of charPuts) stores[CHARS].put(row);
+                        });
+                    } else {
+                        for (const row of groupPuts) await db.put(GROUPS, row);
+                        for (const row of charPuts) await db.put(CHARS, row);
+                    }
                 }
 
                 changes.emit({ type: 'import', imported, skipped });

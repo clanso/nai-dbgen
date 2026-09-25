@@ -100,6 +100,17 @@ describe('ui/slot slot-states', () => {
         assert.equal(view.stateClass, slotStateClass('done'));
     });
 
+    it('记录在但缓存已清 → idle（可再出）', () => {
+        const view = deriveSlotUiView(
+            { images: [{ imageRef: 'gone' }] },
+            { cacheMissing: true },
+        );
+        assert.equal(view.state, 'idle');
+        assert.equal(view.showImage, false);
+        assert.equal(view.canClick, true);
+        assert.equal(view.buttonLabel, slotButtonLabel('idle'));
+    });
+
     it('generating 优先于已有图', () => {
         const view = deriveSlotUiView(
             { images: [{ imageRef: 'prev' }] },
@@ -117,6 +128,35 @@ describe('ui/slot slot-states', () => {
         assert.equal(view.showError, true);
         assert.equal(view.errorMessage, '找不到 slot #3');
         assert.equal(view.traceId, 'abc-trace');
+    });
+
+    it('超出保留范围：有缓存图仍不可点击再出图', () => {
+        const withCache = deriveSlotUiView(null, {
+            beyondRetain: true,
+            hasCachedImage: true,
+        });
+        assert.equal(withCache.state, 'beyond_retain');
+        assert.equal(withCache.showImage, true);
+        assert.equal(withCache.canClick, false);
+        assert.match(withCache.errorMessage, /超出保留范围/);
+
+        const noCache = deriveSlotUiView(null, {
+            beyondRetain: true,
+            hasCachedImage: false,
+        });
+        assert.equal(noCache.state, 'beyond_retain');
+        assert.equal(noCache.showImage, false);
+        assert.equal(noCache.canClick, false);
+    });
+
+    it('loadError 优先且不可点击', () => {
+        const view = deriveSlotUiView(
+            { images: [{ imageRef: 'x' }] },
+            { loadError: true, loadErrorMessage: '网络失败' },
+        );
+        assert.equal(view.state, 'load_error');
+        assert.equal(view.canClick, false);
+        assert.equal(view.errorMessage, '网络失败');
     });
 
     it('hasClassToken 精确匹配，不误匹配子串', () => {

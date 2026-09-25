@@ -23,12 +23,16 @@ function makeFakeContext() {
     return {
         chat,
         chatId: 'chat-1',
+        chatMetadata: { integrity: 'sess-test-1' },
         maxContext: 4096,
         extensionSettings,
         extensionPrompts,
         powerUserSettings: { encode_tags: false },
         eventTypes: {
             CHAT_CHANGED: 'chat_id_changed',
+            CHAT_DELETED: 'chat_deleted',
+            GROUP_CHAT_DELETED: 'group_chat_deleted',
+            CHAT_RENAMED: 'chat_renamed',
             CHARACTER_MESSAGE_RENDERED: 'character_message_rendered',
             MESSAGE_SWIPED: 'message_swiped',
             MESSAGE_UPDATED: 'message_updated',
@@ -51,7 +55,11 @@ function makeFakeContext() {
             },
         },
         getCurrentChatId: () => 'chat-1',
+        getRequestHeaders: () => ({ 'Content-Type': 'application/json' }),
+        characters: [],
+        groups: [],
         saveSettingsDebounced() {},
+        saveMetadataDebounced() {},
         async saveChat() {},
         updateMessageBlock() {},
         getCharacterCardFields: () => ({
@@ -103,18 +111,6 @@ describe('sillytavern.host HostPort', () => {
         host.dispose();
     });
 
-    it('writeMessageExtra 合并写入 nai-dbgen 命名空间', async () => {
-        const ctx = makeFakeContext();
-        const host = createSillyTavernHost({ getContext: () => ctx });
-        const r = await host.writeMessageExtra(1, { slots: { 1: { status: 'ready' } } });
-        assert.equal(isOk(r), true);
-        assert.deepEqual(host.readMessageExtra(1).slots, { 1: { status: 'ready' } });
-        const r2 = await host.writeMessageExtra(1, { note: 'x' });
-        assert.equal(isOk(r2), true);
-        assert.equal(host.readMessageExtra(1).note, 'x');
-        assert.ok(host.readMessageExtra(1).slots);
-        host.dispose();
-    });
 
     it('registerOutboundTransform 可取消；创建时注册全局 interceptor', async () => {
         const ctx = makeFakeContext();
@@ -178,6 +174,29 @@ describe('sillytavern.host HostPort', () => {
         assert.equal(isOk(r), true);
         // 动态 import world-info 在 Node 失败 → includeNames 默认 true
         assert.equal(r.value, 'WI:Char: second|Char: first');
+        host.dispose();
+    });
+
+    it('resolveWorldInfo 用 Chat Completion 的可用上下文，不用 maxContext 滑杆', async () => {
+        const ctx = makeFakeContext();
+        ctx.mainApi = 'openai';
+        ctx.maxContext = 2048;
+        ctx.chatCompletionSettings = {
+            openai_max_context: 128000,
+            openai_max_tokens: 4096,
+        };
+        /** @type {number|undefined} */
+        let seenMax;
+        ctx.getWorldInfoPrompt = async (scanInput, maxContext) => {
+            seenMax = maxContext;
+            return { worldInfoString: `WI:${scanInput.join('|')}` };
+        };
+        const host = createSillyTavernHost({ getContext: () => ctx });
+        const r = await host.resolveWorldInfo({
+            contextWindow: [{ messageId: 1, name: 'Char', text: 'hi', isUser: false, isSystem: false }],
+        });
+        assert.equal(isOk(r), true);
+        assert.equal(seenMax, 128000 - 4096);
         host.dispose();
     });
 

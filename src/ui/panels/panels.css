@@ -3,59 +3,221 @@
 :is(#nai-dbgen-root, .nd-root) .nd-shell {
     display: flex;
     flex-direction: column;
-    gap: 12px;
-    min-height: 420px;
-    max-height: min(80vh, 900px);
+    gap: var(--nd-space-stack);
+    width: 100%;
+    min-width: 0;
+    min-height: 0;
+    flex: 1 1 auto;
+    height: 100%;
+    max-height: 100%;
+    overflow: hidden;
+}
+
+:is(#nai-dbgen-root, .nd-root) .nd-debug-list {
+    display: flex;
+    flex-direction: column;
+    gap: var(--nd-space-stack);
+    min-width: 0;
+}
+
+:is(#nai-dbgen-root, .nd-root) .nd-debug-card {
+    display: flex;
+    flex-direction: column;
+    gap: 0.35rem;
+    min-width: 0;
+    padding-bottom: var(--nd-space-stack);
+    border-bottom: 1px solid var(--nd-line);
+}
+
+:is(#nai-dbgen-root, .nd-root) .nd-debug-card__meta {
+    margin: 0;
+    color: var(--nd-muted);
+    font-size: var(--nd-fs-xs);
+}
+
+:is(#nai-dbgen-root, .nd-root) .nd-debug-raw {
+    width: 100%;
+    min-height: 14rem;
+    margin: 0;
+    padding: 0.6rem 0.7rem;
+    box-sizing: border-box;
+    resize: vertical;
+    white-space: pre;
+    overflow: auto;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-size: var(--nd-fs-xs);
+    line-height: 1.45;
 }
 
 :is(#nai-dbgen-root, .nd-root) .nd-shell__tabs {
     display: flex;
     flex-wrap: wrap;
     gap: 6px;
-    padding-bottom: 8px;
+    flex: 0 0 auto;
+    padding: 0;
+    padding-bottom: var(--nd-space-stack);
     border-bottom: 1px solid var(--nd-line);
 }
 
-:is(#nai-dbgen-root, .nd-root) .nd-shell__tab.is-active {
-    background: var(--nd-accent);
-    border-color: var(--nd-accent);
-    color: var(--nd-on-accent);
+/* D61：选中态须 !important，否则被 components.css 基础 button / .nd-button 的 !important 压掉 */
+:is(#nai-dbgen-root, .nd-root) .nd-shell__tab.is-active,
+:is(#nai-dbgen-root, .nd-root) .nd-shell__tab.is-active:hover:not(:disabled) {
+    background: var(--nd-accent) !important;
+    border-color: var(--nd-accent) !important;
+    color: var(--nd-on-accent) !important;
 }
 
-:is(#nai-dbgen-root, .nd-root) .nd-shell__body,
-:is(#nai-dbgen-root, .nd-root) .nd-shell__panel,
-:is(#nai-dbgen-root, .nd-root) .nd-panel {
+/* 子库分段切换（API / 预设）：与主标签同 token 体系 */
+:is(#nai-dbgen-root, .nd-root) .nd-segment {
+    display: inline-flex;
+    flex-wrap: wrap;
+    align-items: stretch;
+    gap: 0;
+    flex: 0 0 auto;
+    max-width: 100%;
+    padding: 2px;
+    border: 1px solid var(--nd-line);
+    border-radius: var(--nd-radius-sm);
+    background: var(--nd-surface-2);
+}
+
+:is(#nai-dbgen-root, .nd-root) .nd-segment__tab {
+    margin: 0 !important;
+    border: 0 !important;
+    border-radius: var(--nd-radius-xs) !important;
+    background: transparent !important;
+    color: var(--nd-text) !important;
+    font-size: var(--nd-fs-sm) !important;
+    font-weight: 600;
+    box-shadow: none !important;
+}
+
+:is(#nai-dbgen-root, .nd-root) .nd-segment__tab.is-active,
+:is(#nai-dbgen-root, .nd-root) .nd-segment__tab.is-active:hover:not(:disabled) {
+    background: var(--nd-accent) !important;
+    border-color: var(--nd-accent) !important;
+    color: var(--nd-on-accent) !important;
+}
+
+:is(#nai-dbgen-root, .nd-root) .nd-segment__tab:hover:not(:disabled):not(.is-active) {
+    background: var(--nd-accent-wash) !important;
+    color: var(--nd-accent-deep) !important;
+}
+
+/*
+ * 滚动模型：标题 + 标签固定；body 吃剩余高度。
+ * 库/列表面板由内部 scroller 滚；表单面板（运行配置/存储）由 panel 自身滚。
+ */
+:is(#nai-dbgen-root, .nd-root) .nd-shell__body {
+    display: flex;
+    flex-direction: column;
     min-width: 0;
-    flex: 1;
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow: hidden;
+}
+
+:is(#nai-dbgen-root, .nd-root) .nd-shell__panel {
+    display: flex;
+    flex-direction: column;
+    flex: 1 1 auto;
+    min-width: 0;
+    min-height: 0;
+    overflow: hidden;
 }
 
 :is(#nai-dbgen-root, .nd-root) .nd-panel {
     display: flex;
     flex-direction: column;
-    gap: 12px;
+    gap: var(--nd-space-stack);
+    flex: 1 1 auto;
+    min-width: 0;
+    min-height: 0;
+    overflow: auto;
+}
+
+/* 有专用内容滚动区的面板：panel 本身不滚，避免双滚动条 */
+:is(#nai-dbgen-root, .nd-root) .nd-panel--artist,
+:is(#nai-dbgen-root, .nd-root) .nd-panel--api,
+:is(#nai-dbgen-root, .nd-root) .nd-panel--preset,
+:is(#nai-dbgen-root, .nd-root) .nd-panel--character,
+:is(#nai-dbgen-root, .nd-root) .nd-panel--tag,
+:is(#nai-dbgen-root, .nd-root) .nd-panel--prompts {
+    overflow: hidden;
 }
 
 :is(#nai-dbgen-root, .nd-root) .nd-panel__list {
-    min-height: 200px;
-    max-height: min(60vh, 640px);
+    flex: 1 1 auto;
+    min-height: 0;
+    max-height: none;
     overflow: auto;
+}
+
+:is(#nai-dbgen-root, .nd-root) .nd-library-view {
+    display: flex;
+    flex-direction: column;
+    gap: var(--nd-space-stack);
+    flex: 1 1 auto;
+    min-width: 0;
+    min-height: 0;
+    overflow: hidden;
+}
+
+:is(#nai-dbgen-root, .nd-root) .nd-library-view > .nd-library-toolbar,
+:is(#nai-dbgen-root, .nd-root) .nd-library-view > .nd-library-view__status {
+    flex: 0 0 auto;
+}
+
+/* 卡片网格 / 文字卡列表：唯一滚动容器（工具栏固定在上） */
+:is(#nai-dbgen-root, .nd-root) .nd-library-view__scroller {
+    flex: 1 1 auto;
+    min-width: 0;
+    min-height: 0;
+    overflow: auto;
+    scrollbar-gutter: auto;
 }
 
 :is(#nai-dbgen-root, .nd-root) .nd-library-view__status {
     color: var(--nd-muted);
-    font-size: 0.73em;
+    font-size: var(--nd-fs-sm);
+    padding: 0;
 }
 
 :is(#nai-dbgen-root, .nd-root) .nd-row-actions {
     display: flex;
     flex-wrap: wrap;
+    align-items: center;
     gap: 4px;
     margin-left: auto;
 }
 
 :is(#nai-dbgen-root, .nd-root) .nd-muted {
     color: var(--nd-muted);
-    font-size: 0.73em;
+    font-size: var(--nd-fs-sm);
+}
+
+:is(#nai-dbgen-root, .nd-root) .nd-field-hint {
+    display: block;
+    margin-top: 4px;
+    font-size: var(--nd-fs-sm);
+}
+
+:is(#nai-dbgen-root, .nd-root) .nd-key-preview {
+    min-height: var(--nd-h);
+    padding: 8px 10px;
+    border: 1px solid var(--nd-line);
+    border-radius: var(--nd-radius-sm);
+    background: var(--nd-surface-2);
+    color: var(--nd-text);
+    font-size: var(--nd-fs-base);
+    line-height: 1.4;
+    word-break: break-all;
+}
+
+:is(#nai-dbgen-root, .nd-root) .nd-key-preview--error {
+    color: var(--nd-danger);
+    border-color: var(--nd-danger-ring);
+    background: var(--nd-danger-wash);
 }
 
 :is(#nai-dbgen-root, .nd-root) .nd-form,
@@ -91,50 +253,378 @@
     gap: 8px;
     padding: 10px;
     border: 1px solid var(--nd-line);
-    border-radius: var(--nd-control-radius);
+    border-radius: var(--nd-radius-sm);
     background: var(--nd-surface-2);
 }
 
 :is(#nai-dbgen-root, .nd-root) .nd-subtabs {
     display: flex;
     gap: 6px;
+    flex: 0 0 auto;
 }
 
-:is(#nai-dbgen-root, .nd-root) .nd-subtabs .nd-button.is-active {
-    background: var(--nd-accent-wash);
-    border-color: var(--nd-accent);
+:is(#nai-dbgen-root, .nd-root) .nd-subpanel {
+    display: flex;
+    flex-direction: column;
+    flex: 1 1 auto;
+    min-width: 0;
+    min-height: 0;
+    overflow: hidden;
+}
+
+/* panels.css 晚于 components.css：.nd-subpanel{display:flex} 会压掉 .nd-hidden */
+:is(#nai-dbgen-root, .nd-root) .nd-subpanel.nd-hidden,
+:is(#nai-dbgen-root, .nd-root) .nd-hidden.nd-subpanel {
+    display: none !important;
+}
+
+:is(#nai-dbgen-root, .nd-root) .nd-panel--character > .nd-library-toolbar,
+:is(#nai-dbgen-root, .nd-root) .nd-panel--tag > .nd-library-toolbar,
+:is(#nai-dbgen-root, .nd-root) .nd-panel--api > .nd-segment,
+:is(#nai-dbgen-root, .nd-root) .nd-panel--api > .nd-subtabs,
+:is(#nai-dbgen-root, .nd-root) .nd-panel--preset > .nd-segment,
+:is(#nai-dbgen-root, .nd-root) .nd-panel--preset > .nd-subtabs {
+    flex: 0 0 auto;
+}
+
+/* D61：同 shell 标签——无 !important 时被 .nd-button / :hover 压掉 */
+:is(#nai-dbgen-root, .nd-root) .nd-subtabs .nd-button.is-active,
+:is(#nai-dbgen-root, .nd-root) .nd-subtabs .nd-button.is-active:hover:not(:disabled) {
+    background: var(--nd-accent-wash) !important;
+    border-color: var(--nd-accent) !important;
+    color: var(--nd-accent-deep) !important;
 }
 
 :is(#nai-dbgen-root, .nd-root) .nd-artist-preview-cover {
-    width: 120px;
+    /* 编辑态预览：与库卡同 832:1216，贴满 cover */
+    width: min(100%, 280px);
     aspect-ratio: 832 / 1216;
+    min-height: 0;
     display: grid;
     place-items: center;
     border: 1px solid var(--nd-line);
-    border-radius: var(--nd-control-radius);
-    background: linear-gradient(145deg, var(--nd-cover-grad-a), var(--nd-cover-grad-b));
+    border-radius: var(--nd-radius-md);
+    background: linear-gradient(145deg, #fff2f7, #fff);
     overflow: hidden;
     font-family: var(--nd-serif);
-    font-size: 1.6em;
-    color: var(--nd-muted);
+    font-size: var(--nd-fs-display);
+    color: rgba(186, 76, 125, 0.2);
 }
 
 :is(#nai-dbgen-root, .nd-root) .nd-artist-preview-cover img {
     width: 100%;
     height: 100%;
-    object-fit: contain;
+    object-fit: cover;
+    object-position: center top;
+}
+
+/* ── 提示词面板 ───────────────────────────────────────── */
+
+:is(#nai-dbgen-root, .nd-root) .nd-panel--prompts {
+    gap: 8px;
+}
+
+:is(#nai-dbgen-root, .nd-root) .nd-prompts-toolbar {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(120px, 220px) auto;
+    align-items: center;
+    gap: 8px;
+    flex: 0 0 auto;
+}
+
+:is(#nai-dbgen-root, .nd-root) .nd-prompts-toolbar__hint {
+    margin: 0;
+    font-size: var(--nd-fs-xs);
+    line-height: 1.35;
+}
+
+:is(#nai-dbgen-root, .nd-root) .nd-preset-vars-hint {
+    margin: 0;
+    font-size: var(--nd-fs-xs);
+    line-height: 1.45;
+    color: var(--nd-muted);
+}
+
+:is(#nai-dbgen-root, .nd-root) .nd-prompts-toolbar__search {
+    min-width: 0;
 }
 
 :is(#nai-dbgen-root, .nd-root) .nd-prompts-list {
     display: grid;
-    gap: 12px;
+    gap: 10px;
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow: auto;
+}
+
+:is(#nai-dbgen-root, .nd-root) .nd-prompts-floor {
+    display: grid;
+    gap: 6px;
+}
+
+:is(#nai-dbgen-root, .nd-root) .nd-prompts-floor__header {
+    display: grid;
+    gap: 2px;
+}
+
+:is(#nai-dbgen-root, .nd-root) .nd-prompts-floor__title {
+    margin: 0;
+    font-size: var(--nd-fs-md);
+    font-weight: 600;
+    color: var(--nd-text);
+}
+
+:is(#nai-dbgen-root, .nd-root) .nd-prompts-floor__summary {
+    margin: 0;
+    font-size: var(--nd-fs-xs);
+    line-height: 1.35;
+}
+
+:is(#nai-dbgen-root, .nd-root) .nd-prompts-floor__error {
+    margin: 0;
+    padding: 6px 8px;
+    font-size: var(--nd-fs-sm);
+}
+
+:is(#nai-dbgen-root, .nd-root) .nd-prompts-floor__cards {
+    display: grid;
+    gap: 8px;
 }
 
 :is(#nai-dbgen-root, .nd-root) .nd-prompt-card {
-    padding: 12px;
+    display: grid;
+    grid-template-columns: 72px minmax(0, 1fr);
+    gap: 12px;
+    align-items: start;
+    padding: 10px;
     border: 1px solid var(--nd-line);
-    border-radius: var(--nd-control-radius);
+    border-radius: var(--nd-radius-sm);
     background: var(--nd-surface);
+}
+
+:is(#nai-dbgen-root, .nd-root) .nd-prompt-card__thumb {
+    width: 72px;
+    aspect-ratio: 4 / 5;
+    height: auto;
+    align-self: start;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    overflow: hidden;
+    border-radius: var(--nd-radius-xs);
+    background: var(--nd-surface-2);
+    border: 1px solid var(--nd-line);
+    flex-shrink: 0;
+    box-sizing: border-box;
+}
+
+:is(#nai-dbgen-root, .nd-root) .nd-prompt-card__thumb--clickable {
+    cursor: pointer;
+}
+
+:is(#nai-dbgen-root, .nd-root) .nd-prompt-card__thumb--clickable:focus-visible {
+    outline: 2px solid var(--nd-accent-deep);
+    outline-offset: 2px;
+}
+
+:is(#nai-dbgen-root, .nd-root) .nd-prompt-card__thumb img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    display: block;
+}
+
+:is(#nai-dbgen-root, .nd-root) .nd-prompt-card__thumb .nd-cover-monogram {
+    font-size: var(--nd-fs-lg);
+}
+
+:is(#nai-dbgen-root, .nd-root) .nd-prompt-card__thumb-empty {
+    font-size: var(--nd-fs-xs);
+    color: var(--nd-muted);
+    text-align: center;
+    padding: 4px;
+    line-height: 1.3;
+}
+
+:is(#nai-dbgen-root, .nd-root) .nd-prompt-card__body {
+    min-width: 0;
+    display: grid;
+    gap: 8px;
+    align-content: start;
+}
+
+:is(#nai-dbgen-root, .nd-root) .nd-prompt-card__layers {
+    display: grid;
+    gap: 8px;
+    min-width: 0;
+}
+
+:is(#nai-dbgen-root, .nd-root) .nd-prompt-card__section {
+    display: grid;
+    gap: 6px;
+    min-width: 0;
+    padding: 8px 10px;
+    border: 1px solid var(--nd-line);
+    border-radius: var(--nd-radius-xs);
+    background: var(--nd-surface-2);
+    box-sizing: border-box;
+}
+
+:is(#nai-dbgen-root, .nd-root) .nd-prompt-card__section--chars {
+    container-type: inline-size;
+    container-name: nd-prompt-chars;
+}
+
+:is(#nai-dbgen-root, .nd-root) .nd-prompt-card__section-title {
+    margin: 0;
+    font-size: var(--nd-fs-xs);
+    font-weight: 700;
+    color: var(--nd-accent);
+    line-height: 1.35;
+}
+
+:is(#nai-dbgen-root, .nd-root) .nd-prompt-card__kv {
+    --nd-prompt-label-col: 2.75em;
+    display: grid;
+    grid-template-columns: var(--nd-prompt-label-col) minmax(0, 1fr);
+    column-gap: 8px;
+    row-gap: 4px;
+    align-items: start;
+    min-width: 0;
+}
+
+:is(#nai-dbgen-root, .nd-root) .nd-prompt-card__pill {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    box-sizing: border-box;
+    width: fit-content;
+    max-width: 100%;
+    margin: 0;
+    padding: 1px 7px;
+    border-radius: var(--nd-radius-pill);
+    font-size: var(--nd-fs-xs);
+    font-weight: 600;
+    line-height: 1.35;
+    white-space: nowrap;
+}
+
+:is(#nai-dbgen-root, .nd-root) .nd-prompt-card__pill--pos {
+    background: var(--nd-accent-wash);
+    color: var(--nd-accent);
+}
+
+:is(#nai-dbgen-root, .nd-root) .nd-prompt-card__pill--neg {
+    background: color-mix(in srgb, var(--nd-muted) 14%, var(--nd-surface));
+    color: var(--nd-muted);
+}
+
+:is(#nai-dbgen-root, .nd-root) .nd-prompt-card__kv-value {
+    margin: 0;
+    font-size: var(--nd-fs-xs);
+    line-height: 1.45;
+    color: var(--nd-text);
+    white-space: pre-wrap;
+    word-break: break-word;
+    overflow-wrap: anywhere;
+    min-width: 0;
+}
+
+:is(#nai-dbgen-root, .nd-root) .nd-prompt-card__kv-value--neg {
+    color: var(--nd-soft);
+}
+
+:is(#nai-dbgen-root, .nd-root) .nd-prompt-card__chars {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    gap: 6px;
+    min-width: 0;
+}
+
+:is(#nai-dbgen-root, .nd-root) .nd-prompt-card__char {
+    display: grid;
+    gap: 4px;
+    min-width: 0;
+    padding: 6px 8px;
+    border: 1px solid var(--nd-line);
+    border-radius: var(--nd-radius-xs);
+    background: var(--nd-surface);
+    box-sizing: border-box;
+}
+
+:is(#nai-dbgen-root, .nd-root) .nd-prompt-card__char-title {
+    margin: 0;
+    font-size: var(--nd-fs-xs);
+    font-weight: 600;
+    color: var(--nd-text);
+    line-height: 1.35;
+}
+
+@container nd-prompt-chars (min-width: 360px) {
+    :is(#nai-dbgen-root, .nd-root) .nd-prompt-card__chars {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+}
+
+:is(#nai-dbgen-root, .nd-root) .nd-prompt-card__foot {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+    align-items: center;
+    gap: 8px;
+    margin-top: 2px;
+}
+
+:is(#nai-dbgen-root, .nd-root) .nd-prompt-card__foot .nd-checkbox-row {
+    min-height: 0;
+    gap: 0.4em;
+    font-size: var(--nd-fs-xs);
+    color: var(--nd-muted);
+}
+
+:is(#nai-dbgen-root, .nd-root) .nd-prompt-card__foot .nd-checkbox-row input {
+    width: 14px !important;
+    height: 14px !important;
+}
+
+:is(#nai-dbgen-root, .nd-root) .nd-prompt-card__copy {
+    height: var(--nd-h-micro) !important;
+    min-height: var(--nd-h-micro) !important;
+    padding: 0 10px !important;
+    font-size: var(--nd-fs-xs) !important;
+    line-height: 1.2 !important;
+}
+
+@container nd-root (max-width: 540px) {
+    :is(#nai-dbgen-root, .nd-root) .nd-prompts-toolbar {
+        grid-template-columns: minmax(0, 1fr) auto;
+        grid-template-areas:
+            'hint hint'
+            'search refresh';
+    }
+
+    :is(#nai-dbgen-root, .nd-root) .nd-prompts-toolbar__hint {
+        grid-area: hint;
+    }
+
+    :is(#nai-dbgen-root, .nd-root) .nd-prompts-toolbar__search {
+        grid-area: search;
+    }
+
+    :is(#nai-dbgen-root, .nd-root) .nd-prompts-toolbar > .nd-button {
+        grid-area: refresh;
+    }
+}
+
+@container nd-root (max-width: 420px) {
+    :is(#nai-dbgen-root, .nd-root) .nd-prompt-card {
+        grid-template-columns: 56px minmax(0, 1fr);
+        gap: 8px;
+    }
+
+    :is(#nai-dbgen-root, .nd-root) .nd-prompt-card__thumb {
+        width: 56px;
+    }
 }
 
 :is(#nai-dbgen-root, .nd-root) .nd-code {
@@ -142,23 +632,142 @@
     padding: 10px;
     overflow: auto;
     max-height: 240px;
-    font-size: 0.73em;
-    border-radius: var(--nd-control-radius);
+    font-size: var(--nd-fs-sm);
+    border-radius: var(--nd-radius-sm);
     background: var(--nd-surface-2);
     border: 1px solid var(--nd-line);
     white-space: pre-wrap;
     word-break: break-word;
 }
 
-:is(#nai-dbgen-root, .nd-root) .nd-nested-list__child {
-    display: flex;
-    flex-wrap: wrap;
-    align-items: center;
-    gap: 8px;
-}
 
 :is(#nai-dbgen-root, .nd-root) .nd-button.is-busy,
 :is(#nai-dbgen-root, .nd-root) .nd-button:disabled {
     opacity: 0.65;
     cursor: not-allowed;
+}
+
+:is(#nai-dbgen-root, .nd-root) .nd-form__group {
+    display: flex;
+    flex-direction: column;
+    gap: var(--nd-space-stack);
+    min-width: 0;
+}
+
+:is(#nai-dbgen-root, .nd-root) .nd-form__group-title {
+    margin: 0;
+    font-size: var(--nd-fs-md);
+    font-weight: 600;
+}
+
+:is(#nai-dbgen-root, .nd-root) .nd-combobox__row {
+    display: flex;
+    flex-wrap: nowrap;
+    align-items: stretch;
+    gap: 8px;
+    min-width: 0;
+}
+
+:is(#nai-dbgen-root, .nd-root) .nd-combobox__input {
+    flex: 1 1 auto;
+    min-width: 0;
+}
+
+:is(#nai-dbgen-root, .nd-root) .nd-combobox__trail {
+    flex: 0 0 auto;
+    display: flex;
+    align-items: center;
+}
+
+:is(#nai-dbgen-root, .nd-root) .nd-combobox__list {
+    margin: 0;
+    padding: 4px 0;
+    list-style: none;
+    overflow: auto;
+    box-sizing: border-box;
+    border: 1px solid var(--nd-line) !important;
+    border-radius: var(--nd-radius-sm) !important;
+    background: var(--nd-surface) !important;
+    color: var(--nd-text) !important;
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.18);
+}
+
+:is(#nai-dbgen-root, .nd-root) .nd-combobox__option,
+:is(#nai-dbgen-root, .nd-root) .nd-combobox__empty {
+    margin: 0;
+    padding: 8px 12px;
+    font-size: var(--nd-fs-sm);
+    line-height: 1.3;
+    cursor: pointer;
+}
+
+:is(#nai-dbgen-root, .nd-root) .nd-combobox__empty {
+    cursor: default;
+    color: var(--nd-muted);
+}
+
+:is(#nai-dbgen-root, .nd-root) .nd-combobox__option:hover,
+:is(#nai-dbgen-root, .nd-root) .nd-combobox__option.is-active {
+    background: var(--nd-surface-2) !important;
+}
+
+:is(#nai-dbgen-root, .nd-root) .nd-panel--storage {
+    gap: var(--nd-space-section, 1.5rem);
+}
+
+:is(#nai-dbgen-root, .nd-root) .nd-storage-block {
+    display: flex;
+    flex-direction: column;
+    gap: var(--nd-space-stack);
+    min-width: 0;
+}
+
+:is(#nai-dbgen-root, .nd-root) .nd-storage-block__title {
+    margin: 0;
+    font-size: var(--nd-fs-md);
+    font-weight: 600;
+    color: var(--nd-text);
+}
+
+:is(#nai-dbgen-root, .nd-root) .nd-storage-stats,
+:is(#nai-dbgen-root, .nd-root) .nd-storage-result {
+    margin: 0;
+    font-size: var(--nd-fs-sm);
+}
+
+:is(#nai-dbgen-root, .nd-root) .nd-cache-gallery {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+    gap: 16px;
+}
+
+:is(#nai-dbgen-root, .nd-root) .nd-cache-card {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    margin: 0;
+    min-width: 0;
+    padding: 8px;
+    border: 1px solid var(--nd-line);
+    border-radius: 8px;
+    background: var(--nd-surface, #fff);
+    cursor: pointer;
+}
+
+:is(#nai-dbgen-root, .nd-root) .nd-cache-card__img {
+    display: block;
+    width: 100%;
+    height: auto;
+    max-height: 420px;
+    object-fit: contain;
+    border-radius: 4px;
+    background: var(--nd-surface-2, #f3f3f3);
+}
+
+:is(#nai-dbgen-root, .nd-root) .nd-cache-card__cap {
+    margin-top: 4px;
+    font-size: 11px;
+    line-height: 1.3;
+    color: var(--nd-text-muted, #666);
+    word-break: break-all;
 }

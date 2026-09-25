@@ -19,7 +19,7 @@ import { GENERATE_INTERCEPTOR_GLOBAL_NAME } from '../../src/adapters/host/genera
 import { installFakeDom } from '../ui/fake-dom.js';
 import { emptyNaiCaption } from '../../src/domain/model/nai-params.js';
 import { probeCapabilities } from '../../src/bootstrap/capabilities.js';
-import { Ok } from '../../src/infra/result.js';
+import { Ok, Err } from '../../src/infra/result.js';
 
 function makeFakeContext(overrides = {}) {
     /** @type {object[]} */
@@ -31,6 +31,7 @@ function makeFakeContext(overrides = {}) {
             { name: 'Char', mes: 'hello', is_user: false, is_system: false, extra: {} },
         ],
         chatId: 'chat-life',
+        chatMetadata: { integrity: 'sess-life-1' },
         maxContext: 4096,
         extensionSettings: {
             regex: [],
@@ -41,6 +42,9 @@ function makeFakeContext(overrides = {}) {
         powerUserSettings: { encode_tags: false },
         eventTypes: {
             CHAT_CHANGED: 'chat_id_changed',
+            CHAT_DELETED: 'chat_deleted',
+            GROUP_CHAT_DELETED: 'group_chat_deleted',
+            CHAT_RENAMED: 'chat_renamed',
             CHARACTER_MESSAGE_RENDERED: 'character_message_rendered',
             MESSAGE_UPDATED: 'message_updated',
             MORE_MESSAGES_LOADED: 'more_messages_loaded',
@@ -55,7 +59,11 @@ function makeFakeContext(overrides = {}) {
             },
         },
         getCurrentChatId: () => 'chat-life',
+        getRequestHeaders: () => ({ 'Content-Type': 'application/json' }),
+        characters: [],
+        groups: [],
         saveSettingsDebounced() {},
+        saveMetadataDebounced() {},
         async saveChat() {},
         updateMessageBlock() {},
         async getWorldInfoPrompt() {
@@ -78,7 +86,7 @@ function makeFakeContext(overrides = {}) {
         substituteParams: (t) => t,
         callGenericPopup: async () => {},
         _slashCommands: slashCommands,
-        _slashRegistry: slashCommands, // 兼容旧断言：用 .includes 会失败，改测例
+        _slashRegistry: slashCommands, // 占位；下方 defineProperty 提供 .includes 视图
         ...overrides,
     };
     // 让 _slashRegistry.includes 仍可用：代理成名字数组视图
@@ -163,9 +171,38 @@ describe('bootstrap/lifecycle', () => {
         const rt = _runtimeForTest();
         assert.ok(rt.container);
         assert.equal(typeof globalThis[PUBLIC_API_NAME].generate, 'function');
+        assert.equal(typeof globalThis[PUBLIC_API_NAME].generateSinglePrompt, 'function');
         assert.equal(typeof globalThis[GENERATE_INTERCEPTOR_GLOBAL_NAME], 'function');
         assert.ok(ctx._slashRegistry.includes('naigen'));
         assert.ok(ctx._slashRegistry.includes('naiwb'));
+    });
+
+    it('activate 后触发图片缓存裁剪；失败只记日志不抛', async () => {
+        const ctx = makeFakeContext();
+        const getContext = () => ctx;
+        let trimCalls = 0;
+        await activate({
+            getContext,
+            createContainer: async (opts) => {
+                const c = await createContainer({
+                    ...opts,
+                    getContext,
+                    host: createSillyTavernHost({ getContext }),
+                    db: createMemoryIdb(),
+                });
+                const orig = c.services.imageCacheTrim.trim.bind(c.services.imageCacheTrim);
+                c.services.imageCacheTrim.trim = async () => {
+                    trimCalls += 1;
+                    return Err({ code: 'TRIM_FAIL', message: '模拟失败', category: 'storage' });
+                };
+                // keep orig referenced for lint silence in case needed
+                void orig;
+                return c;
+            },
+        });
+        await new Promise((r) => setTimeout(r, 20));
+        assert.equal(trimCalls, 1);
+        assert.ok(_runtimeForTest().container);
     });
 
     it('对外入口缺 replaceCharacterKeywords → 报错', async () => {
@@ -176,6 +213,15 @@ describe('bootstrap/lifecycle', () => {
             () => globalThis[PUBLIC_API_NAME].generate({ caption: emptyNaiCaption() }),
             /replaceCharacterKeywords/,
         );
+    });
+
+    it('4.16 generateSinglePrompt 空描述 → Result Err（与 4.14 同为 resolve Result）', async () => {
+        const ctx = makeFakeContext();
+        await boot(ctx);
+
+        const r = await globalThis[PUBLIC_API_NAME].generateSinglePrompt({ description: '  ' });
+        assert.equal(r.ok, false);
+        assert.equal(r.error.code, 'SINGLE_DESC_EMPTY');
     });
 
     it('activate 中途失败 → 已建资源被回收、不抛到宿主', async () => {
@@ -290,7 +336,7 @@ describe('bootstrap/lifecycle', () => {
         assert.ok(toasts.some((t) => t[0] === 'error' && /启动失败|找不到/.test(t[1])));
     });
 
-    it('probeCapabilities：旧版缺 eventSource 标为不可用', async () => {
+    it('probeCapabilities：缺 eventSource 标为不可用', async () => {
         const host = {
             getCurrentChatId: () => null,
             ensureSlotRegexInstalled: async () => ({ ok: true }),
@@ -305,7 +351,7 @@ describe('bootstrap/lifecycle', () => {
         });
         const item = report.items.find((i) => i.id === 'eventSource');
         assert.equal(item?.available, false);
-        assert.ok(/自动写 slot/.test(item?.detail || ''));
+        assert.ok(/自动生成提示词/.test(item?.detail || ''));
     });
 
     it('D54：楼层按钮进行中再点 → execute 只进入一次（共享 Promise）', async () => {
@@ -393,4 +439,113 @@ describe('bootstrap/lifecycle', () => {
             `toast 应含指引：${errToast[1]}`,
         );
     });
+
+    it('activate 成功后 body 下有且仅有一个悬浮球根', async () => {
+        const ctx = makeFakeContext();
+        await boot(ctx);
+
+        const rt = _runtimeForTest();
+        assert.ok(rt.floatingBallHandle);
+        assert.ok(rt.floatingBallRoot);
+        assert.equal(rt.floatingBallRoot.parentNode, fakeDom.document.body);
+        assert.ok(rt.floatingBallRoot.classList.contains('nd-root'));
+        assert.equal(countFloatingBallRoots(fakeDom.document.body), 1);
+        assert.equal(countFabButtons(fakeDom.document.body), 1);
+    });
+
+    it('dispose 后悬浮球从 body 移除', async () => {
+        const ctx = makeFakeContext();
+        await boot(ctx);
+        assert.equal(countFloatingBallRoots(fakeDom.document.body), 1);
+
+        await dispose();
+        const rt = _runtimeForTest();
+        assert.equal(rt.floatingBallHandle, null);
+        assert.equal(rt.floatingBallRoot, null);
+        assert.equal(countFloatingBallRoots(fakeDom.document.body), 0);
+        assert.equal(countFabButtons(fakeDom.document.body), 0);
+    });
+
+    it('activate → dispose → activate 不重复挂球', async () => {
+        const ctx = makeFakeContext();
+        await boot(ctx);
+        await dispose();
+        await boot(ctx);
+
+        assert.equal(countFloatingBallRoots(fakeDom.document.body), 1);
+        assert.equal(countFabButtons(fakeDom.document.body), 1);
+        assert.ok(_runtimeForTest().floatingBallHandle);
+    });
+
+    it('activate 在挂球前失败 → 无悬浮球残留', async () => {
+        const ctx = makeFakeContext();
+        const getContext = () => ctx;
+
+        await activate({
+            getContext,
+            createContainer: async (opts) => {
+                const c = await createContainer({
+                    ...opts,
+                    getContext,
+                    host: createSillyTavernHost({ getContext }),
+                    db: createMemoryIdb(),
+                });
+                // 失败点在斜杠/挂球之前（与现有 D56 测例同位置）
+                c.services.autoTrigger.start = () => {
+                    throw new Error('挂球前失败');
+                };
+                return c;
+            },
+        });
+
+        assert.equal(_runtimeForTest().container, null);
+        assert.equal(_runtimeForTest().floatingBallHandle, null);
+        assert.equal(countFloatingBallRoots(fakeDom.document.body), 0);
+        assert.equal(countFabButtons(fakeDom.document.body), 0);
+    });
 });
+
+/**
+ * 宿主容器：body 直系 `.nd-root` 且含 `.nd-fab` 子节点。
+ * @param {any} body
+ * @returns {number}
+ */
+function countFloatingBallRoots(body) {
+    let n = 0;
+    for (const child of body?.childNodes || []) {
+        if (!child?.classList?.contains('nd-root')) {
+            continue;
+        }
+        const hasFab = (child.childNodes || []).some(
+            (c) => c?.classList?.contains('nd-fab'),
+        );
+        if (hasFab) {
+            n += 1;
+        }
+    }
+    return n;
+}
+
+/**
+ * @param {any} root
+ * @returns {number}
+ */
+function countFabButtons(root) {
+    let n = 0;
+    /**
+     * @param {any} node
+     */
+    function walk(node) {
+        if (!node) {
+            return;
+        }
+        if (node.classList?.contains('nd-fab')) {
+            n += 1;
+        }
+        for (const c of node.childNodes || []) {
+            walk(c);
+        }
+    }
+    walk(root);
+    return n;
+}

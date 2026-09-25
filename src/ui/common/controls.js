@@ -63,6 +63,149 @@ export function createButton(opts) {
 }
 
 /**
+ * 卡底 / 嵌套列表行内统一小条按钮（浅粉底；danger 仅红字，非实心红底）。
+ * @param {object} opts
+ * @param {string} opts.label
+ * @param {boolean} [opts.danger]
+ * @param {string} [opts.action]
+ * @param {() => void} [opts.onClick]
+ * @returns {HTMLButtonElement}
+ */
+export function createMiniAction(opts) {
+    const btn = createButton({
+        label: opts?.label,
+        variant: 'ghost',
+        onClick: opts?.onClick,
+    });
+    btn.classList.add('nd-mini-action');
+    if (opts?.danger) {
+        btn.classList.add('nd-mini-action--danger');
+    }
+    if (opts?.action != null && String(opts.action) !== '') {
+        btn.dataset.action = String(opts.action);
+    }
+    return btn;
+}
+
+/**
+ * 分段标签（管理台子切换）：与 `.nd-shell__tab` 同一视觉体系；`role=tablist/tab` + 左右键。
+ * @param {object} opts
+ * @param {{ id: string, label: string }[]} opts.items
+ * @param {string} [opts.value]
+ * @param {(id: string) => void} [opts.onChange]
+ * @param {string} [opts.storageKey] sessionStorage 记住上次选中
+ * @param {string} [opts.ariaLabel]
+ * @returns {{
+ *   el: HTMLElement,
+ *   getValue: () => string,
+ *   setValue: (id: string) => void,
+ *   destroy: () => void,
+ * }}
+ */
+export function createSegmentedTabs(opts) {
+    const items = Array.isArray(opts?.items) ? opts.items.filter((it) => it && it.id != null) : [];
+    if (!items.length) {
+        throw new Error('createSegmentedTabs: items required');
+    }
+
+    const storageKey = opts?.storageKey != null ? String(opts.storageKey) : '';
+    let current = String(opts?.value ?? items[0].id);
+    if (storageKey && typeof sessionStorage !== 'undefined') {
+        try {
+            const saved = sessionStorage.getItem(storageKey);
+            if (saved && items.some((it) => String(it.id) === saved)) {
+                current = saved;
+            }
+        } catch {
+            // ignore
+        }
+    }
+    if (!items.some((it) => String(it.id) === current)) {
+        current = String(items[0].id);
+    }
+
+    const root = el('div', 'nd-segment');
+    root.setAttribute('role', 'tablist');
+    if (opts?.ariaLabel) {
+        root.setAttribute('aria-label', String(opts.ariaLabel));
+    }
+
+    /** @type {HTMLButtonElement[]} */
+    const buttons = [];
+
+    /**
+     * @param {string} id
+     * @param {{ silent?: boolean }} [flags]
+     */
+    function select(id, flags = {}) {
+        const next = String(id);
+        if (!items.some((it) => String(it.id) === next)) return;
+        current = next;
+        for (const btn of buttons) {
+            const on = btn.dataset.tab === current;
+            btn.classList.toggle('is-active', on);
+            btn.setAttribute('aria-selected', on ? 'true' : 'false');
+            btn.tabIndex = on ? 0 : -1;
+        }
+        if (storageKey && typeof sessionStorage !== 'undefined') {
+            try {
+                sessionStorage.setItem(storageKey, current);
+            } catch {
+                // ignore
+            }
+        }
+        if (!flags.silent && typeof opts?.onChange === 'function') {
+            opts.onChange(current);
+        }
+    }
+
+    for (const item of items) {
+        const id = String(item.id);
+        const btn = /** @type {HTMLButtonElement} */ (el('button', 'nd-button nd-segment__tab'));
+        btn.type = 'button';
+        btn.dataset.tab = id;
+        btn.setAttribute('role', 'tab');
+        setText(btn, item.label != null ? String(item.label) : id);
+        btn.addEventListener('click', () => select(id));
+        btn.addEventListener('keydown', (ev) => {
+            if (ev.key !== 'ArrowLeft' && ev.key !== 'ArrowRight' && ev.key !== 'Home' && ev.key !== 'End') {
+                return;
+            }
+            ev.preventDefault();
+            const idx = items.findIndex((it) => String(it.id) === current);
+            let nextIdx = idx;
+            if (ev.key === 'ArrowLeft') {
+                nextIdx = (idx - 1 + items.length) % items.length;
+            } else if (ev.key === 'ArrowRight') {
+                nextIdx = (idx + 1) % items.length;
+            } else if (ev.key === 'Home') {
+                nextIdx = 0;
+            } else if (ev.key === 'End') {
+                nextIdx = items.length - 1;
+            }
+            select(String(items[nextIdx].id));
+            const focusBtn = buttons[nextIdx];
+            if (focusBtn && typeof focusBtn.focus === 'function') {
+                focusBtn.focus();
+            }
+        });
+        root.appendChild(btn);
+        buttons.push(btn);
+    }
+
+    select(current, { silent: true });
+
+    return {
+        el: root,
+        getValue: () => current,
+        setValue: (id) => select(String(id)),
+        destroy: () => {
+            root.remove();
+        },
+    };
+}
+
+/**
  * @param {object} opts
  * @param {string} opts.label
  * @param {string} [opts.value]
@@ -75,8 +218,14 @@ export function createField(opts) {
     setText(labelEl, opts?.label != null ? String(opts.label) : '');
     /** @type {HTMLInputElement} */
     const input = /** @type {HTMLInputElement} */ (el('input', 'nd-input'));
-    input.type = 'text';
+    input.type = opts?.type ? String(opts.type) : 'text';
     input.value = opts?.value != null ? String(opts.value) : '';
+    if (opts?.placeholder != null) {
+        input.placeholder = String(opts.placeholder);
+    }
+    if (opts?.min != null) input.min = String(opts.min);
+    if (opts?.max != null) input.max = String(opts.max);
+    if (opts?.step != null) input.step = String(opts.step);
 
     /** @type {(v: string) => void} */
     const onChange = typeof opts?.onChange === 'function' ? opts.onChange : () => {};
@@ -100,6 +249,336 @@ export function createField(opts) {
 /**
  * @param {object} opts
  * @param {string} opts.label
+ * @param {string} [opts.value]
+ * @param {string} [opts.placeholder]
+ * @param {number} [opts.rows]
+ * @param {(v: string) => void} [opts.onChange]
+ * @returns {{ el: HTMLElement, getValue: () => string, setValue: (v: string) => void, destroy: () => void }}
+ */
+export function createTextarea(opts) {
+    const root = el('label', 'nd-field');
+    const labelEl = el('span', 'nd-field__label');
+    setText(labelEl, opts?.label != null ? String(opts.label) : '');
+    /** @type {HTMLTextAreaElement} */
+    const input = /** @type {HTMLTextAreaElement} */ (el('textarea', 'nd-input nd-textarea'));
+    input.rows = Number(opts?.rows) > 0 ? Number(opts.rows) : 3;
+    input.value = opts?.value != null ? String(opts.value) : '';
+    if (opts?.placeholder != null) {
+        input.placeholder = String(opts.placeholder);
+    }
+
+    /** @type {(v: string) => void} */
+    const onChange = typeof opts?.onChange === 'function' ? opts.onChange : () => {};
+    const handler = () => onChange(input.value);
+    input.addEventListener('input', handler);
+
+    root.append(labelEl, input);
+    return {
+        el: root,
+        getValue: () => input.value,
+        setValue: (v) => {
+            input.value = v == null ? '' : String(v);
+        },
+        destroy: () => {
+            input.removeEventListener('input', handler);
+            root.remove();
+        },
+    };
+}
+
+/**
+ * 可搜索组合框：输入过滤；聚焦/点击展开列表（fixed 定位，弹层内不裁切）；
+ * 键盘 ↑↓ 选中、Enter 确认、Esc 收起；列表外手输有效。
+ *
+ * @param {object} opts
+ * @param {string} opts.label
+ * @param {string} [opts.value]
+ * @param {string} [opts.placeholder]
+ * @param {string[]} [opts.options]
+ * @param {HTMLElement} [opts.trailing] 贴在输入右侧的控件（如「获取模型」）
+ * @param {(v: string) => void} [opts.onChange]
+ * @returns {{
+ *   el: HTMLElement,
+ *   getValue: () => string,
+ *   setValue: (v: string) => void,
+ *   setOptions: (options: string[]) => void,
+ *   open: () => void,
+ *   close: () => void,
+ *   destroy: () => void,
+ * }}
+ */
+export function createCombobox(opts) {
+    const root = el('div', 'nd-field nd-combobox');
+    const labelEl = el('span', 'nd-field__label');
+    setText(labelEl, opts?.label != null ? String(opts.label) : '');
+
+    const row = el('div', 'nd-combobox__row');
+    /** @type {HTMLInputElement} */
+    const input = /** @type {HTMLInputElement} */ (el('input', 'nd-input nd-combobox__input'));
+    input.type = 'text';
+    input.autocomplete = 'off';
+    input.spellcheck = false;
+    input.value = opts?.value != null ? String(opts.value) : '';
+    if (opts?.placeholder != null) {
+        input.placeholder = String(opts.placeholder);
+    }
+    row.appendChild(input);
+    if (opts?.trailing instanceof HTMLElement) {
+        const trail = el('div', 'nd-combobox__trail');
+        trail.appendChild(opts.trailing);
+        row.appendChild(trail);
+    }
+
+    /** @type {HTMLElement} */
+    const list = el('ul', 'nd-combobox__list');
+    list.setAttribute('role', 'listbox');
+    list.hidden = true;
+
+    root.append(labelEl, row);
+
+    /** @type {string[]} */
+    let allOptions = normalizeOptions(opts?.options);
+    /** @type {string[]} */
+    let filtered = [];
+    let highlight = -1;
+    let open = false;
+
+    /** @type {(v: string) => void} */
+    const onChange = typeof opts?.onChange === 'function' ? opts.onChange : () => {};
+
+    /**
+     * @param {unknown} options
+     * @returns {string[]}
+     */
+    function normalizeOptions(options) {
+        if (!Array.isArray(options)) return [];
+        return options.map((item) => {
+            if (item == null) return '';
+            if (typeof item === 'string' || typeof item === 'number') return String(item);
+            if (typeof item === 'object') {
+                if (/** @type {{value?: unknown}} */ (item).value != null) {
+                    return String(/** @type {{value: unknown}} */ (item).value);
+                }
+                if (/** @type {{label?: unknown}} */ (item).label != null) {
+                    return String(/** @type {{label: unknown}} */ (item).label);
+                }
+            }
+            return String(item);
+        }).filter(Boolean);
+    }
+
+    function emit() {
+        onChange(input.value);
+    }
+
+    function filterOptions() {
+        const q = input.value.trim().toLowerCase();
+        filtered = q
+            ? allOptions.filter((id) => id.toLowerCase().includes(q))
+            : [...allOptions];
+        if (filtered.length > 500) {
+            filtered = filtered.slice(0, 500);
+        }
+    }
+
+    function renderList() {
+        list.replaceChildren();
+        if (filtered.length === 0) {
+            const empty = el('li', 'nd-combobox__empty');
+            setText(empty, allOptions.length ? '无匹配项，可直接手输' : '暂无列表，可直接手输');
+            list.appendChild(empty);
+            highlight = -1;
+            return;
+        }
+        filtered.forEach((id, index) => {
+            const item = el('li', 'nd-combobox__option');
+            item.setAttribute('role', 'option');
+            item.dataset.index = String(index);
+            setText(item, id);
+            if (index === highlight) {
+                item.classList.add('is-active');
+                item.setAttribute('aria-selected', 'true');
+            }
+            item.addEventListener('mousedown', (ev) => {
+                ev.preventDefault();
+                pick(id);
+            });
+            list.appendChild(item);
+        });
+    }
+
+    function positionList() {
+        const rect = input.getBoundingClientRect();
+        const vh = window.innerHeight || 600;
+        const spaceBelow = vh - rect.bottom;
+        const maxH = Math.min(280, Math.max(120, spaceBelow > 160 ? spaceBelow - 8 : rect.top - 8));
+        list.style.position = 'fixed';
+        list.style.left = `${Math.round(rect.left)}px`;
+        list.style.width = `${Math.round(rect.width)}px`;
+        list.style.maxHeight = `${Math.round(maxH)}px`;
+        list.style.zIndex = '10050';
+        if (spaceBelow < 140 && rect.top > spaceBelow) {
+            list.style.top = 'auto';
+            list.style.bottom = `${Math.round(vh - rect.top + 4)}px`;
+        } else {
+            list.style.bottom = 'auto';
+            list.style.top = `${Math.round(rect.bottom + 4)}px`;
+        }
+    }
+
+    function ensureListMounted() {
+        if (list.parentNode) {
+            return;
+        }
+        const host = root.closest('.nd-root') || document.body;
+        host.appendChild(list);
+    }
+
+    function openList() {
+        filterOptions();
+        if (highlight < 0 && filtered.length) {
+            highlight = 0;
+        }
+        renderList();
+        ensureListMounted();
+        positionList();
+        list.hidden = false;
+        open = true;
+        root.classList.add('is-open');
+    }
+
+    function closeList() {
+        list.hidden = true;
+        open = false;
+        highlight = -1;
+        root.classList.remove('is-open');
+    }
+
+    /**
+     * @param {string} id
+     */
+    function pick(id) {
+        input.value = id;
+        emit();
+        closeList();
+        input.focus();
+    }
+
+    /**
+     * @param {number} next
+     */
+    function moveHighlight(next) {
+        if (!filtered.length) {
+            highlight = -1;
+            return;
+        }
+        highlight = ((next % filtered.length) + filtered.length) % filtered.length;
+        renderList();
+        const active = list.querySelector('.is-active');
+        if (active && typeof active.scrollIntoView === 'function') {
+            active.scrollIntoView({ block: 'nearest' });
+        }
+    }
+
+    const onInput = () => {
+        emit();
+        filterOptions();
+        highlight = filtered.length ? 0 : -1;
+        if (!open) {
+            openList();
+        } else {
+            renderList();
+            positionList();
+        }
+    };
+
+    const onFocus = () => {
+        openList();
+    };
+
+    const onKeyDown = (ev) => {
+        if (ev.key === 'ArrowDown') {
+            ev.preventDefault();
+            if (!open) openList();
+            else moveHighlight(highlight + 1);
+            return;
+        }
+        if (ev.key === 'ArrowUp') {
+            ev.preventDefault();
+            if (!open) openList();
+            else moveHighlight(highlight - 1);
+            return;
+        }
+        if (ev.key === 'Enter') {
+            if (open && highlight >= 0 && filtered[highlight]) {
+                ev.preventDefault();
+                pick(filtered[highlight]);
+            }
+            return;
+        }
+        if (ev.key === 'Escape') {
+            if (open) {
+                ev.preventDefault();
+                closeList();
+            }
+        }
+    };
+
+    const onDocPointer = (ev) => {
+        if (!open) return;
+        const t = /** @type {Node|null} */ (ev.target);
+        if (t && (root.contains(t) || list.contains(t))) return;
+        closeList();
+    };
+
+    const onScrollOrResize = () => {
+        if (open) positionList();
+    };
+
+    input.addEventListener('input', onInput);
+    input.addEventListener('focus', onFocus);
+    input.addEventListener('keydown', onKeyDown);
+    document.addEventListener('mousedown', onDocPointer, true);
+    window.addEventListener('resize', onScrollOrResize);
+    window.addEventListener('scroll', onScrollOrResize, true);
+
+    return {
+        el: root,
+        getValue: () => input.value,
+        setValue: (v) => {
+            input.value = v == null ? '' : String(v);
+        },
+        setOptions: (options) => {
+            allOptions = normalizeOptions(options);
+            if (open) {
+                filterOptions();
+                highlight = filtered.length ? Math.min(highlight, filtered.length - 1) : -1;
+                renderList();
+                positionList();
+            }
+        },
+        open: () => {
+            input.focus();
+            openList();
+        },
+        close: closeList,
+        destroy: () => {
+            input.removeEventListener('input', onInput);
+            input.removeEventListener('focus', onFocus);
+            input.removeEventListener('keydown', onKeyDown);
+            document.removeEventListener('mousedown', onDocPointer, true);
+            window.removeEventListener('resize', onScrollOrResize);
+            window.removeEventListener('scroll', onScrollOrResize, true);
+            list.remove();
+            root.remove();
+        },
+    };
+}
+
+/**
+ * @param {object} opts
+ * @param {string} opts.label
+ * @param {string} [opts.hint] 标签下小字说明
  * @param {boolean} [opts.checked]
  * @param {(v: boolean) => void} [opts.onChange]
  * @returns {{ el: HTMLElement, getValue: () => boolean, setValue: (v: boolean) => void, destroy: () => void }}
@@ -110,6 +589,11 @@ export function createToggle(opts) {
     const strong = el('strong');
     setText(strong, opts?.label != null ? String(opts.label) : '');
     text.appendChild(strong);
+    if (opts?.hint != null && String(opts.hint)) {
+        const small = el('small');
+        setText(small, String(opts.hint));
+        text.appendChild(small);
+    }
 
     /** @type {HTMLInputElement} */
     const input = /** @type {HTMLInputElement} */ (el('input'));
@@ -258,10 +742,18 @@ export function createNumberField(opts) {
 /**
  * @param {object} opts
  * @param {string} opts.label
- * @param {{ value: string, label: string }[]} opts.options
- * @param {string} [opts.value]
+ * @param {{ value: string|number, label: string }[]} opts.options
+ * @param {string|number} [opts.value]
+ * @param {boolean} [opts.disabled]
  * @param {(v: string) => void} [opts.onChange]
- * @returns {{ el: HTMLElement, getValue: () => string, setValue: (v: string) => void, destroy: () => void }}
+ * @returns {{
+ *   el: HTMLElement,
+ *   getValue: () => string,
+ *   setValue: (v: string|number) => void,
+ *   setOptions: (options: { value: string|number, label: string }[], keepValue?: string|number) => void,
+ *   setDisabled: (disabled: boolean) => void,
+ *   destroy: () => void,
+ * }}
  */
 export function createSelect(opts) {
     const root = el('label', 'nd-field');
@@ -269,16 +761,32 @@ export function createSelect(opts) {
     setText(labelEl, opts?.label != null ? String(opts.label) : '');
     /** @type {HTMLSelectElement} */
     const select = /** @type {HTMLSelectElement} */ (el('select', 'nd-select'));
-    const options = Array.isArray(opts?.options) ? opts.options : [];
-    for (const item of options) {
-        const option = document.createElement('option');
-        option.value = String(item.value);
-        setText(option, item.label != null ? String(item.label) : String(item.value));
-        select.appendChild(option);
+
+    /**
+     * @param {{ value: string|number, label: string }[]} list
+     * @param {string|number} [preferred]
+     */
+    function fillOptions(list, preferred) {
+        const keep = preferred != null ? String(preferred) : select.value;
+        select.replaceChildren();
+        for (const item of list) {
+            const option = document.createElement('option');
+            option.value = String(item.value);
+            setText(option, item.label != null ? String(item.label) : String(item.value));
+            select.appendChild(option);
+        }
+        if (keep && [...select.options].some((o) => o.value === keep)) {
+            select.value = keep;
+        } else if (select.options.length > 0) {
+            select.selectedIndex = 0;
+        }
     }
+
+    fillOptions(Array.isArray(opts?.options) ? opts.options : [], opts?.value);
     if (opts?.value != null) {
         select.value = String(opts.value);
     }
+    select.disabled = opts?.disabled === true;
 
     /** @type {(v: string) => void} */
     const onChange = typeof opts?.onChange === 'function' ? opts.onChange : () => {};
@@ -291,6 +799,13 @@ export function createSelect(opts) {
         getValue: () => select.value,
         setValue: (v) => {
             select.value = v == null ? '' : String(v);
+        },
+        setOptions: (options, keepValue) => {
+            fillOptions(Array.isArray(options) ? options : [], keepValue);
+        },
+        setDisabled: (disabled) => {
+            select.disabled = Boolean(disabled);
+            root.classList.toggle('is-disabled', Boolean(disabled));
         },
         destroy: () => {
             select.removeEventListener('change', handler);

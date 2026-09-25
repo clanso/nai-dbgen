@@ -6,33 +6,75 @@
  * - 挂载后 JS 补的 .nd-slot* 类名未经净化，不加前缀
  *
  * 控件在气泡内、不在 .nd-root 下 → 在 .nd-slot 上镜像 --nd-* 令牌。
- * 硬化关键属性，抵御宿主消息内全局 p/img/button 规则泄漏。
+ *
+ * D61：在自己的作用域（.nd-slot）内对关键属性使用 !important，抵御宿主全局皮。
+ * 白名单：appearance / box-sizing / font-family / font-size / line-height / color /
+ * background / border / border-radius / padding / width / height / min-height；
+ * img 额外：filter / max-width / object-fit。
+ * 禁止污染 :root、body、.mes、#chat 等宿主选择器。
  */
 
 /* —— 唯一带 custom- 前缀：挂载完成前的占位，避免无样式闪烁 —— */
-.custom-nai-slot {
-    min-height: 34px;
+.custom-nai-slot,
+.nai-slot {
+    display: block;
+    width: 100%;
+    max-width: 100%;
+    margin: 0.55em 0;
+    min-height: 36px;
+}
+
+.nai-slot > .nai-slot-btn {
+    appearance: none;
+    box-sizing: border-box;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 36px;
+    margin: 0;
+    padding: 0 14px;
+    border: 1px solid #c13d75;
+    border-radius: 8px;
+    background: #c13d75;
+    color: #fff;
+    font-size: 14px;
+    font-weight: 700;
+    line-height: 1.2;
+    cursor: pointer;
 }
 
 /* —— 挂载后（JS 补类，未经净化） —— */
 .nd-slot {
-    /* 令牌镜像：气泡外无 .nd-root 时仍可用 */
-    --nd-text: var(--SmartThemeBodyColor, #4b3040);
-    --nd-surface: var(--SmartThemeBlurTintColor, #fffdfd);
-    --nd-surface-2: var(--SmartThemeBotMesBlurTintColor, #fff0f6);
-    --nd-line: var(--SmartThemeBorderColor, rgba(123, 70, 96, 0.21));
-    --nd-muted: var(--SmartThemeEmColor, #7f5f70);
+    /* 令牌镜像：气泡外无 .nd-root 时仍可用（D63 配色 + D64 字号） */
+    --nd-bg: #fff7fb;
+    --nd-text: #4b3040;
+    --nd-surface: #fffdfd;
+    --nd-surface-2: #fff0f6;
+    --nd-line: rgba(123, 70, 96, 0.21);
+    --nd-line-strong: rgba(123, 70, 96, 0.36);
+    --nd-muted: #7f5f70;
+    --nd-soft: #735466;
     --nd-accent: #c13d75;
     --nd-accent-deep: #aa2f65;
     --nd-accent-soft: #f47eae;
     --nd-danger: #d94f72;
     --nd-on-accent: #ffffff;
-    --nd-control-radius: 10px;
+    --nd-radius-lg: 16px;
+    --nd-radius-md: 12px;
+    --nd-radius-sm: 8px;
+    --nd-radius-xs: 6px;
+    --nd-radius-pill: 999px;
     --nd-h: 36px;
     --nd-accent-wash: color-mix(in srgb, var(--nd-accent-soft) 18%, var(--nd-surface));
     --nd-danger-wash: color-mix(in srgb, var(--nd-danger) 6%, var(--nd-surface));
     --nd-danger-ring: color-mix(in srgb, var(--nd-danger) 22%, transparent);
-    --nd-line-strong: color-mix(in srgb, var(--nd-line) 70%, var(--nd-text));
+    --nd-fs-base: max(11px, var(--mainFontSize, 15px));
+    --nd-fs-xs: max(11px, calc(var(--mainFontSize, 15px) * 9 / 15));
+    --nd-fs-sm: max(11px, calc(var(--mainFontSize, 15px) * 11 / 15));
+    --nd-fs-md: max(11px, calc(var(--mainFontSize, 15px) * 12 / 15));
+    --nd-fs-lg: max(11px, calc(var(--mainFontSize, 15px) * 14 / 15));
+    --nd-fs-title: max(11px, calc(var(--mainFontSize, 15px) * 18 / 15));
+    --nd-fs-display: max(11px, calc(var(--mainFontSize, 15px) * 25 / 15));
 
     container-type: inline-size;
     container-name: nd-slot;
@@ -44,40 +86,63 @@
     max-width: 100%;
     margin: 0.55em 0;
     padding: 0;
-    box-sizing: border-box;
-    font-family: Aptos, "Microsoft YaHei UI", "PingFang SC", system-ui, sans-serif;
-    font-size: var(--mainFontSize, 15px);
-    color: var(--nd-text);
-    line-height: 1.35;
+    box-sizing: border-box !important;
+    font-family: Aptos, "Microsoft YaHei UI", "PingFang SC", system-ui, sans-serif !important;
+    font-size: var(--nd-fs-base) !important;
+    color: var(--nd-text) !important;
+    line-height: 1.35 !important;
+}
+
+/* —— D61：原生控件全量硬化（写法对齐 components.css） —— */
+.nd-slot button,
+.nd-slot input,
+.nd-slot select,
+.nd-slot textarea {
+    box-sizing: border-box !important;
+    appearance: none !important;
+    -webkit-appearance: none !important;
+    font-family: inherit !important;
+}
+
+.nd-slot button {
+    font-size: inherit !important;
+    line-height: 1.2 !important;
+    color: var(--nd-text) !important;
+    background: var(--nd-surface-2) !important;
+    border: 1px solid var(--nd-line) !important;
+    border-radius: var(--nd-radius-sm) !important;
+    padding: 0 14px !important;
+    min-height: var(--nd-h) !important;
 }
 
 .nd-slot *,
 .nd-slot *::before,
 .nd-slot *::after {
-    box-sizing: border-box;
+    box-sizing: border-box !important;
 }
 
 /* 硬化：宿主 mes_text 内 button / img / p 全局规则 */
 .nd-slot .nd-slot__btn {
-    appearance: none;
-    -webkit-appearance: none;
+    appearance: none !important;
+    -webkit-appearance: none !important;
+    box-sizing: border-box !important;
     display: inline-flex;
     align-items: center;
     justify-content: center;
     align-self: flex-start;
-    height: var(--nd-h);
-    min-height: var(--nd-h);
+    height: var(--nd-h) !important;
+    min-height: var(--nd-h) !important;
     max-width: 100%;
     margin: 0;
-    padding: 0 14px;
-    border: 1px solid var(--nd-accent);
-    border-radius: var(--nd-control-radius);
-    background: var(--nd-accent);
-    color: var(--nd-on-accent);
-    font: inherit;
-    font-size: 0.8em;
+    padding: 0 14px !important;
+    border: 1px solid var(--nd-accent) !important;
+    border-radius: var(--nd-radius-sm) !important;
+    background: var(--nd-accent) !important;
+    color: var(--nd-on-accent) !important;
+    font-family: inherit !important;
+    font-size: var(--nd-fs-md) !important;
     font-weight: 700;
-    line-height: 1.2;
+    line-height: 1.2 !important;
     letter-spacing: normal;
     text-transform: none;
     text-decoration: none;
@@ -89,8 +154,8 @@
 }
 
 .nd-slot .nd-slot__btn:hover:not(:disabled) {
-    background: var(--nd-accent-deep);
-    border-color: var(--nd-accent-deep);
+    background: var(--nd-accent-deep) !important;
+    border-color: var(--nd-accent-deep) !important;
 }
 
 .nd-slot .nd-slot__btn:disabled {
@@ -105,23 +170,27 @@
 
 .nd-slot--done .nd-slot__btn,
 .nd-slot--error .nd-slot__btn {
-    background: var(--nd-surface-2);
-    border-color: var(--nd-line);
-    color: var(--nd-text);
+    background: var(--nd-surface-2) !important;
+    border-color: var(--nd-line) !important;
+    color: var(--nd-text) !important;
 }
 
 .nd-slot--done .nd-slot__btn:hover:not(:disabled),
 .nd-slot--error .nd-slot__btn:hover:not(:disabled) {
-    background: var(--nd-accent-wash);
-    border-color: var(--nd-line-strong);
+    background: var(--nd-accent-wash) !important;
+    border-color: var(--nd-line-strong) !important;
 }
 
 .nd-slot .nd-slot__status {
     margin: 0;
     padding: 0;
-    font-size: 0.73em;
-    color: var(--nd-muted);
-    min-height: 0;
+    font-size: var(--nd-fs-sm) !important;
+    font-family: inherit !important;
+    line-height: 1.35 !important;
+    color: var(--nd-muted) !important;
+    background: transparent !important;
+    border: 0 !important;
+    min-height: 0 !important;
 }
 
 .nd-slot .nd-slot__status:empty {
@@ -130,12 +199,13 @@
 
 .nd-slot .nd-slot__img {
     display: block;
-    width: 100%;
+    width: 100% !important;
     max-width: 100%;
     margin: 0;
-    padding: 0;
-    border: 0;
-    background: transparent;
+    padding: 0 !important;
+    border: 0 !important;
+    border-radius: 0 !important;
+    background: transparent !important;
     float: none;
     clear: both;
 }
@@ -144,48 +214,63 @@
     display: none;
 }
 
-.nd-slot .nd-slot__thumb {
+/* 出图跟楼层正文同宽：挡住宿主 border-radius:50% / filter / max-width */
+.nd-slot .nd-slot__thumb,
+.nd-slot img {
     display: block;
-    width: 100%;
-    max-width: min(100%, 28rem);
-    height: auto;
+    width: 100% !important;
+    max-width: 100% !important;
+    height: auto !important;
+    min-height: 0 !important;
     margin: 0;
-    padding: 0;
-    border: 1px solid var(--nd-line);
-    border-radius: var(--nd-control-radius);
-    background: var(--nd-surface);
-    object-fit: contain;
+    padding: 0 !important;
+    border: 1px solid var(--nd-line) !important;
+    border-radius: var(--nd-radius-sm) !important;
+    background: var(--nd-surface) !important;
+    object-fit: contain !important;
+    filter: none !important;
     cursor: zoom-in;
     float: none;
 }
 
 .nd-slot .nd-slot__error {
     margin: 0;
-    padding: 0.55em 0.7em;
-    border: 1px solid var(--nd-danger-ring);
-    border-radius: var(--nd-control-radius);
-    background: var(--nd-danger-wash);
-    color: var(--nd-danger);
-    font-size: 0.73em;
-    line-height: 1.4;
+    padding: 0.55em 0.7em !important;
+    border: 1px solid var(--nd-danger-ring) !important;
+    border-radius: var(--nd-radius-sm) !important;
+    background: var(--nd-danger-wash) !important;
+    color: var(--nd-danger) !important;
+    font-family: inherit !important;
+    font-size: var(--nd-fs-sm) !important;
+    line-height: 1.4 !important;
 }
 
 .nd-slot .nd-slot__error[hidden] {
-    display: none !important;
+    display: none;
 }
 
 .nd-slot .nd-slot__error-msg {
     margin: 0;
     padding: 0;
-    color: var(--nd-danger);
+    color: var(--nd-danger) !important;
+    font-family: inherit !important;
+    font-size: inherit !important;
     font-weight: 600;
+    line-height: inherit !important;
+    background: transparent !important;
+    border: 0 !important;
 }
 
 .nd-slot .nd-slot__error-trace {
     margin: 0.35em 0 0;
     padding: 0;
-    color: var(--nd-muted);
+    color: var(--nd-muted) !important;
+    font-family: inherit !important;
+    font-size: inherit !important;
     font-weight: 400;
+    line-height: inherit !important;
+    background: transparent !important;
+    border: 0 !important;
     word-break: break-all;
 }
 
@@ -193,28 +278,8 @@
 @container nd-slot (max-width: 220px) {
     .nd-slot .nd-slot__btn {
         align-self: stretch;
-        width: 100%;
+        width: 100% !important;
         white-space: normal;
     }
 }
 
-/* 查看器（弹窗内，通常在 .nd-root） */
-.nd-slot-viewer {
-    display: flex;
-    justify-content: center;
-    align-items: center;
-    width: 100%;
-    max-width: 100%;
-    padding: 0.5em;
-}
-
-.nd-slot-viewer__img {
-    display: block;
-    max-width: 100%;
-    max-height: min(80vh, 900px);
-    width: auto;
-    height: auto;
-    object-fit: contain;
-    margin: 0;
-    border-radius: var(--nd-control-radius, 10px);
-}

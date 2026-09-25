@@ -94,6 +94,26 @@ export function validationErr(code, message, context) {
 }
 
 /**
+ * schemaVersion 必须精确等于当前常量；不符即格式错误。
+ * @param {unknown} obj
+ * @param {number} expected
+ * @param {string} code
+ * @param {string} label 面向用户的实体名
+ * @returns {{ ok: false, error: import('./errors.js').AppError } | null} 通过返回 null
+ */
+export function schemaVersionMismatch(obj, expected, code, label) {
+    const actual = isPlainObject(obj) ? Number(obj.schemaVersion) : NaN;
+    if (actual === expected) {
+        return null;
+    }
+    return validationErr(
+        code,
+        `${label}格式版本不符（期望 v${expected}）`,
+        { schemaVersion: isPlainObject(obj) ? obj.schemaVersion : undefined, expected },
+    );
+}
+
+/**
  * 包装成功值（供 model 层统一风格）。
  * @template T
  * @param {T} value

@@ -8,6 +8,7 @@ import { emptyNaiCaption } from '../../src/domain/model/nai-params.js';
 import { createContextCollector } from '../../src/application/context-collector.js';
 import { createWorldInfoResolver } from '../../src/application/worldinfo-resolver.js';
 import { createTagRecallService } from '../../src/application/tag-recall.service.js';
+import { createViewpointBlocksBuilder } from '../../src/application/viewpoint-blocks.js';
 import { createGenerateSlotsUseCase } from '../../src/application/generate-slots.usecase.js';
 import { createImageGenService } from '../../src/application/image-gen.service.js';
 import { createRenderSlotUseCase } from '../../src/application/render-slot.usecase.js';
@@ -38,10 +39,9 @@ export function makeLlmConfig(id, name = id) {
         schemaVersion: 1,
         id,
         name,
-        baseUrl: 'https://example.test',
-        apiKey: 'k',
+        baseUrl: 'https://example.test/v1',
+        secretId: 'sec-test',
         model: 'm',
-        transport: 'direct',
     };
 }
 
@@ -62,9 +62,11 @@ export function makeArtist(id, positive = 'artist_pos', negative = 'artist_neg')
         schemaVersion: 1,
         id,
         name: id,
-        positive,
-        negative,
-        previewImageRef: null,
+        sequence: 0,
+        positivePrompt: positive,
+        negativePrompt: negative,
+        referenceImageRef: null,
+        cardImageRef: null,
         createdAt: 't0',
         updatedAt: 't0',
     };
@@ -108,7 +110,7 @@ export function createFakeHost(opts = {}) {
         {
             messageId: 2,
             name: 'Bot',
-            text: 'Alice walked into the garden.<IMG>\n9\n</IMG>',
+            text: 'Alice walked into the garden.',
             isUser: false,
             isSystem: false,
         },
@@ -144,11 +146,24 @@ export function createFakeHost(opts = {}) {
             for (const fn of chatListeners) fn(chatId);
         },
         getCurrentChatId: () => chatId,
-        getMessages: () => [...byId.values()],
+        getSessionId: () => opts.sessionId ?? `sess-${chatId}`,
+        getChatLocation: () => ({
+            chatFileName: chatId,
+            avatarUrl: opts.avatarUrl ?? 'char.png',
+            groupId: opts.groupId ?? null,
+        }),
+        getMessages: () => [...byId.values()].sort((a, b) => a.messageId - b.messageId),
         getRecentAiMessages: (n) => aiMessages.slice(0, n).map((m) => ({ ...m })),
         getMessage: (id) => {
             const m = byId.get(id);
             return m ? { ...m } : null;
+        },
+        getMessageSwipeTexts: (id) => {
+            if (opts.swipeTextsByMessageId && opts.swipeTextsByMessageId[id]) {
+                return [...opts.swipeTextsByMessageId[id]];
+            }
+            const m = byId.get(id);
+            return m ? [String(m.text ?? '')] : [];
         },
         replaceMessageText: async (id, text) => {
             if (opts.replaceFail) {
@@ -162,8 +177,6 @@ export function createFakeHost(opts = {}) {
             return Ok(undefined);
         },
         rerenderMessage: () => {},
-        readMessageExtra: () => ({}),
-        writeMessageExtra: async () => Ok(undefined),
         ensureSlotRegexInstalled: async () => Ok(undefined),
         onMessageDomReady: () => () => {},
         registerOutboundTransform: () => () => {},
@@ -184,6 +197,10 @@ export function createFakeHost(opts = {}) {
                 if (i >= 0) chatListeners.splice(i, 1);
             };
         },
+        onChatDeleted: () => () => {},
+        onGroupChatDeleted: () => () => {},
+        onChatRenamed: () => () => {},
+        listAliveChats: async () => Ok(opts.aliveChats ?? []),
         onAiMessageSettled: (fn) => {
             settledListeners.push(fn);
             return () => {
@@ -269,8 +286,15 @@ export function createFakeSlotRepo() {
     const repo = {
         failGet: false,
         failGetByMessage: false,
+        failListRetained: false,
         failPut: false,
         failRecordImageOnce: false,
+        listRetained: async () => {
+            if (repo.failListRetained) {
+                return Err(hostError({ code: 'LIST_RETAINED_FAIL', message: 'listRetained failed' }));
+            }
+            return Ok([...map.values()]);
+        },
         getByMessage: async (messageId) => {
             if (repo.failGetByMessage) {
                 return Err(hostError({ code: 'GET_BY_MSG_FAIL', message: 'getByMessage failed' }));
@@ -377,11 +401,15 @@ export function buildPipeline(overrides = {}) {
     const libraries = overrides.libraries ?? [
         {
             schemaVersion: 1, id: 'lib1', name: 'lib1', active: true,
-            createdAt: '', updatedAt: '',
+            kind: 'composition', createdAt: '', updatedAt: '',
         },
         {
             schemaVersion: 1, id: 'lib2', name: 'lib2', active: false,
-            createdAt: '', updatedAt: '',
+            kind: 'composition', createdAt: '', updatedAt: '',
+        },
+        {
+            schemaVersion: 1, id: 'lib-feat', name: 'lib-feat', active: true,
+            kind: 'feature', createdAt: '', updatedAt: '',
         },
     ];
     const tagEntries = overrides.tagEntries ?? [
@@ -395,11 +423,20 @@ export function buildPipeline(overrides = {}) {
             key: 'night', value: 'should-not-recall',
             createdAt: '', updatedAt: '',
         },
+        {
+            schemaVersion: 1, id: 't3', libraryId: 'lib-feat',
+            key: 'Alice', value: 'silver hair feature ref',
+            createdAt: '', updatedAt: '',
+        },
     ];
 
     const presetRepo = createMemoryRepo([
         makePreset('preset-recall', 'recall', 'ctx={{当前上下文}}\nkeys={{候选 key}}'),
-        makePreset('preset-imagegen', 'imagegen', 'W={{世界书}} C={{当前上下文}} R={{角色库}} T={{标签库}}'),
+        makePreset(
+            'preset-imagegen',
+            'imagegen',
+            'W={{世界书}} C={{当前上下文}} R={{角色库}} T={{构图标签}} F={{特征参考}} K={{常驻标签}} Recent={{近期生图记录}}',
+        ),
     ]);
     const llmConfigRepo = createMemoryRepo([
         makeLlmConfig('llm-recall'),
@@ -419,20 +456,24 @@ export function buildPipeline(overrides = {}) {
             if (overrides.llmComplete) {
                 return overrides.llmComplete(req, llmCalls.length);
             }
-            // 第 1 次召回 / 第 2 次提示词
+            // 第 1 次召回 / 第 2 次提示词（需求 4.11 / §5）
             if (req.config.id === 'llm-recall') {
-                return Ok({ text: '["garden"]', json: ['garden'] });
+                const positions = [{
+                    生成点: 'Alice walked into the garden.',
+                    key: ['1'],
+                }];
+                return Ok({ text: JSON.stringify(positions), json: positions });
             }
             return Ok({
                 text: '[]',
                 json: [{
                     slotid: 1,
-                    生成点: 'Alice walked into the garden.',
                     生图内容: makeCaption('a garden scene'),
                 }],
             });
         },
-        probe: async () => ({ ok: true, transport: 'direct', decoder: 'json' }),
+        probe: async () => ({ ok: true, transport: 'st-backend', decoder: 'json' }),
+        listModels: async () => Ok({ models: ['m'], count: 1 }),
     };
 
     /** @type {any[]} */
@@ -457,6 +498,9 @@ export function buildPipeline(overrides = {}) {
 
     const contextCollector = createContextCollector({ host, loadSettings });
     const worldInfoResolver = createWorldInfoResolver({ host });
+    const viewpointBlocks = createViewpointBlocksBuilder({
+        host, characterRepo, tagRepo, contextCollector, worldInfoResolver, loadSettings,
+    });
     const tagRecall = createTagRecallService({
         llm, tagRepo, presetRepo, llmConfigRepo, loadSettings, runHostMacros,
     });
@@ -465,7 +509,7 @@ export function buildPipeline(overrides = {}) {
     });
     const generateSlots = createGenerateSlotsUseCase({
         host, llm, characterRepo, tagRepo, presetRepo, slotRepo, llmConfigRepo,
-        contextCollector, worldInfoResolver, tagRecall, bus,
+        contextCollector, worldInfoResolver, viewpointBlocks, tagRecall, bus,
         loadSettings, runHostMacros,
         newId: () => 'id-1',
         nowIso,
@@ -475,7 +519,13 @@ export function buildPipeline(overrides = {}) {
         imageGen, slotRepo, imageRepo, host, bus, nowIso, newTraceId,
     });
     const artistPreview = createArtistPreviewService({
-        imageGen, artistRepo, imageRepo,
+        imageGen,
+        artistRepo,
+        savePreviewPair: async (_artistId, _refBlob, _cardBlob, _oldRefs) => Ok({
+            referenceImageRef: 'preview-ref-test',
+            cardImageRef: 'preview-card-test',
+        }),
+        makeCardImage: async (blob) => blob,
     });
     const workbench = createWorkbenchService({
         llm, imageGen, characterRepo, tagRepo, presetRepo, llmConfigRepo,
@@ -518,6 +568,7 @@ export function buildPipeline(overrides = {}) {
         artistRepo,
         contextCollector,
         worldInfoResolver,
+        viewpointBlocks,
         tagRecall,
         imageGen,
         generateSlots,

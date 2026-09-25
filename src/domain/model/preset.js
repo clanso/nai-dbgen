@@ -8,6 +8,7 @@ import {
     isNonEmptyString,
     isPlainObject,
     requireArg,
+    schemaVersionMismatch,
     validationErr,
     validationOk,
 } from '../../infra/validate.js';
@@ -33,16 +34,40 @@ export const PRESET_SCHEMA_VERSION = 1;
  */
 
 /**
+ * 预设类型（需求 4.4 / 4.11 / 4.16）。
+ * @typedef {'imagegen'|'recall'|'single-recall'|'single-imagegen'} PresetKind
+ */
+
+/**
  * @typedef {object} Preset
  * @property {number} schemaVersion
  * @property {string} id
  * @property {string} name
- * @property {'imagegen'|'recall'} kind
+ * @property {PresetKind} kind
  * @property {PresetPrompt[]} prompts
  * @property {PresetOrderItem[]} prompt_order 单角色场景扁平化（基线 §10 的 order 数组）
  * @property {string} createdAt
  * @property {string} updatedAt
  */
+
+/** @type {ReadonlySet<PresetKind>} */
+const PRESET_KINDS = Object.freeze(new Set([
+    'imagegen',
+    'recall',
+    'single-recall',
+    'single-imagegen',
+]));
+
+/**
+ * @param {unknown} raw
+ * @returns {PresetKind}
+ */
+export function normalizePresetKind(raw) {
+    if (typeof raw === 'string' && PRESET_KINDS.has(/** @type {PresetKind} */ (raw))) {
+        return /** @type {PresetKind} */ (raw);
+    }
+    return 'imagegen';
+}
 
 /**
  * @typedef {{ id: string, now: string }} IdNowDeps
@@ -56,12 +81,11 @@ export const PRESET_SCHEMA_VERSION = 1;
 export function createPreset(input, deps) {
     requireArg(isPlainObject(input), 'input');
     requireArg(deps && isNonEmptyString(deps.id) && isNonEmptyString(deps.now), 'deps');
-    const kind = input.kind === 'recall' ? 'recall' : 'imagegen';
     return {
         schemaVersion: PRESET_SCHEMA_VERSION,
         id: deps.id,
         name: String(input.name ?? ''),
-        kind,
+        kind: normalizePresetKind(input.kind),
         prompts: normalizePrompts(input.prompts),
         prompt_order: normalizePromptOrder(input.prompt_order, input.prompts),
         createdAt: deps.now,
@@ -70,9 +94,9 @@ export function createPreset(input, deps) {
 }
 
 /**
- * 从酒馆预设 JSON 抽取可迁移内核：只取 prompts + prompt_order[].order，丢弃连接/采样键。
+ * 从酒馆预设 JSON 抽取可导入内核：只取 prompts + prompt_order[].order，丢弃连接/采样键。
  * @param {object} stJson
- * @param {{ kind?: 'imagegen'|'recall', name?: string }} [opts]
+ * @param {{ kind?: PresetKind, name?: string }} [opts]
  * @param {IdNowDeps} deps
  * @returns {{ ok: true, value: Preset } | { ok: false, error: import('../../infra/errors.js').AppError }}
  */
@@ -96,7 +120,7 @@ export function importFromSillyTavernPreset(stJson, opts, deps) {
     }
     const preset = createPreset({
         name: opts?.name ?? String(stJson.name ?? '导入预设'),
-        kind: opts?.kind === 'recall' ? 'recall' : 'imagegen',
+        kind: normalizePresetKind(opts?.kind),
         prompts: stJson.prompts,
         prompt_order: order,
     }, deps);
@@ -156,33 +180,27 @@ export function validatePreset(obj) {
     if (!isNonEmptyString(obj.name)) {
         return validationErr('PRESET_NAME', '请填写预设名称');
     }
-    if (obj.kind !== 'imagegen' && obj.kind !== 'recall') {
-        return validationErr('PRESET_KIND', '预设类型必须是 imagegen 或 recall');
+    if (!PRESET_KINDS.has(/** @type {PresetKind} */ (obj.kind))) {
+        return validationErr(
+            'PRESET_KIND',
+            '预设类型必须是 imagegen、recall、single-recall 或 single-imagegen',
+        );
     }
     if (!Array.isArray(obj.prompts)) {
         return validationErr('PRESET_PROMPTS', '预设 prompts 必须是数组');
     }
+    const ver = schemaVersionMismatch(obj, PRESET_SCHEMA_VERSION, 'PRESET_SCHEMA', '预设');
+    if (ver) {
+        return ver;
+    }
     return validationOk(/** @type {Preset} */ ({
-        schemaVersion: Number(obj.schemaVersion) || PRESET_SCHEMA_VERSION,
+        schemaVersion: PRESET_SCHEMA_VERSION,
         id: String(obj.id),
         name: String(obj.name),
-        kind: obj.kind,
+        kind: /** @type {PresetKind} */ (obj.kind),
         prompts: normalizePrompts(obj.prompts),
         prompt_order: normalizePromptOrder(obj.prompt_order, obj.prompts),
         createdAt: String(obj.createdAt ?? ''),
         updatedAt: String(obj.updatedAt ?? ''),
     }));
-}
-
-/**
- * @param {object} obj
- * @param {number} fromVersion
- * @returns {{ ok: true, value: object } | { ok: false, error: import('../../infra/errors.js').AppError }}
- */
-export function migratePreset(obj, fromVersion) {
-    requireArg(isPlainObject(obj), 'obj');
-    return validatePreset({
-        ...obj,
-        schemaVersion: PRESET_SCHEMA_VERSION,
-    });
 }

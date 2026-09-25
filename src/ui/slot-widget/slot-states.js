@@ -9,13 +9,19 @@
 
 import { t } from '../i18n/zh-CN.js';
 
-/** @typedef {'idle'|'generating'|'done'|'error'} SlotUiState */
+/** @typedef {'idle'|'generating'|'done'|'error'|'beyond_retain'|'load_error'} SlotUiState */
 
 /**
  * @typedef {object} SlotRuntimeSnapshot
  * @property {'generating'|'error'|null|undefined} [status]
  * @property {unknown} [error]
  * @property {string|null|undefined} [traceId]
+ * @property {boolean} [beyondRetain]
+ * @property {boolean} [hasCachedImage]
+ * @property {boolean} [cacheMissing]
+ *   记录里有 imageRef 但浏览器缓存已不在 → 按未生图（可再出）。
+ * @property {boolean} [loadError]
+ * @property {string|null|undefined} [loadErrorMessage]
  */
 
 /**
@@ -28,6 +34,7 @@ import { t } from '../i18n/zh-CN.js';
  * @property {boolean} showError
  * @property {string} errorMessage
  * @property {string} traceId
+ * @property {boolean} [canClick]
  */
 
 /**
@@ -178,6 +185,10 @@ export function slotStateClass(state) {
             return 'nd-slot--done';
         case 'error':
             return 'nd-slot--error';
+        case 'beyond_retain':
+            return 'nd-slot--beyond';
+        case 'load_error':
+            return 'nd-slot--error';
         case 'idle':
         default:
             return 'nd-slot--idle';
@@ -196,6 +207,10 @@ export function slotButtonLabel(state) {
             return t('slot.regenerate');
         case 'error':
             return '重试';
+        case 'beyond_retain':
+            return '已超出保留范围';
+        case 'load_error':
+            return '记录加载失败';
         case 'idle':
         default:
             return t('slot.generate');
@@ -211,31 +226,53 @@ export function deriveSlotUiView(record, runtime) {
     /** @type {SlotUiState} */
     let state = 'idle';
 
-    if (runtime && runtime.status === 'generating') {
+    if (runtime && runtime.loadError) {
+        state = 'load_error';
+    } else if (runtime && runtime.status === 'generating') {
         state = 'generating';
     } else if (runtime && runtime.status === 'error' && shouldTreatAsError(runtime.error)) {
         state = 'error';
-    } else if (recordHasImage(record)) {
+    } else if (recordHasImage(record) && runtime?.cacheMissing !== true) {
         state = 'done';
+    } else if (runtime && runtime.beyondRetain) {
+        // 有缓存图照常显示，但不可再出图（需求 4.17）
+        state = 'beyond_retain';
     } else {
         state = 'idle';
     }
 
     const errSrc = runtime && runtime.status === 'error' ? runtime.error : null;
-    const errorMessage = state === 'error' ? slotErrorMessage(errSrc) : '';
+    let errorMessage = state === 'error' ? slotErrorMessage(errSrc) : '';
+    if (state === 'load_error') {
+        errorMessage = runtime?.loadErrorMessage
+            ? String(runtime.loadErrorMessage)
+            : '生图记录加载失败，请刷新后重试';
+    }
+    if (state === 'beyond_retain') {
+        errorMessage = runtime?.hasCachedImage
+            ? '已超出保留范围，仅可查看已出的图'
+            : '已超出保留范围';
+    }
     const traceId = state === 'error'
         ? slotErrorTraceId(errSrc, runtime?.traceId)
         : '';
+
+    const canClick = state !== 'beyond_retain'
+        && state !== 'load_error'
+        && state !== 'generating';
 
     return {
         state,
         buttonLabel: slotButtonLabel(state),
         stateClass: slotStateClass(state),
         busy: state === 'generating',
-        showImage: state === 'done' || state === 'generating',
-        showError: state === 'error',
+        showImage: state === 'done' || state === 'generating'
+            || (state === 'beyond_retain' && runtime?.hasCachedImage === true),
+        showError: state === 'error' || state === 'load_error' || state === 'beyond_retain',
         errorMessage,
         traceId,
+        /** @type {boolean} */
+        canClick,
     };
 }
 

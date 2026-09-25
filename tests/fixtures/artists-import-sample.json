@@ -1,0 +1,28 @@
+[
+  {
+    "name": "fixture-alpha",
+    "sequence": 10,
+    "positivePrompt": "1.35::artist_alpha::, year_2024",
+    "negativePrompt": "lowres, blurry",
+    "referenceImage": "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==",
+    "thumbnail": "data:image/webp;base64,UklGRiQAAABXRUJQVlA4IBgAAAAwAQCdASoBAAEAAwA0JaQAA3AA/vuUAAA="
+  },
+  {
+    "name": "fixture-beta",
+    "sequence": 20,
+    "positivePrompt": "artist_beta, {fine_lineart}",
+    "negativePrompt": "worst quality",
+    "referenceImage": "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==",
+    "thumbnail": "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==",
+    "extraJunk": 123,
+    "legacyField": "ignored"
+  },
+  {
+    "name": "fixture-gamma-null-image",
+    "sequence": 5,
+    "positivePrompt": "artist_gamma\nwith newline",
+    "negativePrompt": "bad",
+    "referenceImage": null,
+    "thumbnail": null
+  }
+]

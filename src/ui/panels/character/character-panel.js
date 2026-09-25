@@ -4,8 +4,12 @@
  */
 
 import { createLibraryToolbar } from '../../common/library-chrome.js';
-import { createButton, createField, createToggle, createCheckbox, createFieldGroup, createInlineError } from '../../common/controls.js';
-import { mountNestedList } from '../../common/nested-list.js';
+import { createButton, createMiniAction, createField, createToggle, createCheckbox, createFieldGroup, createInlineError } from '../../common/controls.js';
+import {
+    mountNestedList,
+    paintNestedChildTexts,
+    NESTED_CHILD_ROW_HEIGHT,
+} from '../../common/nested-list.js';
 import { createStore } from '../../common/store.js';
 import {
     createCharacter,
@@ -97,45 +101,43 @@ export function mountCharacterPanel(root, deps) {
             isParentEnabled: (p) => p.active !== false,
             onParentEnabledChange: (parent, enabled) => void toggleGroup(parent, enabled),
             renderParentMeta: (parent, metaEl) => {
-                const add = createButton({
+                const add = createMiniAction({
                     label: '＋角色',
-                    variant: 'ghost',
                     onClick: () => void openCharacterEditor(null, String(parent.id)),
                 });
-                const edit = createButton({
+                const edit = createMiniAction({
                     label: '编辑组',
-                    variant: 'text',
                     onClick: () => void openGroupEditor(parent),
                 });
-                const del = createButton({
+                const del = createMiniAction({
                     label: '删除组',
-                    variant: 'danger',
+                    danger: true,
                     onClick: () => void removeGroup(parent),
                 });
                 metaEl.append(add, edit, del);
             },
             renderChild: (child, row) => {
-                const name = el('strong');
-                setText(name, String(child.name ?? ''));
-                const kw = el('span', 'nd-muted');
-                setText(kw, (child.keywords || []).join(', '));
+                paintNestedChildTexts(row, {
+                    primary: String(child.name ?? ''),
+                    secondary: (child.keywords || []).join(', '),
+                });
                 const actions = el('div', 'nd-row-actions');
                 actions.append(
-                    createButton({
+                    createMiniAction({
                         label: '编辑',
-                        variant: 'text',
                         onClick: () => void openCharacterEditor(child, String(child.groupId)),
                     }),
-                    createButton({
+                    createMiniAction({
                         label: '删除',
-                        variant: 'danger',
+                        danger: true,
                         onClick: () => void removeCharacter(child),
                     }),
                 );
-                row.append(name, kw, actions);
+                row.append(actions);
             },
             virtualizeChildren: true,
             virtualThreshold: 48,
+            childRowHeight: NESTED_CHILD_ROW_HEIGHT,
         });
     }
 
@@ -185,7 +187,7 @@ export function mountCharacterPanel(root, deps) {
             value: group?.name ?? '',
         });
         const activeToggle = createToggle({
-            label: '激活（未激活组不参与关键字计算）',
+            label: '激活',
             checked: group ? group.active !== false : true,
         });
         const form = el('div', 'nd-form');
@@ -232,14 +234,14 @@ export function mountCharacterPanel(root, deps) {
      * @param {string} groupId
      */
     async function openCharacterEditor(character, groupId) {
-        const nameField = createField({ label: '名称（注入标题，不参与匹配）', value: character?.name ?? '' });
+        const nameField = createField({ label: '名称', value: character?.name ?? '' });
         const kwField = createField({
-            label: '关键字（英文逗号分隔；/regex/flags 整段保留）',
+            label: '关键字',
             value: Array.isArray(character?.keywords)
                 ? character.keywords.join(', ')
                 : '',
         });
-        const dna = labeledTextarea('固定特征（DNA）', character?.fixedFeatures ?? '', 5);
+        const dna = labeledTextarea('固定特征', character?.fixedFeatures ?? '', 5);
         /** @type {object[]} */
         let varFeatures = Array.isArray(character?.variableFeatures)
             ? character.variableFeatures.map((v) => ({ ...v }))
@@ -296,15 +298,15 @@ export function mountCharacterPanel(root, deps) {
         paintVars();
 
         const overrideCase = createCheckbox({
-            label: '覆盖：区分大小写',
+            label: '区分大小写',
             checked: character?.matchOverrides?.caseSensitive === true,
         });
         const overrideWhole = createCheckbox({
-            label: '覆盖：全词匹配',
+            label: '全词匹配',
             checked: character?.matchOverrides?.matchWholeWords === true,
         });
         const useOverride = createCheckbox({
-            label: '为本角色单独覆盖匹配规则',
+            label: '单独设置匹配规则',
             checked: Boolean(character?.matchOverrides),
         });
 
@@ -374,8 +376,11 @@ export function mountCharacterPanel(root, deps) {
             deps,
             '导入角色库',
             'character',
-            async (data, strategy) => {
-                const r = await repo.importJson(data, { strategy });
+            async (data, strategy, progress) => {
+                const r = await repo.importJson(data, {
+                    strategy,
+                    onProgress: progress?.onProgress,
+                });
                 if (!r.ok) throw new Error(r.error?.message || '导入失败');
                 return r.value;
             },

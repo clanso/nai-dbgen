@@ -1,12 +1,12 @@
 /**
- * L5 UI · slot 图片查看器（宿主 Popup / openModal）。
- * 归属：W2-G。
+ * L5 UI · 图片查看器（宿主 Popup / openModal）。
+ * 归属：W1-E 公共组件（原 slot-widget，供面板/控件共用）。
  *
  * 凡写 img.src 必须过 safeImageUrl（D24）。
  */
 
-import { safeImageUrl } from '../common/safe-url.js';
-import { openModal } from '../common/modal.js';
+import { safeImageUrl } from './safe-url.js';
+import { openModal } from './modal.js';
 import { t } from '../i18n/zh-CN.js';
 
 /**

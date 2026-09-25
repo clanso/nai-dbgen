@@ -41,6 +41,22 @@ describe('ui/panels library-logic', () => {
         assert.ok(hit.some((i) => i.name === 'Beta'));
     });
 
+    it('sorts by sequence asc/desc', () => {
+        const items = [
+            { id: 'a', name: '后', sequence: 3 },
+            { id: 'b', name: '先', sequence: 1 },
+            { id: 'c', name: '中', sequence: 2 },
+        ];
+        assert.deepEqual(
+            filterSortItems(items, { sort: 'sequence-asc' }).map((i) => i.id),
+            ['b', 'c', 'a'],
+        );
+        assert.deepEqual(
+            filterSortItems(items, { sort: 'sequence-desc' }).map((i) => i.id),
+            ['a', 'c', 'b'],
+        );
+    });
+
     it('filters nested character/tag libraries together', () => {
         const parents = [
             { id: 'g1', name: '组甲', active: true, order: 1 },
@@ -61,15 +77,15 @@ describe('ui/panels library-logic', () => {
     });
 
     it('export → import round-trip keeps payload', () => {
-        const envelope = {
-            kind: 'artist',
-            schemaVersion: 1,
-            items: [
-                { id: 'a1', name: '串A', positive: 'artist1', negative: 'bad' },
-            ],
-        };
-        const back = roundTripJson(envelope);
-        assert.deepEqual(back, envelope);
+        const payload = [{
+            name: '串A',
+            sequence: 1,
+            positivePrompt: 'artist1',
+            negativePrompt: 'bad',
+            referenceImage: null,
+        }];
+        const back = roundTripJson(payload);
+        assert.deepEqual(back, payload);
         const prepared = prepareImportCommit(back, 'artist');
         assert.equal(prepared.ok, true);
         assert.equal(prepared.value.rows.length, 1);
@@ -100,11 +116,11 @@ describe('ui/panels library-logic', () => {
         assert.match(prepared.error, /类型不匹配/);
     });
 
-    it('D49: rejects bare arrays and envelopes without kind', () => {
-        assert.equal(assertImportKind([{ id: '1' }], 'artist').ok, false);
-        assert.equal(prepareImportCommit([{ id: '1', name: 'x' }], 'artist').ok, false);
-        assert.equal(assertImportKind({ items: [{ id: '1' }] }, 'artist').ok, false);
-        assert.match(assertImportKind({ items: [] }, 'artist').error, /缺少 kind/);
+    it('D49: artist 允许裸数组；其它 kind 拒绝无 kind 信封', () => {
+        assert.equal(assertImportKind([{ id: '1' }], 'artist').ok, true);
+        assert.equal(prepareImportCommit([{ id: '1', name: 'x' }], 'artist').ok, true);
+        assert.equal(assertImportKind({ items: [{ id: '1' }] }, 'character').ok, false);
+        assert.match(assertImportKind({ items: [] }, 'character').error, /缺少 kind/);
     });
 
     it('blocks malicious cover URLs', () => {
@@ -117,7 +133,7 @@ describe('ui/panels library-logic', () => {
     });
 
     it('artist preview uses editing row, never reads or writes activeArtistId', () => {
-        const editing = { id: 'edit-9', name: '正在编辑', positive: 'a', negative: 'b' };
+        const editing = { id: 'edit-9', name: '正在编辑', positivePrompt: 'a', negativePrompt: 'b' };
         const settings = { activeArtistId: 'global-active-1' };
         const req = buildArtistPreviewRequest(editing, {
             promptText: 'girl',
@@ -138,6 +154,7 @@ describe('ui/panels library-logic', () => {
         assert.ok(keys.has('activeArtistId'));
         assert.ok(keys.has('recallLlmConfigId'));
         assert.ok(keys.has('naiParams'));
+        assert.ok(keys.has('imageCacheLimit'));
         assert.equal(keys.has('myCustomKey'), false);
 
         const patch = pickAllowedSettingsPatch({
@@ -198,23 +215,23 @@ describe('ui/panels library-logic', () => {
 
         // 画师
         const artist = {
-            id: 'a1', name: 'A', positive: 'p', negative: 'n',
-            previewImageRef: 'img-9', schemaVersion: 1, createdAt: 't0',
+            id: 'a1', name: 'A', positivePrompt: 'p', negativePrompt: 'n',
+            referenceImageRef: 'img-9', schemaVersion: 1, createdAt: 't0',
         };
         const artistSaved = applyFormFields(artist, {
-            name: 'B', positive: 'p2', updatedAt: 't1',
+            name: 'B', positivePrompt: 'p2', updatedAt: 't1',
         });
-        assert.equal(artistSaved.previewImageRef, 'img-9');
-        assert.equal(artistSaved.negative, 'n');
+        assert.equal(artistSaved.referenceImageRef, 'img-9');
+        assert.equal(artistSaved.negativePrompt, 'n');
 
         // API
         const llm = {
-            id: 'l1', name: 'L', baseUrl: 'u', apiKey: 'k', model: 'm',
-            transport: 'st-backend', schemaVersion: 1, createdAt: 't0', vendorHint: 'x',
+            id: 'l1', name: 'L', baseUrl: 'u', secretId: 'sec', model: 'm',
+            schemaVersion: 1, createdAt: 't0', vendorHint: 'x',
         };
         const llmSaved = applyFormFields(llm, { name: 'L2', model: 'm2', updatedAt: 't1' });
         assert.equal(llmSaved.vendorHint, 'x');
-        assert.equal(llmSaved.transport, 'st-backend');
+        assert.equal(llmSaved.secretId, 'sec');
 
         // 预设 injection_* 往返
         const prompt = {
@@ -287,13 +304,19 @@ describe('ui/panels library-logic', () => {
         const keys = new Set(PLUGIN_SETTINGS_KEYS);
         assert.ok(keys.has('activeImagegenPresetId'));
         assert.ok(keys.has('activeRecallPresetId'));
+        assert.ok(keys.has('activeSingleRecallPresetId'));
+        assert.ok(keys.has('activeSingleImagegenPresetId'));
         const patch = pickAllowedSettingsPatch({
             activeImagegenPresetId: 'ig-1',
             activeRecallPresetId: 'rc-1',
+            activeSingleRecallPresetId: 'sr-1',
+            activeSingleImagegenPresetId: 'si-1',
             fakePresetId: 'nope',
         });
         assert.equal(patch.activeImagegenPresetId, 'ig-1');
         assert.equal(patch.activeRecallPresetId, 'rc-1');
+        assert.equal(patch.activeSingleRecallPresetId, 'sr-1');
+        assert.equal(patch.activeSingleImagegenPresetId, 'si-1');
         assert.equal(patch.fakePresetId, undefined);
     });
 
@@ -385,7 +408,7 @@ describe('ui/panels runExclusivePaidAction (D55)', () => {
 
     it('preview busy: second submit does not start; NAI called once; restores after fail', async () => {
         const btn = document.createElement('button');
-        btn.textContent = '手填预览生图';
+        btn.textContent = '预览出图';
         document.body.appendChild(btn);
 
         let naiCalls = 0;
@@ -397,8 +420,8 @@ describe('ui/panels runExclusivePaidAction (D55)', () => {
 
         const first = runExclusivePaidAction({
             button: btn,
-            idleLabel: '手填预览生图',
-            busyLabel: '预览生成中…',
+            idleLabel: '预览出图',
+            busyLabel: '出图中…',
             run: async () => {
                 naiCalls += 1;
                 await gate;
@@ -409,15 +432,15 @@ describe('ui/panels runExclusivePaidAction (D55)', () => {
         // 进行中再点
         const second = await runExclusivePaidAction({
             button: btn,
-            idleLabel: '手填预览生图',
-            busyLabel: '预览生成中…',
+            idleLabel: '预览出图',
+            busyLabel: '出图中…',
             run: async () => {
                 naiCalls += 1;
             },
         });
         assert.equal(second.started, false);
         assert.equal(btn.disabled, true);
-        assert.equal(btn.textContent, '预览生成中…');
+        assert.equal(btn.textContent, '出图中…');
         assert.equal(btn.dataset.ndBusy, '1');
 
         release();
@@ -431,14 +454,14 @@ describe('ui/panels runExclusivePaidAction (D55)', () => {
         assert.equal(naiCalls, 1);
         // 失败后恢复可点
         assert.equal(btn.disabled, false);
-        assert.equal(btn.textContent, '手填预览生图');
+        assert.equal(btn.textContent, '预览出图');
         assert.equal(btn.dataset.ndBusy, '0');
 
         // 恢复后可以再点
         const third = await runExclusivePaidAction({
             button: btn,
-            idleLabel: '手填预览生图',
-            busyLabel: '预览生成中…',
+            idleLabel: '预览出图',
+            busyLabel: '出图中…',
             run: async () => {
                 naiCalls += 1;
                 return 'ok';

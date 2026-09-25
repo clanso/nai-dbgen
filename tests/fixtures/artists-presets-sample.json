@@ -1,0 +1,10 @@
+{
+  "presets": {
+    "监狱学园（去汗水油腻）": {
+      "fixedPrompt": "5::best quality, absurdres, very aesthetic, detailed, masterpiece::,\n1.6::hiramoto akira (style), prison school style, heavy shading, dramatic shadows, intense expression::,\n1.2::misaka12003-gou ::, 0.8::dino(dinoartforame), wanke, liduke ::, year 2025, realistic, 4k,\n1.4::photorealistic::, 1.4::photo(medium)::, \n1.3::slightly shiny skin, glossy skin finish, detailed skin texture::,\nvery aesthetic, masterpiece, no text",
+      "fixedPrompt_end": "",
+      "negativePrompt": "3::3D ::,\n1.5::multiple views::,\n1.6::worst quality::, \n1.6::low quality::, \n1.6::normal quality::, \n1.6::CGI render::, \n1.6::malformed hands::, \n1.6::fused fingers::, \n1.6::extra joints::, \n1.6::Blush line::,\n1.5::poor topology::, \n1.5::non-manifold geometry::, \n1.5::mesh distortion::, \n1.5::rigging error::,\n1.5::ray tracing artifact::, \n1.5::denoising failure::, \n1.5::subsurface scattering error::, \n1.5::specular aliasing::, \n1.5::z-fighting::, \n1.5::UV stretching::,\n1.6::cartoon::, \n1.6::Disney style::, \n1.6::Pixar style::, \n1.6::cel-shaded::, \n1.6::vector art::,\n1.5::plastic skin::, \n1.5::wax figure::, \n1.5::clay render::, \n1.5::oversaturated::, \n1.5::overexposed::, \n1.5::specular overflow::, \n1.5::PBR error::,\n3.5::watermark::, \n3.6::signature::, \n1.6::text::, \n1.6::username::, \n1.6::frame border::,\n1.5::motion blur::, \n1.5::chromatic aberration::, \n1.5::lens flare artifact::, \n1.5::vignetting::,\n1.5::facial asymmetry::, \n1.5::iris deformation::, \n1.5::disproportional philtrum::, \n1.5::elf ear::, \n1.5::doll joint::"
+    }
+  },
+  "images": {}
+}

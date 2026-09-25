@@ -8,6 +8,7 @@ import {
     isNonEmptyString,
     isPlainObject,
     requireArg,
+    schemaVersionMismatch,
     validationErr,
     validationOk,
 } from '../../infra/validate.js';
@@ -211,8 +212,12 @@ export function validateCharacterGroup(obj) {
     if (typeof obj.active !== 'boolean') {
         return validationErr('CHAR_GROUP_ACTIVE', '角色组激活开关无效');
     }
+    const ver = schemaVersionMismatch(obj, CHARACTER_SCHEMA_VERSION, 'CHAR_GROUP_SCHEMA', '角色组');
+    if (ver) {
+        return ver;
+    }
     return validationOk(/** @type {CharacterGroup} */ ({
-        schemaVersion: Number(obj.schemaVersion) || CHARACTER_SCHEMA_VERSION,
+        schemaVersion: CHARACTER_SCHEMA_VERSION,
         id: String(obj.id),
         name: String(obj.name),
         active: obj.active,
@@ -247,8 +252,12 @@ export function validateCharacter(obj) {
     if (!isArrayOf(obj.variableFeatures ?? [], (x) => isPlainObject(x)) && obj.variableFeatures != null) {
         return validationErr('CHAR_VAR', '非固定特征格式无效');
     }
+    const ver = schemaVersionMismatch(obj, CHARACTER_SCHEMA_VERSION, 'CHAR_SCHEMA', '角色');
+    if (ver) {
+        return ver;
+    }
     return validationOk(/** @type {Character} */ ({
-        schemaVersion: Number(obj.schemaVersion) || CHARACTER_SCHEMA_VERSION,
+        schemaVersion: CHARACTER_SCHEMA_VERSION,
         id: String(obj.id),
         groupId: String(obj.groupId),
         name: String(obj.name),
@@ -259,37 +268,4 @@ export function validateCharacter(obj) {
         createdAt: String(obj.createdAt ?? ''),
         updatedAt: String(obj.updatedAt ?? ''),
     }));
-}
-
-/**
- * @param {object} obj
- * @param {number} fromVersion
- * @returns {{ ok: true, value: object } | { ok: false, error: import('../../infra/errors.js').AppError }}
- */
-export function migrateCharacter(obj, fromVersion) {
-    requireArg(isPlainObject(obj), 'obj');
-    if (fromVersion >= CHARACTER_SCHEMA_VERSION) {
-        return validationOk({ ...obj, schemaVersion: CHARACTER_SCHEMA_VERSION });
-    }
-    return validationOk({
-        ...obj,
-        schemaVersion: CHARACTER_SCHEMA_VERSION,
-        keywords: normalizeKeywords(obj.keywords),
-        variableFeatures: normalizeVariableFeatures(obj.variableFeatures),
-        matchOverrides: normalizeMatchOverrides(obj.matchOverrides),
-    });
-}
-
-/**
- * @param {object} obj
- * @param {number} fromVersion
- * @returns {{ ok: true, value: object } | { ok: false, error: import('../../infra/errors.js').AppError }}
- */
-export function migrateCharacterGroup(obj, fromVersion) {
-    requireArg(isPlainObject(obj), 'obj');
-    return validationOk({
-        ...obj,
-        schemaVersion: CHARACTER_SCHEMA_VERSION,
-        active: obj.active !== false,
-    });
 }

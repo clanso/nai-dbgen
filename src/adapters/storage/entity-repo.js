@@ -3,6 +3,7 @@
  */
 
 import { Ok, Err } from '../../infra/result.js';
+import { yieldMain } from '../../infra/yield-main.js';
 import { configError } from '../../infra/errors.js';
 import { mapIdbError } from './idb.js';
 import {
@@ -21,7 +22,6 @@ import {
  * @param {string} args.kind
  * @param {number} args.schemaVersion
  * @param {(obj: unknown) => { ok: true, value: T } | { ok: false, error: import('../../infra/errors.js').AppError }} args.validate
- * @param {(obj: object, fromVersion: number) => { ok: true, value: object } | { ok: false, error: import('../../infra/errors.js').AppError }} args.migrate
  * @param {string} [args.idPrefix]
  * @param {(entity: T) => boolean} [args.filter]
  * @returns {import('../../ports/repository.port.js').Repository<T>}
@@ -33,7 +33,6 @@ export function createEntityRepo(args) {
         kind,
         schemaVersion,
         validate,
-        migrate,
         idPrefix = 'ent',
         filter,
     } = args;
@@ -150,19 +149,32 @@ export function createEntityRepo(args) {
             let skipped = 0;
             /** @type {string[]} */
             const errors = [];
+            const total = itemsIn.length;
+            let done = 0;
+            let lastYieldAt = 0;
+            /** @type {any[]} */
+            const puts = [];
 
             try {
                 const existing = normalizeList(await db.getAll(storeName));
                 const byId = new Map(existing.map((e) => [e.id, e]));
 
                 for (const raw of itemsIn) {
-                    const fromVersion = Number(raw?.schemaVersion) || parsed.value.schemaVersion;
-                    const migrated = migrate(raw, fromVersion);
-                    if (!migrated.ok) {
-                        errors.push(migrated.error.message);
-                        continue;
+                    done += 1;
+                    if (typeof opts?.onProgress === 'function') {
+                        const name = raw && typeof raw === 'object'
+                            ? String(raw.name || raw.id || '')
+                            : '';
+                        opts.onProgress({ index: done, total: total || 1, name });
                     }
-                    const validated = validate(migrated.value);
+                    const now = typeof performance !== 'undefined' && performance.now
+                        ? performance.now()
+                        : Date.now();
+                    if (now - lastYieldAt >= 32 || done === 1 || done === total) {
+                        lastYieldAt = now;
+                        await yieldMain();
+                    }
+                    const validated = validate(raw);
                     if (!validated.ok) {
                         errors.push(validated.error.message);
                         continue;
@@ -181,9 +193,23 @@ export function createEntityRepo(args) {
                         skipped += 1;
                         continue;
                     }
-                    await db.put(storeName, decision.entity);
+                    puts.push(decision.entity);
                     byId.set(decision.entity.id, decision.entity);
                     imported += 1;
+                }
+
+                if (puts.length) {
+                    if (typeof opts?.onProgress === 'function') {
+                        opts.onProgress({ index: total || 1, total: total || 1, name: '正在写入文件' });
+                    }
+                    await yieldMain();
+                    if (typeof db.runTransaction === 'function') {
+                        await db.runTransaction([storeName], 'readwrite', (stores) => {
+                            for (const row of puts) stores[storeName].put(row);
+                        });
+                    } else {
+                        for (const row of puts) await db.put(storeName, row);
+                    }
                 }
 
                 changes.emit({ type: 'import', imported, skipped });

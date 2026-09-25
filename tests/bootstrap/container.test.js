@@ -31,6 +31,7 @@ function makeFakeContext() {
             { name: 'Char', mes: 'hello', is_user: false, is_system: false, extra: {} },
         ],
         chatId: 'chat-test',
+        chatMetadata: { integrity: 'sess-container-test' },
         maxContext: 4096,
         extensionSettings: {
             regex: [],
@@ -41,6 +42,9 @@ function makeFakeContext() {
         powerUserSettings: { encode_tags: false },
         eventTypes: {
             CHAT_CHANGED: 'chat_id_changed',
+            CHAT_DELETED: 'chat_deleted',
+            GROUP_CHAT_DELETED: 'group_chat_deleted',
+            CHAT_RENAMED: 'chat_renamed',
             CHARACTER_MESSAGE_RENDERED: 'character_message_rendered',
             MESSAGE_UPDATED: 'message_updated',
             MORE_MESSAGES_LOADED: 'more_messages_loaded',
@@ -50,7 +54,11 @@ function makeFakeContext() {
             removeListener() {},
         },
         getCurrentChatId: () => 'chat-test',
+        getRequestHeaders: () => ({ 'Content-Type': 'application/json' }),
+        characters: [],
+        groups: [],
         saveSettingsDebounced() {},
+        saveMetadataDebounced() {},
         async saveChat() {},
         updateMessageBlock() {},
         async getWorldInfoPrompt() {
@@ -164,8 +172,53 @@ describe('bootstrap/createContainer', () => {
 
         assert.equal(typeof container.useCases.generateSlots.execute, 'function');
         assert.equal(typeof container.useCases.renderSlot.execute, 'function');
+        assert.equal(typeof container.useCases.generateFloor.execute, 'function');
+        assert.equal(typeof container.useCases.generateFloor.isRunning, 'function');
         assert.equal(typeof container.services.workbench.writePrompt, 'function');
         assert.equal(typeof container.services.imageGen.generate, 'function');
+
+        container.dispose();
+        host.dispose();
+    });
+
+    it('generateFloor 与 generateSlots/renderSlot 同实例（D35/D54）', async () => {
+        /** @type {object[]} */
+        const captured = [];
+        const ctx = makeFakeContext();
+        const getContext = () => ctx;
+        const host = createSillyTavernHost({ getContext });
+
+        const container = await createContainer({
+            getContext,
+            host,
+            db: createMemoryIdb(),
+            factories: {
+                createGenerateSlotsUseCase: (deps) => {
+                    captured.push({ name: 'generateSlots', deps, inst: createGenSlots(deps) });
+                    return captured[captured.length - 1].inst;
+                },
+                createRenderSlotUseCase: (deps) => {
+                    captured.push({ name: 'renderSlot', deps, inst: createRenderSlot(deps) });
+                    return captured[captured.length - 1].inst;
+                },
+                createGenerateFloorUseCase: (deps) => {
+                    captured.push({ name: 'generateFloor', deps });
+                    return {
+                        execute: async () => ({ ok: true, value: {} }),
+                        isRunning: () => false,
+                    };
+                },
+            },
+        });
+
+        const gen = captured.find((c) => c.name === 'generateSlots');
+        const render = captured.find((c) => c.name === 'renderSlot');
+        const floor = captured.find((c) => c.name === 'generateFloor');
+        assert.ok(gen && render && floor);
+        assert.equal(floor.deps.generateSlots, gen.inst);
+        assert.equal(floor.deps.renderSlot, render.inst);
+        assert.equal(floor.deps.generateSlots, container.useCases.generateSlots);
+        assert.equal(floor.deps.renderSlot, container.useCases.renderSlot);
 
         container.dispose();
         host.dispose();

@@ -9,6 +9,7 @@ import { mountImportExport } from '../../common/import-export.js';
 import { mergePluginSettings } from '../../../domain/model/plugin-settings.js';
 import { newId } from '../../../infra/id.js';
 import { nowIso } from '../../../infra/clock.js';
+import { yieldMain } from '../../../infra/yield-main.js';
 import { prepareImportCommit, pickAllowedSettingsPatch, formatErrorDisplay } from './library-logic.js';
 
 /**
@@ -145,14 +146,27 @@ export function watchModalDismiss(element, onDismiss) {
 }
 
 /**
- * 删除二次确认。
- * @param {object} deps
+ * 异步确认框（单层 dialog）。禁止 window.confirm / alert / prompt。
+ * @param {object} [deps]
  * @param {object} [deps.host]
- * @param {string} message
+ * @param {object} opts
+ * @param {string} opts.message
+ * @param {string} [opts.title='确认']
+ * @param {string} [opts.okLabel='确认']
+ * @param {string} [opts.cancelLabel='取消']
+ * @param {'danger'|'primary'|'ghost'} [opts.okVariant='danger']
  * @returns {Promise<boolean>}
  */
-export async function confirmDanger(deps, message) {
+export async function confirmAsk(deps, opts) {
     const host = deps?.host;
+    const message = opts?.message != null ? String(opts.message) : '';
+    const title = opts?.title != null ? String(opts.title) : '确认';
+    const okLabel = opts?.okLabel != null ? String(opts.okLabel) : '确认';
+    const cancelLabel = opts?.cancelLabel != null ? String(opts.cancelLabel) : '取消';
+    const okVariant = opts?.okVariant === 'primary' || opts?.okVariant === 'ghost'
+        ? opts.okVariant
+        : 'danger';
+
     const body = el('div', 'nd-confirm');
     const p = el('p');
     setText(p, message);
@@ -169,13 +183,13 @@ export async function confirmDanger(deps, message) {
     });
 
     const cancel = createButton({
-        label: '取消',
+        label: cancelLabel,
         variant: 'ghost',
         onClick: () => settle(false),
     });
     const ok = createButton({
-        label: '确认删除',
-        variant: 'danger',
+        label: okLabel,
+        variant: okVariant,
         onClick: () => settle(true),
     });
     actions.append(cancel, ok);
@@ -188,7 +202,7 @@ export async function confirmDanger(deps, message) {
     try {
         modal = await openModal(
             { host },
-            { title: '确认删除', element: body },
+            { title, element: body },
         );
         // D50：关窗立即 settle(false)，不用长超时
         unwatch = watchModalDismiss(body, () => settle(false));
@@ -201,42 +215,125 @@ export async function confirmDanger(deps, message) {
 }
 
 /**
+ * 删除二次确认（confirmAsk 包装）。
+ * @param {object} deps
+ * @param {object} [deps.host]
+ * @param {string} message
+ * @returns {Promise<boolean>}
+ */
+export async function confirmDanger(deps, message) {
+    return confirmAsk(deps, {
+        message: message == null ? '' : String(message),
+        title: '确认删除',
+        okLabel: '确认删除',
+        cancelLabel: '取消',
+        okVariant: 'danger',
+    });
+}
+
+/**
  * 打开导入导出弹层；import 前必经 prepareImportCommit。
  * @param {object} deps
  * @param {object} [deps.host]
  * @param {string} title
  * @param {string} expectedKind
- * @param {(data: object, strategy: string) => Promise<object>} importJson
- * @param {() => Promise<object>} exportJson
+ * @param {(data: object|object[], strategy: string, progress?: { onProgress?: Function }) => Promise<object>} importJson
+ * @param {(progress?: { onProgress?: Function }) => Promise<object|object[]>} exportJson
  * @param {() => void} [onDone]
+ * @param {{
+ *   allowBareArray?: boolean,
+ *   onCancelIo?: () => void,
+ *   autoImport?: { data: object|object[], strategy?: string },
+ * }} [opts]
  * @returns {Promise<{ destroy: () => void }>}
  */
-export async function openImportExportModal(deps, title, expectedKind, importJson, exportJson, onDone) {
+export async function openImportExportModal(deps, title, expectedKind, importJson, exportJson, onDone, opts) {
     const root = el('div', 'nd-import-modal');
     const err = createInlineError();
     root.appendChild(err.el);
 
+    const progressEl = el('p', 'nd-muted nd-import-progress');
+    progressEl.setAttribute('aria-live', 'polite');
+    root.appendChild(progressEl);
+
+    /**
+     * @param {{ index: number, total: number, name?: string }|null} p
+     */
+    function setProgress(p) {
+        const inline = root.querySelector('.nd-import-status');
+        if (!p) {
+            setText(progressEl, '');
+            return;
+        }
+        const name = p.name ? ` · ${p.name}` : '';
+        const line = `进度 ${p.index}/${p.total}${name}`;
+        setText(progressEl, line);
+        if (inline) {
+            setText(inline, line);
+        }
+    }
+
+    /**
+     * 与「导入已勾选」同一条提交路径（含进度）。
+     * @param {object|object[]} data
+     * @param {string} strategy
+     * @returns {Promise<object>}
+     */
+    async function commitImport(data, strategy) {
+        const prepared = prepareImportCommit(data, expectedKind);
+        if (!prepared.ok) {
+            err.setMessage(prepared.error);
+            throw new Error(prepared.error);
+        }
+        try {
+            setProgress({ index: 0, total: prepared.value.rows.length });
+            // 先画出「进度 0/N」，再进入可能很重的 importJson（含大图）
+            await yieldMain();
+            const result = await importJson(prepared.value.data, strategy, {
+                onProgress: (p) => setProgress(p),
+            });
+            err.clear();
+            if (typeof onDone === 'function') onDone();
+            toast(deps?.host, 'success', '导入完成');
+            return result;
+        } catch (e) {
+            const msg = formatErrorDisplay(e, '导入失败');
+            err.setMessage(msg);
+            throw e;
+        } finally {
+            setProgress(null);
+        }
+    }
+
     const handle = mountImportExport(root, {
-        exportJson,
-        async importJson(data, strategy) {
-            const prepared = prepareImportCommit(data, expectedKind);
-            if (!prepared.ok) {
-                err.setMessage(prepared.error);
-                throw new Error(prepared.error);
-            }
+        exportJson: async () => {
+            setProgress({ index: 0, total: 0, name: '导出中' });
             try {
-                const result = await importJson(prepared.value.data, strategy);
-                err.clear();
-                if (typeof onDone === 'function') onDone();
-                toast(deps?.host, 'success', '导入完成');
-                return result;
-            } catch (e) {
-                const msg = formatErrorDisplay(e, '导入失败');
-                err.setMessage(msg);
-                throw e;
+                return await exportJson({
+                    onProgress: (p) => setProgress(p),
+                });
+            } finally {
+                setProgress(null);
             }
         },
+        importJson: commitImport,
+        confirmOverwrite: async (count) => confirmAsk(deps, {
+            title: '覆盖导入',
+            message: `将覆盖 ${count} 条已有记录。`,
+            okLabel: '覆盖',
+            cancelLabel: '取消',
+            okVariant: 'danger',
+        }),
     });
+
+    if (typeof opts?.onCancelIo === 'function') {
+        const cancelBtn = createButton({
+            label: '取消进行中的导入/导出',
+            variant: 'ghost',
+            onClick: () => opts.onCancelIo(),
+        });
+        root.appendChild(cancelBtn);
+    }
 
     const modal = await openModal(
         { host: deps?.host },
@@ -247,6 +344,26 @@ export async function openImportExportModal(deps, title, expectedKind, importJso
             allowVerticalScrolling: true,
         },
     );
+
+    if (opts?.autoImport?.data != null) {
+        // 让弹层先上屏再导入；rAF 与短超时先到者继续（后台标签页 rAF 可能永不触发）
+        await Promise.race([
+            typeof requestAnimationFrame === 'function'
+                ? new Promise((resolve) => {
+                    requestAnimationFrame(() => resolve(undefined));
+                })
+                : Promise.resolve(),
+            new Promise((resolve) => {
+                setTimeout(resolve, 50);
+            }),
+        ]);
+        const strategy = opts.autoImport.strategy || 'skip';
+        try {
+            await commitImport(opts.autoImport.data, strategy);
+        } catch {
+            // 错误已写进弹层
+        }
+    }
 
     return {
         destroy() {

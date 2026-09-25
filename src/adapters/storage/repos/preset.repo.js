@@ -7,13 +7,12 @@ import { IDB_STORES } from '../idb.js';
 import { createEntityRepo } from '../entity-repo.js';
 import {
     PRESET_SCHEMA_VERSION,
-    migratePreset,
     validatePreset,
 } from '../../../domain/model/preset.js';
 
 /**
- * @param {{ db: object, bus?: object, messageExtra?: object }} deps
- * @returns {import('../../../ports/repository.port.js').Repository<any>|import('../../../ports/repository.port.js').SlotRepository}
+ * @param {{ db: object, bus?: object }} deps
+ * @returns {import('../../../ports/repository.port.js').Repository<any>}
  */
 export function createPresetRepo(deps) {
     return createEntityRepo({
@@ -22,7 +21,6 @@ export function createPresetRepo(deps) {
         kind: 'preset',
         schemaVersion: PRESET_SCHEMA_VERSION,
         validate: validatePreset,
-        migrate: migratePreset,
         idPrefix: 'pr',
     });
 }

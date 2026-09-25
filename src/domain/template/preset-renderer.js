@@ -8,7 +8,7 @@
  */
 
 import { getBlock } from '../blocks/block-set.js';
-import { listVariableAliases, resolveVariableName } from './variable-map.js';
+import { listRegisteredVariables, resolveVariableName } from './variable-map.js';
 
 /**
  * @typedef {import('../model/preset.js').Preset} Preset
@@ -71,7 +71,7 @@ export function renderPreset(preset, blocks, deps) {
 }
 
 /**
- * 仅替换插件变量（中文+别名），不跑宿主宏。空块 → 空串。
+ * 仅替换插件变量（中文主名），不跑宿主宏。空块 → 空串。
  * 未知 `{{…}}` **保留原文**（见文件头）。
  * @param {string} template
  * @param {BlockSet} blocks
@@ -88,10 +88,6 @@ export function injectBlockVariables(template, blocks) {
         if (valueByName.has(name)) {
             return /** @type {string} */ (valueByName.get(name));
         }
-        const lower = name.toLowerCase();
-        if (valueByName.has(lower)) {
-            return /** @type {string} */ (valueByName.get(lower));
-        }
         return full;
     });
 }
@@ -104,13 +100,8 @@ function buildValueLookup(blocks) {
     /** @type {Map<string, string>} */
     const values = new Map();
 
-    for (const { canonical, aliases } of listVariableAliases()) {
-        const text = getBlock(blocks, canonical);
-        values.set(canonical, text);
-        for (const alias of aliases) {
-            values.set(alias, text);
-            values.set(alias.toLowerCase(), text);
-        }
+    for (const canonical of listRegisteredVariables()) {
+        values.set(canonical, getBlock(blocks, canonical));
     }
 
     // BlockSet 内额外键（如召回「候选 key」）也可被引用；未被模板写出的键不会泄露
@@ -122,16 +113,7 @@ function buildValueLookup(blocks) {
             const text = raw == null ? '' : String(raw);
             const canonical = resolveVariableName(key);
             if (canonical) {
-                // 别名键写入时，同步更新规范名对应值
                 values.set(canonical, text);
-                for (const { canonical: c, aliases } of listVariableAliases()) {
-                    if (c === canonical) {
-                        for (const alias of aliases) {
-                            values.set(alias, text);
-                            values.set(alias.toLowerCase(), text);
-                        }
-                    }
-                }
                 values.set(key, text);
             } else if (!values.has(key)) {
                 values.set(key, text);

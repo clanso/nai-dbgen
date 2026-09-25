@@ -5,7 +5,7 @@
  * - **区分大小写**：`===`，不做 toLowerCase（「原文」）
  * - **回文侧 trim**：只对 LLM 回文做 `.trim()`，目录 key 原样比较
  *   （吸收模型常带的首尾空白/换行；不改用户存盘的 key）
- * - **不做**模糊、包含、正则、按 id 匹配
+ * - **不做**模糊、包含、正则。按编号对账见 reconcileRecalledIds
  * - **多库同名 key**：`activeEntries` 数组序**先出现者胜**；调用方负责排序
  * - **重复回文**：同一 entry 只命中一次；后续同 key 回文忽略（不进 unmatched）
  * - **空 / 仅空白回文**：记入 unmatched（可观测，不静默吞掉）
@@ -26,6 +26,88 @@
  *   未对上的回文（保序）：编造、拼错、大小写不符、trim 后仍对不上、空串/仅空白。
  *   上层应展示给用户（可观测）；注入块只用 matched。
  */
+
+/**
+ * 构图 key 里第一个「：」前是分类，只用于显示。传给模型和回文对账时不用这段。
+ * @param {unknown} key
+ * @returns {string}
+ */
+export function compositionNameForRecall(key) {
+    const text = typeof key === 'string' ? key.trim() : '';
+    const sep = text.indexOf('：');
+    if (sep < 0) {
+        return text;
+    }
+    return text.slice(sep + 1).trim();
+}
+
+/**
+ * 候选行：`编号 名称`。编号从 1 起，与 ordered 下标对应。
+ * @param {TagEntry[]} activeEntries
+ * @returns {{ lines: string[], ordered: TagEntry[] }}
+ */
+export function formatRecallCandidateLines(activeEntries) {
+    const entries = Array.isArray(activeEntries) ? activeEntries : [];
+    /** @type {string[]} */
+    const lines = [];
+    /** @type {TagEntry[]} */
+    const ordered = [];
+    for (const entry of entries) {
+        if (!entry || typeof entry.key !== 'string' || entry.key.length === 0) {
+            continue;
+        }
+        ordered.push(entry);
+        lines.push(`${ordered.length} ${compositionNameForRecall(entry.key)}`);
+    }
+    return { lines, ordered };
+}
+
+/**
+ * 回文是候选编号（1 起），不是汉字 key。
+ * @param {unknown} recalledIds
+ * @param {TagEntry[]} orderedEntries formatRecallCandidateLines 的 ordered
+ * @returns {ReconcileRecalledKeysResult}
+ */
+export function reconcileRecalledIds(recalledIds, orderedEntries) {
+    const ids = Array.isArray(recalledIds) ? recalledIds : [];
+    const ordered = Array.isArray(orderedEntries) ? orderedEntries : [];
+    /** @type {TagEntry[]} */
+    const matched = [];
+    /** @type {string[]} */
+    const unmatched = [];
+    /** @type {Set<number>} */
+    const seen = new Set();
+
+    for (const raw of ids) {
+        const original = raw == null ? '' : String(raw);
+        const trimmed = original.trim();
+        if (trimmed.length === 0) {
+            unmatched.push(original);
+            continue;
+        }
+        if (!/^\d+$/.test(trimmed)) {
+            unmatched.push(original);
+            continue;
+        }
+        const n = Number(trimmed);
+        if (!Number.isInteger(n) || n < 1 || n > ordered.length) {
+            unmatched.push(original);
+            continue;
+        }
+        if (seen.has(n)) {
+            continue;
+        }
+        const entry = ordered[n - 1];
+        if (!entry) {
+            unmatched.push(original);
+            continue;
+        }
+        seen.add(n);
+        matched.push(entry);
+    }
+
+    return { matched, unmatched };
+}
 
 /**
  * 将 LLM 召回回文与已激活库条目做原文对账。

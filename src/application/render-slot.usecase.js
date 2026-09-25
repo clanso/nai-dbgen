@@ -5,7 +5,7 @@
  * 裁决：
  * - D34：注入 newTraceId
  * - D35：闸门在本 usecase 内（进行中互斥 + 已有图拒重出，除非 force）
- * - D36：键带 chatId；写盘前校验 chat，切楼则丢弃结果
+ * - D36：键带 chatId；切聊后仍写入发起时会话文件，楼层正文仅同会话才改
  * - D39：读失败 ≠ 没有图
  * - D42：NAI/blob 成功但 recordImage 失败时保留 imageRef，重试只写盘
  */
@@ -14,6 +14,7 @@ import { Ok, Err } from '../infra/result.js';
 import { domainError } from '../infra/errors.js';
 import { createLogger } from '../infra/logger.js';
 import { latestSlotImage } from '../domain/model/slot.js';
+import { parseSizeSpec } from '../domain/model/size-spec.js';
 import {
     abortErrIfNeeded,
     attachTraceId,
@@ -22,6 +23,30 @@ import {
 import { renderGateKey } from './_gate-key.js';
 
 const log = createLogger('application/render-slot');
+
+/**
+ * @param {{ recordImage: Function }} slotRepo
+ * @param {number} messageId
+ * @param {Array<{ slotId: number, imageRef: string, writeOpts?: object }>} list
+ */
+async function recordImagesOneByOne(slotRepo, messageId, list) {
+    /** @type {object[]} */
+    const rows = [];
+    for (const item of list) {
+        const one = await slotRepo.recordImage(
+            messageId,
+            item.slotId,
+            item.imageRef,
+            {},
+            item.writeOpts,
+        );
+        if (!one.ok) {
+            return one;
+        }
+        rows.push(one.value);
+    }
+    return Ok(rows);
+}
 
 /** D42 挂起写盘上限：跨聊天保留但不无限增长（FIFO 淘汰最旧项） */
 const MAX_PENDING_WRITES = 32;
@@ -46,6 +71,8 @@ const MAX_PENDING_WRITES = 32;
  *   显式强制重出；默认 false。已有图且非 force → 拒紹（D35）
  * @property {string} [imageRef]
  *   D42：仅重试写盘（跳过 NAI / imageRepo.put）
+ * @property {boolean} [deferPersist]
+ *   同一楼多张图时先出图，最后一次写入会话文件
  */
 
 /**
@@ -123,6 +150,15 @@ export function createRenderSlotUseCase(deps) {
         const signal = opts?.signal;
         const force = opts?.force === true;
         const chatIdAtStart = deps.host.getCurrentChatId();
+        const sessionIdAtStart = typeof deps.host.getSessionId === 'function'
+            ? deps.host.getSessionId()
+            : null;
+        const messagesAtStart = typeof deps.host.getMessages === 'function'
+            ? deps.host.getMessages()
+            : [];
+        const locationAtStart = typeof deps.host.getChatLocation === 'function'
+            ? deps.host.getChatLocation()
+            : null;
         const key = renderGateKey(chatIdAtStart, messageId, slotId);
 
         const aborted = abortErrIfNeeded(signal, traceId);
@@ -144,7 +180,7 @@ export function createRenderSlotUseCase(deps) {
         if (!slotR.value) {
             return Err(domainError({
                 code: 'SLOT_NOT_FOUND',
-                message: `找不到 slot #${slotId}`,
+                message: `找不到第 ${slotId} 号生图标记`,
                 hint: '请先点「生图」生成提示词，或确认编号正确',
                 traceId,
                 context: { messageId, slotId, chatId: chatIdAtStart },
@@ -168,7 +204,7 @@ export function createRenderSlotUseCase(deps) {
             return Err(domainError({
                 code: 'SLOT_ALREADY_RENDERED',
                 message: `slot #${slotId} 已有图片`,
-                hint: '重新出图请显式传入 force: true',
+                hint: '该图已生成过；若要重出请点「重新生成」',
                 traceId,
                 context: { messageId, slotId, chatId: chatIdAtStart },
             }));
@@ -184,9 +220,22 @@ export function createRenderSlotUseCase(deps) {
             imageRef = pending.imageRef;
             image = pending.image;
         } else {
+            /** @type {Record<string, unknown>|undefined} */
+            let params;
+            if (typeof record.size === 'string' && record.size.trim()) {
+                const sizeR = parseSizeSpec(record.size);
+                if (!sizeR.ok) {
+                    return attachTraceId(sizeR, traceId);
+                }
+                params = {
+                    width: sizeR.value.width,
+                    height: sizeR.value.height,
+                };
+            }
             const genR = await deps.imageGen.generate({
                 caption: /** @type {import('../domain/model/nai-params.js').NaiCaption} */ (record.caption),
                 replaceCharacterKeywords: false,
+                ...(params ? { params } : {}),
                 signal,
                 traceId,
             });
@@ -210,42 +259,43 @@ export function createRenderSlotUseCase(deps) {
             imageRef = putR.value;
         }
 
-        // D36：写盘前校验仍是发起时的 chat
+        // 会话文件按 integrity 寻址：切到 B 后仍须把图记进发起时的 A 会话文件。
+        // inflight 键仍带 chatId（D36），避免 B 会话误显「生图中」。
         const chatNow = deps.host.getCurrentChatId();
-        if (chatNow !== chatIdAtStart) {
-            rememberPending(key, {
-                imageRef,
+        const writeOpts = sessionIdAtStart
+            ? {
+                sessionId: String(sessionIdAtStart),
+                messagesForTrim: messagesAtStart,
+                chatLocation: locationAtStart,
+            }
+            : undefined;
+
+        if (opts?.deferPersist === true) {
+            return Ok({
+                record: null,
                 image,
-                chatId: chatIdAtStart,
-                messageId,
-                slotId,
-            });
-            log.warn('chat changed before recordImage; discarding write', {
                 traceId,
-                chatIdAtStart,
-                chatNow,
-                messageId,
-                slotId,
-            });
-            return Err(domainError({
-                code: 'CHAT_CHANGED',
-                message: '出图完成时已切换聊天，结果未写入当前楼',
-                hint: '切回原聊天后可重试（不会再次扣费，仅写盘）',
-                traceId,
-                context: {
-                    imageRef,
-                    chatIdAtStart,
-                    chatNow,
+                imageRef,
+                chatChanged: chatNow !== chatIdAtStart,
+                deferEmit: true,
+                deferred: {
                     messageId,
                     slotId,
-                    retryableWrite: true,
+                    imageRef,
+                    writeOpts,
+                    traceId,
+                    chatId: chatIdAtStart,
                 },
-            }));
+            });
         }
 
-        const recR = await deps.slotRepo.recordImage(messageId, slotId, imageRef, {
-            createdAt: deps.nowIso(),
-        });
+        const recR = await deps.slotRepo.recordImage(
+            messageId,
+            slotId,
+            imageRef,
+            { createdAt: deps.nowIso() },
+            writeOpts,
+        );
         if (!recR.ok) {
             // D42：保留 imageRef，下次可只写盘
             rememberPending(key, {
@@ -264,6 +314,8 @@ export function createRenderSlotUseCase(deps) {
                     messageId,
                     slotId,
                     chatId: chatIdAtStart,
+                    sessionId: sessionIdAtStart,
+                    chatChanged: chatNow !== chatIdAtStart,
                 };
             }
             return err;
@@ -271,20 +323,58 @@ export function createRenderSlotUseCase(deps) {
 
         pendingWrites.delete(key);
 
-        deps.bus.emit(APP_EVENTS.SLOT_RENDERED, {
-            messageId,
-            slotId,
-            imageRef,
-            traceId,
-            chatId: chatIdAtStart,
-            record: recR.value,
-        });
+        if (chatNow !== chatIdAtStart) {
+            log.info('chat changed after NAI; image recorded to original session file', {
+                traceId,
+                chatIdAtStart,
+                chatNow,
+                sessionIdAtStart,
+                messageId,
+                slotId,
+            });
+        }
 
         return Ok({
             record: recR.value,
             image,
             traceId,
             imageRef,
+            chatChanged: chatNow !== chatIdAtStart,
+        });
+    }
+
+    /**
+     * inflight 清表后再发 bus：订阅方（slot 控件）刷新时 isRendering 已为 false。
+     * 若在 runOnce 内同步 emit，控件会在 finally 之前 paint，永久卡在「生图中」。
+     * @param {number} messageId
+     * @param {number} slotId
+     * @param {string|null} chatId
+     * @param {import('../infra/result.js').Ok<RenderSlotResult>|import('../infra/result.js').Err<import('../infra/errors.js').AppError>} result
+     */
+    function emitAfterSettle(messageId, slotId, chatId, result) {
+        if (result && result.ok) {
+            const value = result.value;
+            deps.bus.emit(APP_EVENTS.SLOT_RENDERED, {
+                messageId,
+                slotId,
+                imageRef: value.imageRef,
+                traceId: value.traceId,
+                chatId,
+                record: value.record,
+            });
+            return;
+        }
+        const error = result && result.error != null ? result.error : result;
+        const traceId = error && typeof error === 'object'
+            && /** @type {{ traceId?: unknown }} */ (error).traceId != null
+            ? String(/** @type {{ traceId: unknown }} */ (error).traceId)
+            : undefined;
+        deps.bus.emit(APP_EVENTS.SLOT_RENDER_FAILED, {
+            messageId,
+            slotId,
+            chatId,
+            error,
+            traceId,
         });
     }
 
@@ -298,17 +388,26 @@ export function createRenderSlotUseCase(deps) {
             const chatId = deps.host.getCurrentChatId();
             const key = renderGateKey(chatId, messageId, slotId);
 
-            // D35：进行中互斥——并发调用共享同一 promise → NAI 只调一次
+            // D35：进行中互斥——并发调用共享同一 Promise → NAI 只调一次
             const existing = inflight.get(key);
             if (existing) {
                 return existing;
             }
 
-            const promise = runOnce(messageId, slotId, opts).finally(() => {
-                if (inflight.get(key) === promise) {
-                    inflight.delete(key);
-                }
-            });
+            /** @type {Promise<import('../infra/result.js').Ok<RenderSlotResult>|import('../infra/result.js').Err<import('../infra/errors.js').AppError>>} */
+            let promise;
+            promise = runOnce(messageId, slotId, opts)
+                .finally(() => {
+                    if (inflight.get(key) === promise) {
+                        inflight.delete(key);
+                    }
+                })
+                .then((result) => {
+                    if (!(result?.ok && result.value?.deferEmit)) {
+                        emitAfterSettle(messageId, slotId, chatId, result);
+                    }
+                    return result;
+                });
             inflight.set(key, promise);
             return promise;
         },
@@ -331,6 +430,40 @@ export function createRenderSlotUseCase(deps) {
          */
         hasPendingWrite(messageId, slotId) {
             return pendingWrites.has(currentKey(messageId, slotId));
+        },
+
+        /**
+         * 把同一楼已经出好的图记进会话文件，只写一次。
+         * @param {number} messageId
+         * @param {Array<{ slotId: number, imageRef: string, writeOpts?: object, traceId?: string, chatId?: string|null }>} items
+         */
+        async commitRendered(messageId, items) {
+            const list = Array.isArray(items) ? items : [];
+            if (!list.length) {
+                return Ok([]);
+            }
+            const recR = typeof deps.slotRepo.recordImages === 'function'
+                ? await deps.slotRepo.recordImages(
+                    messageId,
+                    list.map((item) => ({ slotId: item.slotId, imageRef: item.imageRef })),
+                    list[0].writeOpts,
+                )
+                : await recordImagesOneByOne(deps.slotRepo, messageId, list);
+            if (!recR.ok) {
+                return recR;
+            }
+            for (const item of list) {
+                const record = recR.value.find((row) => row.slotId === item.slotId) ?? null;
+                deps.bus.emit(APP_EVENTS.SLOT_RENDERED, {
+                    messageId,
+                    slotId: item.slotId,
+                    imageRef: item.imageRef,
+                    traceId: item.traceId,
+                    chatId: item.chatId ?? null,
+                    record,
+                });
+            }
+            return Ok(recR.value);
         },
     };
 }

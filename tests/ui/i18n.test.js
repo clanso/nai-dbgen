@@ -16,7 +16,7 @@ describe('ui/i18n/zh-CN', () => {
         assert.equal(t('import.summary', { count: 3 }), '识别 3 条');
         assert.equal(
             t('import.parseError', { message: 'bad' }),
-            '无法解析 JSON：bad',
+            '无法解析文件：bad',
         );
     });
 

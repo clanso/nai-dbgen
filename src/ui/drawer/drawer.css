@@ -11,8 +11,9 @@
 
 #nai-dbgen-drawer .nd-drawer__title {
     margin: 0;
-    font-family: var(--nd-serif);
-    font-size: 1.05em;
+    font-family: inherit;
+    font-size: var(--nd-fs-title);
+    font-weight: 600;
     color: var(--nd-text);
 }
 
@@ -24,4 +25,21 @@
 #nai-dbgen-drawer .nd-drawer__picker {
     display: grid;
     gap: 4px;
+}
+
+/* 无图/裂图：淡色块占位，不要字母或被裁文字 */
+#nai-dbgen-drawer .nd-picker__cover.nd-cover--empty,
+#nai-dbgen-drawer .nd-mini-cover.nd-cover--empty {
+    background: color-mix(in srgb, var(--nd-surface-2, #fff0f6) 88%, var(--nd-line, rgba(123, 70, 96, 0.18)));
+}
+
+#nai-dbgen-drawer .nd-cover-empty-mark {
+    display: block;
+    width: 40%;
+    aspect-ratio: 1;
+    max-width: 14px;
+    max-height: 14px;
+    border-radius: var(--nd-radius-xs);
+    background: color-mix(in srgb, var(--nd-muted, #9a6b80) 28%, transparent);
+    pointer-events: none;
 }

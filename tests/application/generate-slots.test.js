@@ -182,6 +182,38 @@ describe('renderSlot + imageGen', () => {
             /replaceCharacterKeywords/,
         );
     });
+
+    it('explicit illegal NAI params → Err before NAI; inherited fallback after model switch', async () => {
+        const p = buildPipeline();
+        p.patchSettings({
+            naiParams: {
+                ...p.loadSettings().naiParams,
+                model: 'nai-diffusion-4-5-full',
+                skip_cfg_above_sigma: 58,
+                noise_schedule: 'native',
+            },
+        });
+
+        const bad = await p.imageGen.generate({
+            caption: makeCaption('x'),
+            replaceCharacterKeywords: false,
+            params: { sampler: 'not-a-sampler' },
+        });
+        assert.equal(bad.ok, false);
+        assert.equal(bad.error.code, 'NAI_PARAMS_INVALID');
+        assert.equal(p.naiCalls.length, 0);
+
+        const ok = await p.imageGen.generate({
+            caption: makeCaption('x'),
+            replaceCharacterKeywords: false,
+            params: { model: 'nai-diffusion-5-full' },
+        });
+        assert.equal(ok.ok, true);
+        assert.equal(p.naiCalls.length, 1);
+        assert.equal(p.naiCalls[0].payload.model, 'nai-diffusion-5-full');
+        assert.equal(p.naiCalls[0].payload.parameters.noise_schedule, 'karras');
+        assert.equal(p.naiCalls[0].payload.parameters.skip_cfg_above_sigma, null);
+    });
 });
 
 describe('artist preview', () => {
@@ -204,7 +236,7 @@ describe('artist preview', () => {
         assert.equal(String(payload.input).includes('ACTIVE_POS'), false);
         // 未改全局激活
         assert.equal(p.loadSettings().activeArtistId, 'artist-active');
-        assert.ok(r.value.imageRef);
+        assert.ok(r.value.referenceImageRef);
     });
 });
 
@@ -212,9 +244,8 @@ describe('workbench', () => {
     it('writePrompt does not call NAI and does not touch replace switch', async () => {
         const p = buildPipeline({
             llmComplete: async (req) => {
-                if (req.config.id === 'llm-recall') {
-                    return Ok({ text: '[]', json: ['garden'] });
-                }
+                // 工作台不跑召回，只应打提示词 LLM
+                assert.equal(req.config.id, 'llm-prompt');
                 return Ok({
                     text: '{}',
                     json: makeCaption('workbench scene'),
@@ -224,13 +255,18 @@ describe('workbench', () => {
         const beforeArtist = p.loadSettings().activeArtistId;
         const r = await p.workbench.writePrompt({
             naturalLanguage: 'Alice in a garden',
-            libraryIds: ['lib1'],
+            libraryIds: ['lib1', 'lib-feat'],
         });
         assert.equal(isOk(r), true, r.ok ? '' : r.error?.message);
         assert.equal(r.value.caption.v4_prompt.caption.base_caption, 'workbench scene');
         assert.ok(Array.isArray(r.value.unmatchedKeys));
+        assert.equal(r.value.unmatchedKeys.length, 0);
         assert.equal(p.naiCalls.length, 0);
+        assert.equal(p.llmCalls.length, 1, '工作台写提示词恰好 1 次 LLM（不召回）');
         assert.equal(p.loadSettings().activeArtistId, beforeArtist);
+        const promptMsg = p.llmCalls[0].messages.map((m) => m.content).join('\n');
+        assert.ok(promptMsg.includes('flower garden') || promptMsg.includes('garden'));
+        assert.ok(promptMsg.includes('silver hair feature ref') || promptMsg.includes('Alice'));
     });
 
     it('generateImage passes explicit replaceCharacterKeywords through', async () => {
@@ -262,13 +298,16 @@ describe('D31 unmatchedKeys observability', () => {
             llmComplete: async (req) => {
                 if (req.config.id === 'llm-recall') {
                     // garden 命中；fabricated / Night 未命中（大小写也不行）
-                    return Ok({ text: '[]', json: ['garden', 'fabricated', 'Night'] });
+                    const positions = [{
+                        生成点: 'Alice walked into the garden.',
+                        key: ['1', 'fabricated', 'Night'],
+                    }];
+                    return Ok({ text: JSON.stringify(positions), json: positions });
                 }
                 return Ok({
                     text: '[]',
                     json: [{
                         slotid: 1,
-                        生成点: 'Alice walked into the garden.',
                         生图内容: makeCaption('a garden scene'),
                     }],
                 });

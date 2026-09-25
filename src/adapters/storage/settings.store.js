@@ -4,16 +4,14 @@
  * 归属：W1-D 存储代理实现。W0 仅冻结签名。
  *
  * 裁决 D15：deps 只吃 `host`；load/save 一律经 HostPort，禁止直接碰 extension_settings。
- * 本 store 只做 migrate / merge / 单键 get/set。
+ * 本 store 只做 merge / 单键 get/set；schema 不符或校验失败按缺省处理。
  */
 
 import {
     defaultPluginSettings,
     mergePluginSettings,
-    migratePluginSettings,
     normalizePluginSettings,
     validatePluginSettings,
-    PLUGIN_SETTINGS_SCHEMA_VERSION,
 } from '../../domain/model/plugin-settings.js';
 
 /**
@@ -40,15 +38,8 @@ export function createSettingsStore(deps) {
                 if (!raw || typeof raw !== 'object') {
                     return defaultPluginSettings();
                 }
-                const fromVersion = Number(raw.schemaVersion) || PLUGIN_SETTINGS_SCHEMA_VERSION;
-                if (fromVersion !== PLUGIN_SETTINGS_SCHEMA_VERSION) {
-                    const migrated = migratePluginSettings(raw, fromVersion);
-                    if (migrated.ok) {
-                        return migrated.value;
-                    }
-                }
                 const validated = validatePluginSettings(raw);
-                return validated.ok ? validated.value : normalizePluginSettings(raw);
+                return validated.ok ? validated.value : defaultPluginSettings();
             } catch {
                 return defaultPluginSettings();
             }

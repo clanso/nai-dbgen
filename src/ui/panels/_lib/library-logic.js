@@ -19,9 +19,13 @@ export const PLUGIN_SETTINGS_KEYS = Object.freeze([
     'promptGenLlmConfigId',
     'activeImagegenPresetId',
     'activeRecallPresetId',
+    'activeSingleRecallPresetId',
+    'activeSingleImagegenPresetId',
     'contextWindowSize',
+    'imageCacheLimit',
     'autoWriteSlots',
     'autoRenderSlots',
+    'naiParallel',
     'matchDefaults',
     'naiParams',
 ]);
@@ -80,6 +84,10 @@ export function filterSortItems(items, opts = {}) {
     }
     if (typeof opts.compare === 'function') {
         out.sort(opts.compare);
+    } else if (opts.sort === 'sequence-asc') {
+        out.sort((a, b) => Number(a?.sequence ?? 0) - Number(b?.sequence ?? 0));
+    } else if (opts.sort === 'sequence-desc') {
+        out.sort((a, b) => Number(b?.sequence ?? 0) - Number(a?.sequence ?? 0));
     } else if (opts.sort === 'name-desc') {
         out.sort((a, b) => String(b?.name ?? '').localeCompare(String(a?.name ?? ''), 'zh'));
     } else if (opts.sort === 'updated-desc') {
@@ -208,8 +216,11 @@ export function prepareImportCommit(raw, expectedKind) {
  * @returns {{ ok: true } | { ok: false, error: string }}
  */
 export function assertImportKind(data, expectedKind) {
-    // D49：裸数组一律拒绝，强制信封
+    // 画师串（需求 4.2）：裸 JSON 数组，无信封
     if (Array.isArray(data)) {
+        if (expectedKind === 'artist') {
+            return { ok: true };
+        }
         return {
             ok: false,
             error: '导入必须是带 kind 的信封对象，不接受裸数组',
@@ -426,7 +437,7 @@ export function canSubmitPaidAction(busy) {
  */
 export function paidActionLabels(kind) {
     if (kind === 'artistPreview') {
-        return { idle: '手填预览生图', busy: '预览生成中…' };
+        return { idle: '预览出图', busy: '出图中…' };
     }
     return { idle: '提交', busy: '进行中…' };
 }

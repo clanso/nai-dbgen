@@ -78,6 +78,31 @@ export function matchAnyKeyword(haystack, needles, entryOverrides, globalDefault
 }
 
 /**
+ * 多关键字：全部命中才 true（特征库次要关键字「且涉及全部」）。
+ * @param {string} haystack
+ * @param {string[]} needles
+ * @param {{ caseSensitive?: boolean, matchWholeWords?: boolean }|null} entryOverrides
+ * @param {{ caseSensitive: boolean, matchWholeWords: boolean }} globalDefaults
+ * @returns {boolean}
+ */
+export function matchAllKeywords(haystack, needles, entryOverrides, globalDefaults) {
+    if (!Array.isArray(needles) || needles.length === 0) {
+        return false;
+    }
+    let usable = 0;
+    for (const needle of needles) {
+        if (typeof needle !== 'string' || needle.length === 0) {
+            continue;
+        }
+        usable += 1;
+        if (!matchKeyword(haystack, needle, entryOverrides, globalDefaults)) {
+            return false;
+        }
+    }
+    return usable > 0;
+}
+
+/**
  * 解析 `/pattern/flags`；非正则则返回 null。
  * 实现应优先复用宿主导出的 parseRegexFromString（经适配器注入），本纯函数为无宿主时的退化。
  * 语义对齐 ref/SillyTavern/.../world-info.js:2901 parseRegexFromString。

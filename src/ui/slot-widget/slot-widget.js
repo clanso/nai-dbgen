@@ -40,7 +40,7 @@ import {
     resolveVisualRuntime,
     watchSlotInflight,
 } from './slot-mount.js';
-import { openSlotImageViewer } from './image-viewer.js';
+import { openSlotImageViewer } from '../common/image-viewer.js';
 
 /**
  * @typedef {object} SlotWidgetDeps
@@ -114,8 +114,9 @@ function ensureChrome(rootEl) {
         }
         return hasClassToken(el, SLOT_BTN_CLASS) || hasClassToken(el, 'nai-slot-btn');
     }));
+    const doc = rootEl.ownerDocument || document;
     if (!btn) {
-        btn = /** @type {HTMLButtonElement} */ (document.createElement('button'));
+        btn = /** @type {HTMLButtonElement} */ (doc.createElement('button'));
         rootEl.appendChild(btn);
     }
     btn.classList.add(SLOT_BTN_CLASS);
@@ -131,7 +132,7 @@ function ensureChrome(rootEl) {
         || hasClassToken(el, 'custom-nai-slot-img')
     )));
     if (!imgBox) {
-        imgBox = document.createElement('div');
+        imgBox = doc.createElement('div');
         rootEl.appendChild(imgBox);
     }
     imgBox.classList.add(SLOT_IMG_CLASS);
@@ -140,7 +141,7 @@ function ensureChrome(rootEl) {
         hasClassToken(el, 'nd-slot__status')
     )));
     if (!statusEl) {
-        statusEl = document.createElement('div');
+        statusEl = doc.createElement('div');
         statusEl.className = 'nd-slot__status';
         statusEl.setAttribute('aria-live', 'polite');
         rootEl.appendChild(statusEl);
@@ -150,7 +151,7 @@ function ensureChrome(rootEl) {
         hasClassToken(el, 'nd-slot__error')
     )));
     if (!errEl) {
-        errEl = document.createElement('div');
+        errEl = doc.createElement('div');
         errEl.className = 'nd-slot__error';
         errEl.setAttribute('role', 'alert');
         errEl.hidden = true;
@@ -172,10 +173,11 @@ function paintImage(imgBox, url, onThumbClick) {
     if (!safe) {
         return null;
     }
-    const img = document.createElement('img');
+    const img = (imgBox.ownerDocument || document).createElement('img');
     img.className = 'nd-slot__thumb';
-    img.src = safe;
     img.alt = '';
+    img.style.cssText = 'display:block;width:100%;height:auto;margin-top:8px';
+    img.src = safe;
     img.addEventListener('click', onThumbClick);
     imgBox.appendChild(img);
     return img;
@@ -258,6 +260,7 @@ export function mountSlotWidget(rootEl, messageId, deps) {
             'nd-slot--generating',
             'nd-slot--done',
             'nd-slot--error',
+            'nd-slot--beyond',
         );
         rootEl.classList.add(stateClass);
     }
@@ -279,6 +282,55 @@ export function mountSlotWidget(rootEl, messageId, deps) {
     }
 
     /**
+     * @param {unknown} payload
+     * @returns {boolean}
+     */
+    function busPayloadMatches(payload) {
+        if (!payload || typeof payload !== 'object') {
+            return false;
+        }
+        const p = /** @type {{ messageId?: unknown, slotId?: unknown, chatId?: unknown }} */ (payload);
+        if (Number(p.messageId) !== Number(messageId) || Number(p.slotId) !== Number(slotId)) {
+            return false;
+        }
+        const chatId = resolveChatId();
+        if (p.chatId != null && chatId != null && String(p.chatId) !== String(chatId)) {
+            return false;
+        }
+        return true;
+    }
+
+    /**
+     * 外部出图（悬浮球 / auto-trigger）结算后刷新。
+     * settle 事件在 usecase inflight 清表之后发出，此时 isRendering 已为 false。
+     * @param {'ok'|'error'} kind
+     * @param {unknown} [error]
+     */
+    function onExternalSettle(kind, error) {
+        if (destroyed) {
+            return;
+        }
+        const chatId = resolveChatId();
+        if (kind === 'ok') {
+            resolveSlotInflightOk(chatId, messageId, slotId);
+        } else {
+            const settled = { ok: false, error };
+            const classified = classifyGenerateSettlement(settled);
+            if (classified.kind === 'abort' || classified.kind === 'already') {
+                resolveSlotInflightOk(chatId, messageId, slotId);
+            } else if (classified.kind === 'invalid') {
+                // D43：非 Result 形态的 error 载荷 → 不清表
+                return;
+            } else {
+                const err = classified.kind === 'error' ? classified.error : error;
+                const traceId = slotErrorTraceId(err, null);
+                resolveSlotInflightError(chatId, messageId, slotId, err, traceId || null);
+            }
+        }
+        void paintFromStore();
+    }
+
+    /**
      * @returns {Promise<void>}
      */
     async function paintFromStore() {
@@ -288,25 +340,63 @@ export function mountSlotWidget(rootEl, messageId, deps) {
         const gen = ++paintGeneration;
         const chatId = resolveChatId();
         const record = deps.getRecord(messageId, slotId);
-        const runtime = resolveVisualRuntime({
-            chatId,
-            messageId,
-            slotId,
-            appRendering: appIsRendering(),
-            appPendingWrite: appHasPendingWrite(),
+        const meta = typeof deps.getSlotMeta === 'function'
+            ? (deps.getSlotMeta(messageId, slotId) || {})
+            : {};
+        const runtime = {
+            ...resolveVisualRuntime({
+                chatId,
+                messageId,
+                slotId,
+                appRendering: appIsRendering(),
+                appPendingWrite: appHasPendingWrite(),
+            }),
+            beyondRetain: meta.beyondRetain === true,
+            hasCachedImage: meta.hasCachedImage === true,
+            loadError: meta.loadError === true,
+            loadErrorMessage: meta.loadErrorMessage ?? null,
+        };
+        const entry = latestImageEntry(record);
+        const cachedRef = !entry && meta.cachedImageRef
+            ? String(meta.cachedImageRef)
+            : null;
+        const imageRef = entry?.imageRef || cachedRef;
+
+        /** @type {string|null} */
+        let url = null;
+        let cacheMissing = false;
+        if (imageRef) {
+            try {
+                url = await deps.getImageUrl(imageRef);
+            } catch {
+                url = null;
+            }
+            if (destroyed || gen !== paintGeneration) {
+                return;
+            }
+            // 记录在 + 缓存无 → 未生图；beyond_retain 仅缓存图时 cache 没了走无图
+            if (!url) {
+                cacheMissing = entry != null;
+            }
+        }
+
+        const view = deriveSlotUiView(record, {
+            ...runtime,
+            cacheMissing,
+            hasCachedImage: Boolean(url) && runtime.hasCachedImage,
         });
-        const view = deriveSlotUiView(record, runtime);
 
         applyStateClasses(view.stateClass);
         btn.textContent = view.buttonLabel;
-        btn.disabled = view.busy;
+        const clickable = view.canClick !== false && !view.busy;
+        btn.disabled = !clickable;
         if (typeof btn.setAttribute === 'function') {
             btn.setAttribute('aria-busy', view.busy ? 'true' : 'false');
         }
 
         statusEl.textContent = view.busy
             ? (appHasPendingWrite() && !appIsRendering() ? '写入中…' : '生图中…')
-            : '';
+            : (view.state === 'beyond_retain' ? '已超出保留范围' : '');
 
         if (view.showError) {
             errEl.hidden = false;
@@ -326,8 +416,7 @@ export function mountSlotWidget(rootEl, messageId, deps) {
             errEl.replaceChildren();
         }
 
-        const entry = latestImageEntry(record);
-        if (!entry) {
+        if (!imageRef || !url || cacheMissing) {
             if (view.state !== 'generating') {
                 paintImage(imgBox, null, onThumbClick);
                 currentImageUrl = null;
@@ -335,19 +424,8 @@ export function mountSlotWidget(rootEl, messageId, deps) {
             return;
         }
 
-        try {
-            const url = await deps.getImageUrl(entry.imageRef);
-            if (destroyed || gen !== paintGeneration) {
-                return;
-            }
-            currentImageUrl = url;
-            paintImage(imgBox, url, onThumbClick);
-        } catch {
-            if (!destroyed && gen === paintGeneration) {
-                paintImage(imgBox, null, onThumbClick);
-                currentImageUrl = null;
-            }
-        }
+        currentImageUrl = url;
+        paintImage(imgBox, url, onThumbClick);
     }
 
     function bindInflightWatch() {
@@ -442,22 +520,55 @@ export function mountSlotWidget(rootEl, messageId, deps) {
 
     btn.addEventListener('click', onBtnClick);
 
+    /** @type {Array<() => void>} */
+    const busUnsubs = [];
     if (deps.bus && typeof deps.bus.on === 'function') {
-        unsubBus = deps.bus.on(APP_EVENTS.SLOT_RENDERED, (payload) => {
-            if (destroyed || !payload || typeof payload !== 'object') {
+        busUnsubs.push(deps.bus.on(APP_EVENTS.SLOT_RENDERED, (payload) => {
+            if (!busPayloadMatches(payload)) {
                 return;
             }
-            const p = /** @type {{ messageId?: unknown, slotId?: unknown, chatId?: unknown }} */ (payload);
-            if (Number(p.messageId) !== Number(messageId) || Number(p.slotId) !== Number(slotId)) {
+            onExternalSettle('ok');
+        }));
+        busUnsubs.push(deps.bus.on(APP_EVENTS.SLOT_RENDER_FAILED, (payload) => {
+            if (!busPayloadMatches(payload)) {
                 return;
             }
-            const chatId = resolveChatId();
-            if (p.chatId != null && chatId != null && String(p.chatId) !== String(chatId)) {
+            const p = /** @type {{ error?: unknown }} */ (payload);
+            onExternalSettle('error', p.error);
+        }));
+        busUnsubs.push(deps.bus.on(APP_EVENTS.IMAGE_CACHE_TRIMMED, (payload) => {
+            if (destroyed) {
                 return;
             }
-            resolveSlotInflightOk(chatId, messageId, slotId);
-            void paintFromStore();
-        });
+            const refs = Array.isArray(payload?.removedRefs) ? payload.removedRefs : [];
+            if (!refs.length) {
+                return;
+            }
+            const record = deps.getRecord(messageId, slotId);
+            const meta = typeof deps.getSlotMeta === 'function'
+                ? (deps.getSlotMeta(messageId, slotId) || {})
+                : {};
+            const entry = latestImageEntry(record);
+            const currentRef = entry?.imageRef
+                || (meta.cachedImageRef != null ? String(meta.cachedImageRef) : null);
+            if (!currentRef) {
+                return;
+            }
+            const hit = refs.some((r) => String(r) === currentRef);
+            if (hit) {
+                void paintFromStore();
+            }
+        }));
+        unsubBus = () => {
+            for (const off of busUnsubs) {
+                try {
+                    off();
+                } catch {
+                    // ignore
+                }
+            }
+            busUnsubs.length = 0;
+        };
     }
 
     if (deps.host && typeof deps.host.onChatChanged === 'function') {

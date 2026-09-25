@@ -36,7 +36,14 @@ import { requireArg } from '../infra/validate.js';
  * @typedef {object} HostPort
  *
  * @property {() => (ChatId|null)} getCurrentChatId
- *   当前聊天 id；无打开聊天时 null。基线 §9 chat_metadata。
+ *   当前聊天文件名 id（酒馆 getCurrentChatId）；无打开聊天时 null。闸门键用。
+ *
+ * @property {() => (string|null)} getSessionId
+ *   会话稳定 id = chat_metadata.integrity（改名不变；分支为新会话）。
+ *   缺失时适配器生成并经 saveMetadata 落盘；仍无法取得则 null。
+ *
+ * @property {() => ({ chatFileName: string|null, avatarUrl: string|null, groupId: string|null })} getChatLocation
+ *   当前聊天在酒馆侧的定位信息，供目录文件登记 / 清理核对。
  *
  * @property {() => HostMessage[]} getMessages
  *   全部楼层，下标即 messageId。
@@ -46,17 +53,14 @@ import { requireArg } from '../infra/validate.js';
  *
  * @property {(messageId: number) => (HostMessage|null)} getMessage
  *
+ * @property {(messageId: number) => string[]} getMessageSwipeTexts
+ *   某楼全部 swipe 正文（含当前 mes）；无 swipe 时返回 [当前正文]。
+ *
  * @property {(messageId: number, newText: string) => Promise<import('../infra/result.js').Ok<void>|import('../infra/result.js').Err<import('../infra/errors.js').AppError>>} replaceMessageText
  *   唯一允许改正文的入口。失败：HostError。
  *
  * @property {(messageId: number) => void} rerenderMessage
  *   重绘某楼 DOM。
- *
- * @property {(messageId: number) => object} readMessageExtra
- *   读 message.extra（slot 权威记录载体）。基线 §9。
- *
- * @property {(messageId: number, patch: object) => Promise<import('../infra/result.js').Ok<void>|import('../infra/result.js').Err<import('../infra/errors.js').AppError>>} writeMessageExtra
- *   合并写入 message.extra['nai-dbgen'] 并触发存盘。失败：HostError。
  *
  * @property {() => Promise<import('../infra/result.js').Ok<void>|import('../infra/result.js').Err<import('../infra/errors.js').AppError>>} ensureSlotRegexInstalled
  *   写入/校验/补装两条正则。失败：HostError(REGEX_MISSING) / ConfigError。基线 §4。
@@ -74,6 +78,18 @@ import { requireArg } from '../infra/validate.js';
  *   world_info_include_names 决定，不上浮到 application。失败可降级为空串（HostError）。基线 §6。
  *
  * @property {(fn: (chatId: ChatId|null) => void) => Unsubscribe} onChatChanged
+ *
+ * @property {(fn: (chatFileName: string) => void) => Unsubscribe} onChatDeleted
+ *   单聊被删（CHAT_DELETED，载荷为无 .jsonl 的文件名）。
+ *
+ * @property {(fn: (groupChatId: string) => void) => Unsubscribe} onGroupChatDeleted
+ *   群聊被删（GROUP_CHAT_DELETED）。
+ *
+ * @property {(fn: (info: { avatarId?: string|null, groupId?: string|null, oldFileName: string, newFileName: string }) => void) => Unsubscribe} onChatRenamed
+ *   聊天改名（CHAT_RENAMED）。
+ *
+ * @property {() => Promise<import('../infra/result.js').Ok<Array<{ chatFileName: string, avatarUrl: string|null, groupId: string|null, integrity: string|null }>>|import('../infra/result.js').Err<import('../infra/errors.js').AppError>>} listAliveChats
+ *   列出当前用户下仍存在的角色/群组聊天（含 integrity，供存储清理核对）。
  *
  * @property {(fn: (messageId: number) => void) => Unsubscribe} onAiMessageSettled
  *   流式结束后才触发。基线 §3 CHARACTER_MESSAGE_RENDERED 语义封装。
@@ -103,18 +119,23 @@ import { requireArg } from '../infra/validate.js';
 /** @type {readonly string[]} */
 const REQUIRED_METHODS = Object.freeze([
     'getCurrentChatId',
+    'getSessionId',
+    'getChatLocation',
     'getMessages',
     'getRecentAiMessages',
     'getMessage',
+    'getMessageSwipeTexts',
     'replaceMessageText',
     'rerenderMessage',
-    'readMessageExtra',
-    'writeMessageExtra',
     'ensureSlotRegexInstalled',
     'onMessageDomReady',
     'registerOutboundTransform',
     'resolveWorldInfo',
     'onChatChanged',
+    'onChatDeleted',
+    'onGroupChatDeleted',
+    'onChatRenamed',
+    'listAliveChats',
     'onAiMessageSettled',
     'loadSettings',
     'saveSettings',

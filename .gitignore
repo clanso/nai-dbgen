@@ -1,3 +1,8 @@
 node_modules/
 .DS_Store
 *.log
+__pycache__/
+*.pyc
+preview/live-api.local.json
+preview/last-imagegen-prompts.txt
+preview/trace_*.json

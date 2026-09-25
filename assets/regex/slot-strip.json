@@ -1,10 +1,12 @@
 {
     "id": "nai-dbgen-0002-slot-strip",
-    "scriptName": "nai-dbgen:slot-strip",
+    "scriptName": "酒馆数据库生图：发历史时隐藏",
     "findRegex": "/<IMG>\\s*(\\d+)\\s*<\\/IMG>/gi",
     "replaceString": "",
     "trimStrings": [],
-    "placement": [2],
+    "placement": [
+        2
+    ],
     "disabled": false,
     "markdownOnly": false,
     "promptOnly": true,

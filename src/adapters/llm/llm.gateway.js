@@ -1,6 +1,6 @@
 /**
- * L2 适配器 · LlmPort 实现（默认 st-backend，可选 direct）。
- * 归属：W1-C 网关代理实现。W0 仅冻结签名。
+ * L2 适配器 · LlmPort 实现（一律经酒馆 st-backend / custom 来源转发）。
+ * 归属：W1-C 网关代理实现。
  */
 
 import { Ok, Err, isOk, isErr } from '../../infra/result.js';
@@ -14,6 +14,7 @@ import { extractJson as defaultExtractJson } from './json-extract.js';
 const DEFAULT_MAX_ATTEMPTS = 3;
 const BASE_BACKOFF_MS = 2000;
 const MAX_BACKOFF_MS = 60000;
+const LLM_TRANSPORT = 'st-backend';
 
 /**
  * @typedef {import('../../ports/llm.port.js').LlmGatewayDeps} LlmGatewayDeps
@@ -36,6 +37,17 @@ export function createLlmGateway(deps) {
         : DEFAULT_MAX_ATTEMPTS;
     const sleepFn = typeof deps.sleep === 'function' ? deps.sleep : sleep;
 
+    /**
+     * @returns {{ complete: Function, listModels?: Function }|null}
+     */
+    function getTransport() {
+        const t = transports[LLM_TRANSPORT];
+        if (!t || typeof t.complete !== 'function') {
+            return null;
+        }
+        return t;
+    }
+
     return {
         async complete(req) {
             const config = req?.config;
@@ -45,20 +57,19 @@ export function createLlmGateway(deps) {
                 return Err(configError({
                     code: 'LLM_CONFIG_MISSING',
                     message: '未提供 LLM 接口配置',
-                    hint: '请先在 LLM API 库中配置并选择当前项',
+                    hint: '请先在 LLM API 库中配置并选用一条',
                     traceId,
                 }));
             }
 
-            const transportName = config.transport === 'direct' ? 'direct' : 'st-backend';
-            const transport = transports[transportName];
-            if (!transport || typeof transport.complete !== 'function') {
+            const transport = getTransport();
+            if (!transport) {
                 return Err(configError({
                     code: 'LLM_TRANSPORT_MISSING',
-                    message: `未注册 LLM 传输：${transportName}`,
-                    hint: '请检查 container 传输注册表',
+                    message: `LLM 传输通道不可用：${LLM_TRANSPORT}`,
+                    hint: '请刷新页面或重新启用插件后重试',
                     traceId,
-                    context: { transport: transportName },
+                    context: { transport: LLM_TRANSPORT },
                 }));
             }
 
@@ -92,7 +103,6 @@ export function createLlmGateway(deps) {
                 let text = value?.text ?? '';
                 let json = value?.json;
 
-                // 若调用方要结构化输出且尚未有 json：容错提取（R-06）
                 if (json === undefined && req.jsonSchema != null) {
                     const extracted = extractJsonFn(text);
                     if (isOk(extracted)) {
@@ -129,6 +139,25 @@ export function createLlmGateway(deps) {
             }));
         },
 
+        async listModels(config) {
+            if (!config || typeof config !== 'object') {
+                return Err(configError({
+                    code: 'LLM_CONFIG_MISSING',
+                    message: '未提供 LLM 接口配置',
+                }));
+            }
+            const transport = getTransport();
+            if (!transport || typeof transport.listModels !== 'function') {
+                return Err(configError({
+                    code: 'LLM_TRANSPORT_MISSING',
+                    message: `LLM 传输通道不可用：${LLM_TRANSPORT}`,
+                    hint: '请刷新页面或重新启用插件后重试',
+                    context: { transport: LLM_TRANSPORT },
+                }));
+            }
+            return transport.listModels(config);
+        },
+
         async probe(config) {
             if (!config || typeof config !== 'object') {
                 const error = configError({
@@ -144,53 +173,34 @@ export function createLlmGateway(deps) {
                 };
             }
 
-            const preferred = config.transport === 'direct' ? 'direct' : 'st-backend';
-            const order = preferred === 'st-backend'
-                ? ['st-backend', 'direct']
-                : ['direct', 'st-backend'];
+            const listed = await this.listModels(config);
+            if (isOk(listed)) {
+                const count = listed.value.count;
+                return {
+                    ok: true,
+                    transport: LLM_TRANSPORT,
+                    decoder: 'json-extract',
+                    detail: `已获取 ${count} 个模型`,
+                    context: { models: listed.value.models, count },
+                };
+            }
 
-            /** @type {import('../../infra/errors.js').AppError|null} */
-            let lastError = null;
-
-            for (const name of order) {
-                const transport = transports[name];
-                if (!transport || typeof transport.complete !== 'function') {
-                    continue;
-                }
-
-                const result = await transport.complete({
-                    messages: [{ role: 'user', content: 'ping' }],
-                    config: { ...config, transport: name },
-                    // 探测不强制 schema，避免中转因 json_schema 直接 400
-                });
-
-                if (isOk(result)) {
-                    return {
-                        ok: true,
-                        transport: name,
-                        decoder: 'json-extract',
-                        detail: `通道 ${name} 可达`,
-                    };
-                }
-
-                lastError = result.error;
-                // 401/403：通道通但鉴权失败，仍算「传输可用」
-                if (lastError.context?.status === 401 || lastError.context?.status === 403) {
-                    return {
-                        ok: true,
-                        transport: name,
-                        decoder: 'json-extract',
-                        detail: `通道 ${name} 可达，但鉴权失败（请检查 Key）`,
-                        error: lastError,
-                    };
-                }
+            const lastError = listed.error;
+            if (lastError.context?.status === 401 || lastError.context?.status === 403) {
+                return {
+                    ok: false,
+                    transport: LLM_TRANSPORT,
+                    decoder: 'json-extract',
+                    detail: lastError.message || '鉴权失败，请检查 Key',
+                    error: lastError,
+                };
             }
 
             return {
                 ok: false,
-                transport: preferred,
+                transport: LLM_TRANSPORT,
                 decoder: 'json-extract',
-                detail: lastError?.message ?? '所有 LLM 传输均不可用',
+                detail: lastError?.message ?? '无法拉取模型列表',
                 error: lastError ?? transportError({
                     code: 'LLM_PROBE_FAILED',
                     message: 'LLM 连通性自检失败',
@@ -201,7 +211,6 @@ export function createLlmGateway(deps) {
 }
 
 /**
- * 确保 AppError.traceId 不为空（裁决 D14 / 架构 §10）。
  * @template {import('../../infra/errors.js').AppError} E
  * @param {E|null|undefined} err
  * @param {string|null} traceId

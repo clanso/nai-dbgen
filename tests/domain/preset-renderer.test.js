@@ -2,7 +2,7 @@ import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import {
     VARIABLE_NAMES,
-    listVariableAliases,
+    listRegisteredVariables,
     resolveVariableName,
 } from '../../src/domain/template/variable-map.js';
 import {
@@ -12,18 +12,34 @@ import {
 import { createBlockSet, setBlock } from '../../src/domain/blocks/block-set.js';
 
 describe('variable-map', () => {
-    it('resolves Chinese canonical and ASCII aliases', () => {
+    it('resolves only Chinese canonical names', () => {
         assert.equal(resolveVariableName('世界书'), VARIABLE_NAMES.WORLDINFO);
-        assert.equal(resolveVariableName('worldbook'), VARIABLE_NAMES.WORLDINFO);
-        assert.equal(resolveVariableName('CONTEXT'), VARIABLE_NAMES.CONTEXT);
+        assert.equal(resolveVariableName('当前上下文'), VARIABLE_NAMES.CONTEXT);
+        assert.equal(resolveVariableName('角色库'), VARIABLE_NAMES.CHARACTER);
+        assert.equal(resolveVariableName('构图标签'), VARIABLE_NAMES.COMPOSITION);
+        assert.equal(resolveVariableName('特征参考'), VARIABLE_NAMES.FEATURE);
+        assert.equal(resolveVariableName('常驻标签'), VARIABLE_NAMES.CONSTANT);
+        assert.equal(resolveVariableName('近期生图记录'), VARIABLE_NAMES.RECENT_SLOTS);
+        assert.equal(resolveVariableName('用户描述'), VARIABLE_NAMES.USER_DESC);
+        assert.equal(resolveVariableName('worldbook'), null);
+        assert.equal(resolveVariableName('标签库'), null);
+        assert.equal(resolveVariableName('composition'), null);
         assert.equal(resolveVariableName('unknown_x'), null);
         assert.equal(resolveVariableName(''), null);
     });
 
-    it('listVariableAliases covers four blocks', () => {
-        const list = listVariableAliases();
-        assert.equal(list.length, 4);
-        assert.ok(list.every((x) => x.canonical && x.aliases.length > 0));
+    it('listRegisteredVariables covers blocks + user desc', () => {
+        const list = listRegisteredVariables();
+        assert.equal(list.length, 8);
+        assert.ok(list.includes(VARIABLE_NAMES.COMPOSITION));
+        assert.ok(list.includes(VARIABLE_NAMES.FEATURE));
+        assert.ok(list.includes(VARIABLE_NAMES.CONSTANT));
+        assert.ok(list.includes(VARIABLE_NAMES.RECENT_SLOTS));
+        assert.ok(list.includes(VARIABLE_NAMES.USER_DESC));
+        assert.ok(!('TAG' in VARIABLE_NAMES));
+        assert.equal(VARIABLE_NAMES.COMPOSITION, '构图标签');
+        assert.equal(VARIABLE_NAMES.CONSTANT, '常驻标签');
+        assert.equal(VARIABLE_NAMES.RECENT_SLOTS, '近期生图记录');
     });
 });
 
@@ -32,10 +48,33 @@ describe('injectBlockVariables', () => {
         let blocks = createBlockSet();
         blocks = setBlock(blocks, '世界书', 'WI_TEXT');
         blocks = setBlock(blocks, '角色库', 'CHAR_TEXT');
-        blocks = setBlock(blocks, '标签库', 'TAG_SHOULD_NOT_LEAK');
-        const out = injectBlockVariables('前{{世界书}}中{{character}}后', blocks);
+        blocks = setBlock(blocks, '构图标签', 'TAG_SHOULD_NOT_LEAK');
+        const out = injectBlockVariables('前{{世界书}}中{{角色库}}后', blocks);
         assert.equal(out, '前WI_TEXT中CHAR_TEXT后');
         assert.equal(out.includes('TAG'), false);
+        // 旧别名 / ASCII 不替换，保留原文
+        assert.equal(
+            injectBlockVariables('{{标签库}}/{{composition}}', blocks),
+            '{{标签库}}/{{composition}}',
+        );
+    });
+
+    it('renders 常驻标签 like other blocks', () => {
+        let blocks = createBlockSet();
+        blocks = setBlock(blocks, '常驻标签', '杂项: misc\n镜头: cinematic');
+        assert.equal(
+            injectBlockVariables('K={{常驻标签}}', blocks),
+            'K=杂项: misc\n镜头: cinematic',
+        );
+    });
+
+    it('renders 近期生图记录 like other blocks', () => {
+        let blocks = createBlockSet();
+        blocks = setBlock(blocks, '近期生图记录', 'slotid: 1\n尺寸: 832x1216');
+        assert.equal(
+            injectBlockVariables('R={{近期生图记录}}', blocks),
+            'R=slotid: 1\n尺寸: 832x1216',
+        );
     });
 
     it('unknown variables kept as-is; single-pass no recursion', () => {

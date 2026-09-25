@@ -12,6 +12,8 @@ import { mountApiConfigPanel } from './api-config/api-config-panel.js';
 import { mountPresetPanel } from './preset/preset-panel.js';
 import { mountPromptsPanel } from './prompts/prompts-panel.js';
 import { mountTriggerPanel } from './trigger/trigger-panel.js';
+import { mountStoragePanel } from './storage/storage-panel.js';
+import { mountDebugPanel } from './debug/debug-panel.js';
 
 /**
  * @typedef {object} PanelShellDeps
@@ -24,11 +26,13 @@ import { mountTriggerPanel } from './trigger/trigger-panel.js';
 const TABS = [
     { id: 'character', label: '角色库', mount: mountCharacterPanel },
     { id: 'tag', label: '标签库', mount: mountTagPanel },
-    { id: 'artist', label: '画师串', mount: mountArtistPanel },
-    { id: 'api', label: 'API 配置', mount: mountApiConfigPanel },
+    { id: 'artist', label: '画师串库', mount: mountArtistPanel },
+    { id: 'api', label: 'API 库', mount: mountApiConfigPanel },
     { id: 'preset', label: '预设', mount: mountPresetPanel },
-    { id: 'prompts', label: '提示词', mount: mountPromptsPanel },
+    { id: 'prompts', label: '生图提示词', mount: mountPromptsPanel },
     { id: 'trigger', label: '运行配置', mount: mountTriggerPanel },
+    { id: 'storage', label: '存储管理', mount: mountStoragePanel },
+    { id: 'debug', label: '解析调试', mount: mountDebugPanel },
 ];
 
 /**
@@ -99,7 +103,7 @@ export async function openPanelShell(deps, initialTab) {
     const modal = await openModal(
         { host: deps?.host },
         {
-            title: '数据库生图 · 管理台',
+            title: '酒馆数据库生图',
             element: root,
             wide: true,
             large: true,

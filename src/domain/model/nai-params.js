@@ -10,6 +10,7 @@ import {
     isNonEmptyString,
     isPlainObject,
     requireArg,
+    schemaVersionMismatch,
     validationErr,
     validationOk,
 } from '../../infra/validate.js';
@@ -22,8 +23,6 @@ export const NAI_PARAMS_SCHEMA_VERSION = 1;
 export const FIXED_STRUCTURE = Object.freeze({
     v4_prompt: Object.freeze({ use_coords: true, use_order: true }),
     v4_negative_prompt: Object.freeze({
-        use_coords: false,
-        use_order: true,
         legacy_uc: false,
     }),
 });
@@ -37,11 +36,6 @@ export const ARTIST_PREVIEW_SIZE = Object.freeze({
     width: 832,
     height: 1216,
 });
-
-/**
- * 质量词注入策略（架构文档 §0' #3 / §6.6 / R-04）。
- * @typedef {'field'|'caption'} QualityInjectionStrategy
- */
 
 /**
  * @typedef {object} CharCaption
@@ -73,8 +67,7 @@ export const ARTIST_PREVIEW_SIZE = Object.freeze({
  * @property {number} scale
  * @property {string} sampler
  * @property {string} noise_schedule
- * @property {number} seed
- * @property {boolean} seedRandom 每次出图随机
+ * @property {number} seed -1 表示每次出图换一颗种子
  * @property {number} n_samples 固定 1
  * @property {'png'|'webp'} image_format
  * @property {boolean} qualityToggle
@@ -87,7 +80,6 @@ export const ARTIST_PREVIEW_SIZE = Object.freeze({
  * @property {boolean} sm_dyn
  * @property {boolean} straight_alpha
  * @property {boolean} tag_hint_transparent_background
- * @property {QualityInjectionStrategy} qualityStrategy
  */
 
 /**
@@ -113,8 +105,7 @@ export function defaultNaiParams() {
         scale: 5,
         sampler: 'k_euler_ancestral',
         noise_schedule: 'karras',
-        seed: 0,
-        seedRandom: true,
+        seed: -1,
         n_samples: 1,
         image_format: 'png',
         qualityToggle: true,
@@ -127,7 +118,6 @@ export function defaultNaiParams() {
         sm_dyn: false,
         straight_alpha: false,
         tag_hint_transparent_background: false,
-        qualityStrategy: 'field',
     };
 }
 
@@ -148,7 +138,7 @@ export function createNaiParams(input, _deps) {
 export function normalizeNaiParams(obj) {
     const base = defaultNaiParams();
     return {
-        schemaVersion: Number(obj.schemaVersion) || NAI_PARAMS_SCHEMA_VERSION,
+        schemaVersion: NAI_PARAMS_SCHEMA_VERSION,
         model: isNonEmptyString(obj.model) ? String(obj.model) : base.model,
         width: pickInt(obj.width, base.width),
         height: pickInt(obj.height, base.height),
@@ -158,8 +148,7 @@ export function normalizeNaiParams(obj) {
         noise_schedule: isNonEmptyString(obj.noise_schedule)
             ? String(obj.noise_schedule)
             : base.noise_schedule,
-        seed: pickInt(obj.seed, base.seed),
-        seedRandom: obj.seedRandom !== false,
+        seed: resolveStoredSeed(obj, base.seed),
         n_samples: 1,
         image_format: obj.image_format === 'webp' ? 'webp' : 'png',
         qualityToggle: obj.qualityToggle !== false,
@@ -174,7 +163,6 @@ export function normalizeNaiParams(obj) {
         sm_dyn: obj.sm_dyn === true,
         straight_alpha: obj.straight_alpha === true,
         tag_hint_transparent_background: obj.tag_hint_transparent_background === true,
-        qualityStrategy: obj.qualityStrategy === 'caption' ? 'caption' : 'field',
     };
 }
 
@@ -188,6 +176,20 @@ function pickInt(v, fallback) {
 }
 
 /**
+ * 旧数据用 seedRandom 勾选表示随机，那一勾没有写进请求。
+ * 勾选为开时改成种子 -1。
+ * @param {Record<string, unknown>} obj
+ * @param {number} fallback
+ * @returns {number}
+ */
+function resolveStoredSeed(obj, fallback) {
+    if (obj.seedRandom === true) {
+        return -1;
+    }
+    return pickInt(obj.seed, fallback);
+}
+
+/**
  * @param {unknown} obj
  * @returns {{ ok: true, value: NaiParams } | { ok: false, error: import('../../infra/errors.js').AppError }}
  */
@@ -195,12 +197,19 @@ export function validateNaiParams(obj) {
     if (!isPlainObject(obj)) {
         return validationErr('NAI_PARAMS_SHAPE', '生图参数格式无效');
     }
+    const ver = schemaVersionMismatch(obj, NAI_PARAMS_SCHEMA_VERSION, 'NAI_PARAMS_SCHEMA', '生图参数');
+    if (ver) {
+        return ver;
+    }
     const n = normalizeNaiParams(obj);
     if (!isNonEmptyString(n.model)) {
         return validationErr('NAI_PARAMS_MODEL', '请选择生图模型');
     }
     if (!isIntInRange(n.width, 64, 4096) || !isIntInRange(n.height, 64, 4096)) {
         return validationErr('NAI_PARAMS_SIZE', '宽高超出允许范围');
+    }
+    if (n.width % 64 !== 0 || n.height % 64 !== 0) {
+        return validationErr('NAI_PARAMS_SIZE_STEP', '宽高必须是 64 的倍数');
     }
     if (!isIntInRange(n.steps, 1, 50)) {
         return validationErr('NAI_PARAMS_STEPS', '步数必须在 1–50');
@@ -278,15 +287,3 @@ function normalizeCharCaptions(raw) {
     });
 }
 
-/**
- * @param {object} obj
- * @param {number} fromVersion
- * @returns {{ ok: true, value: NaiParams } | { ok: false, error: import('../../infra/errors.js').AppError }}
- */
-export function migrateNaiParams(obj, fromVersion) {
-    requireArg(isPlainObject(obj), 'obj');
-    return validateNaiParams({
-        ...obj,
-        schemaVersion: NAI_PARAMS_SCHEMA_VERSION,
-    });
-}

@@ -46,7 +46,6 @@ export interface NaiParams {
     sm_dyn: boolean;
     straight_alpha: boolean;
     tag_hint_transparent_background: boolean;
-    qualityStrategy: 'field' | 'caption';
 }
 
 export interface PluginSettings {
@@ -89,8 +88,6 @@ export interface HostPort {
     getMessage(messageId: number): HostMessage | null;
     replaceMessageText(messageId: number, newText: string): Promise<Result<void>>;
     rerenderMessage(messageId: number): void;
-    readMessageExtra(messageId: number): object;
-    writeMessageExtra(messageId: number, patch: object): Promise<Result<void>>;
     ensureSlotRegexInstalled(): Promise<Result<void>>;
     onMessageDomReady(fn: (messageEl: Element, messageId: number) => void): Unsubscribe;
     registerOutboundTransform(fn: (mes: string, msgMeta: object) => string): Unsubscribe;
@@ -170,7 +167,7 @@ export interface LlmApiConfig {
     baseUrl: string;
     apiKey: string;
     model: string;
-    transport: 'st-backend' | 'direct';
+    transport: 'st-backend';
     schemaVersion: number;
 }
 
@@ -315,16 +312,37 @@ export interface SlotRecord {
     traceId?: string | null;
 }
 
-/** 权威在 message.extra；IDB 仅索引。见裁决 D12。 */
+/** 权威在服务器会话文件（需求 4.17）；不写 message.extra。图片缓存在 IDB。 */
 export interface SlotRepository {
     getByMessage(messageId: number): Promise<Result<SlotRecord[]>>;
     get(messageId: number, slotId: number): Promise<Result<SlotRecord | null>>;
-    put(messageId: number, records: SlotRecord[]): Promise<Result<void>>;
+    put(
+        messageId: number,
+        records: SlotRecord[],
+        opts?: {
+            sessionId?: string;
+            messagesForTrim?: HostMessage[];
+            chatLocation?: {
+                chatFileName?: string | null;
+                avatarUrl?: string | null;
+                groupId?: string | null;
+            };
+        },
+    ): Promise<Result<void>>;
     recordImage(
         messageId: number,
         slotId: number,
         imageRef: ImageRef,
-        meta?: object,
+        meta?: { createdAt?: string; naiConfigId?: string | null; artistId?: string | null },
+        opts?: {
+            sessionId?: string;
+            messagesForTrim?: HostMessage[];
+            chatLocation?: {
+                chatFileName?: string | null;
+                avatarUrl?: string | null;
+                groupId?: string | null;
+            };
+        },
     ): Promise<Result<SlotRecord>>;
     onChanged(
         fn: (change: { type: string; messageId?: number; slotId?: number }) => void,

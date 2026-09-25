@@ -245,12 +245,28 @@ function rowMeta(item) {
 }
 
 /**
- * @param {object} data
+ * @param {object|object[]|Blob} data
  * @param {string} filename
  */
 function downloadJson(data, filename) {
-    const text = JSON.stringify(data, null, 2);
-    const blob = new Blob([text], { type: 'application/json' });
+    /** @type {Blob} */
+    let blob;
+    if (typeof Blob !== 'undefined' && data instanceof Blob) {
+        blob = data;
+    } else if (Array.isArray(data)) {
+        // 分段拼 Blob，避免一次性 JSON.stringify 整个巨数组卡死
+        /** @type {BlobPart[]} */
+        const parts = ['[\n'];
+        for (let i = 0; i < data.length; i += 1) {
+            if (i > 0) parts.push(',\n');
+            parts.push(JSON.stringify(data[i], null, 2));
+        }
+        parts.push('\n]');
+        blob = new Blob(parts, { type: 'application/json' });
+    } else {
+        const text = JSON.stringify(data ?? {}, null, 2);
+        blob = new Blob([text], { type: 'application/json' });
+    }
     const url = URL.createObjectURL(blob);
     const safe = safeImageUrl(url);
     if (!safe) {
@@ -276,10 +292,7 @@ async function resolveOverwriteConfirm(count, custom) {
     if (typeof custom === 'function') {
         return Boolean(await custom(count));
     }
-    const message = t('import.overwriteConfirm', { count });
-    if (typeof globalThis.confirm === 'function') {
-        return Boolean(globalThis.confirm(message));
-    }
+    // 禁止 window.confirm；未注入回调则拒绝覆盖（安全默认）
     return false;
 }
 
@@ -288,7 +301,7 @@ async function resolveOverwriteConfirm(count, custom) {
  * @param {object} deps
  * @param {(data: object, strategy: string) => Promise<object>} deps.importJson
  * @param {() => Promise<object>} deps.exportJson
- * @param {(count: number) => boolean|Promise<boolean>} [deps.confirmOverwrite] D53：宿主弹窗确认；未传退回 window.confirm
+ * @param {(count: number) => boolean|Promise<boolean>} [deps.confirmOverwrite] D53：面板注入异步确认（confirmAsk）；未传则拒绝覆盖
  * @returns {{ destroy: () => void }}
  */
 export function mountImportExport(root, deps) {
@@ -390,13 +403,14 @@ export function mountImportExport(root, deps) {
     const strategySelect = document.createElement('select');
     strategySelect.className = 'nd-select';
     for (const [value, key] of [
-        ['skip', 'import.skip'],
         ['overwrite', 'import.overwrite'],
+        ['skip', 'import.skip'],
         ['rename', 'import.rename'],
     ]) {
         const opt = document.createElement('option');
         opt.value = value;
         opt.textContent = t(key);
+        if (value === 'overwrite') opt.selected = true;
         strategySelect.appendChild(opt);
     }
     strategyLabel.append(strategyTitle, strategySelect);
@@ -408,8 +422,12 @@ export function mountImportExport(root, deps) {
             void commitImport();
         },
     });
+    const commitLabel = t('import.commit');
+    const statusEl = document.createElement('p');
+    statusEl.className = 'nd-import-status';
+    statusEl.setAttribute('aria-live', 'polite');
 
-    toolbar.append(toolbarCopy, strategyLabel, commitBtn);
+    toolbar.append(toolbarCopy, strategyLabel, commitBtn, statusEl);
 
     const tableWrap = document.createElement('div');
     tableWrap.className = 'nd-table-scroll';
@@ -517,32 +535,74 @@ export function mountImportExport(root, deps) {
         }
     }
 
+    /**
+     * @param {unknown} result
+     * @returns {string}
+     */
+    function formatImportResult(result) {
+        if (!result || typeof result !== 'object') {
+            return t('import.done');
+        }
+        const rec = /** @type {{ imported?: number, skipped?: number, errors?: string[] }} */ (result);
+        if (typeof rec.imported !== 'number' && typeof rec.skipped !== 'number') {
+            return t('import.done');
+        }
+        const errors = Array.isArray(rec.errors) ? rec.errors.filter(Boolean) : [];
+        const parts = [`已导入 ${rec.imported || 0}`];
+        if (rec.skipped) {
+            parts.push(`跳过 ${rec.skipped}`);
+        }
+        if (errors.length) {
+            parts.push(`失败 ${errors.length}：${errors.slice(0, 2).join('；')}`);
+        }
+        return parts.join('，');
+    }
+
     async function commitImport() {
-        if (!importJson || !pendingData) return;
+        if (!importJson || !pendingData || commitBtn.disabled) return;
         setError('');
-        try {
-            const checked = previewRows.map((row) => Boolean(row.checked));
-            const filtered = filterImportPayload(pendingData, checked);
-            if (filtered == null) {
-                setError(t('import.empty'));
+        const checked = previewRows.map((row) => Boolean(row.checked));
+        const filtered = filterImportPayload(pendingData, checked);
+        if (filtered == null) {
+            statusEl.textContent = t('import.empty');
+            setError(t('import.empty'));
+            return;
+        }
+
+        const mode = strategySelect.value || 'overwrite';
+        if (mode === 'overwrite') {
+            const count = checked.filter(Boolean).length;
+            const ok = await resolveOverwriteConfirm(count, confirmOverwriteCb);
+            if (!ok) {
+                statusEl.textContent = t('import.overwriteCancelled');
+                setError(t('import.overwriteCancelled'));
                 return;
             }
+        }
 
-            const mode = strategySelect.value || 'skip';
-            if (mode === 'overwrite') {
-                const count = checked.filter(Boolean).length;
-                const ok = await resolveOverwriteConfirm(count, confirmOverwriteCb);
-                if (!ok) {
-                    setError(t('import.overwriteCancelled'));
-                    return;
-                }
+        commitBtn.disabled = true;
+        commitBtn.textContent = '导入中…';
+        statusEl.textContent = `正在导入 ${checked.filter(Boolean).length} 条…`;
+        try {
+            const result = await importJson(filtered, mode);
+            const line = formatImportResult(result);
+            statusEl.textContent = line;
+            summary.textContent = line;
+            const errors = result && typeof result === 'object'
+                ? /** @type {{ errors?: string[] }} */ (result).errors
+                : null;
+            if (Array.isArray(errors) && errors.length) {
+                setError(errors.slice(0, 3).join('；'));
+            } else {
+                setError('');
             }
-
-            await importJson(filtered, mode);
-            setError('');
-            summary.textContent = t('import.done');
         } catch (err) {
-            setError(err instanceof Error ? err.message : String(err));
+            const message = err instanceof Error ? err.message : String(err);
+            statusEl.textContent = message;
+            setError(message);
+        } finally {
+            commitBtn.disabled = false;
+            commitBtn.textContent = commitLabel;
         }
     }
 

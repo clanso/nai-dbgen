@@ -103,8 +103,12 @@ export function createAutoTriggerService(deps) {
             });
             return;
         }
+        /** @type {Array<{ slotId: number, imageRef: string, writeOpts?: object, traceId?: string, chatId?: string|null }>} */
+        const deferred = [];
+        const parallel = deps.loadSettings().naiParallel === true;
+        /** @type {Array<import('../domain/model/slot.js').SlotRecord>} */
+        const pending = [];
         for (const record of listR.value) {
-            // 读单条再确认：Err → 跳过（D39）；已有图由 renderSlot 拒紹
             const again = await deps.slotRepo.get(messageId, record.slotId);
             if (!again.ok) {
                 log.warn('autoRenderSlots: get failed; skip slot', {
@@ -117,7 +121,18 @@ export function createAutoTriggerService(deps) {
             if (!again.value) {
                 continue;
             }
-            const r = await deps.renderSlot.execute(messageId, record.slotId);
+            pending.push(again.value);
+        }
+
+        /**
+         * @param {import('../domain/model/slot.js').SlotRecord} record
+         */
+        async function renderOne(record) {
+            const r = await deps.renderSlot.execute(messageId, record.slotId, { deferPersist: true });
+            if (r.ok && r.value?.deferred) {
+                deferred.push(r.value.deferred);
+                return;
+            }
             if (!r.ok
                 && r.error?.code !== 'SLOT_ALREADY_RENDERED'
                 && r.error?.code !== 'CHAT_CHANGED') {
@@ -126,6 +141,26 @@ export function createAutoTriggerService(deps) {
                     slotId: record.slotId,
                     code: r.error?.code,
                 });
+            }
+        }
+
+        try {
+            if (parallel) {
+                await Promise.all(pending.map((record) => renderOne(record)));
+            } else {
+                for (const record of pending) {
+                    await renderOne(record);
+                }
+            }
+        } finally {
+            if (deferred.length && typeof deps.renderSlot.commitRendered === 'function') {
+                const committed = await deps.renderSlot.commitRendered(messageId, deferred);
+                if (!committed.ok) {
+                    log.warn('autoRenderSlots file write failed', {
+                        messageId,
+                        code: committed.error?.code,
+                    });
+                }
             }
         }
     }

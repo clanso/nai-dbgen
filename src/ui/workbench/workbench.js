@@ -13,29 +13,32 @@ import {
     createButton,
     createToggle,
     createCheckbox,
-    createField,
-    createNumberField,
-    createSelect,
     createFieldGroup,
     createDetails,
     createInlineError,
     createStatusPill,
 } from '../common/controls.js';
-import { defaultNaiParams, emptyNaiCaption } from '../../domain/model/nai-params.js';
+import { createNaiParamsForm } from '../common/nai-params-form.js';
+import { openModal } from '../common/modal.js';
+import {
+    parsePromptText,
+} from '../common/prompt-text.js';
+import { emptyNaiCaption } from '../../domain/model/nai-params.js';
+import { mergePluginSettings } from '../../domain/model/plugin-settings.js';
 import { mountCaptionEditor } from './caption-editor.js';
 import {
+    WORKBENCH_MAX_CHARACTERS,
     buildWritePromptInput,
     buildGenerateImageInput,
     createDecoupledWorkbenchApi,
     resolveSessionParams,
-    assembleWorkbenchNaiParams,
     formatUnmatchedKeys,
     isWorkbenchAbort,
     workbenchErrorMessage,
-    workbenchErrorTraceId,
     canSubmitGenerate,
     gatePreviewUrl,
     previewUrlFromImage,
+    resolvePasteArtistAction,
 } from './workbench-logic.js';
 
 /**
@@ -98,6 +101,14 @@ export function mountWorkbench(root, deps) {
     const loadSettings = typeof deps?.loadSettings === 'function'
         ? deps.loadSettings
         : () => (host && typeof host.loadSettings === 'function' ? host.loadSettings() : {});
+    const saveSettings = typeof deps?.saveSettings === 'function'
+        ? deps.saveSettings
+        : (s) => {
+            if (host && typeof host.saveSettings === 'function') host.saveSettings(s);
+        };
+    const artistRepo = deps?.artistRepo
+        || deps?.repos?.artist
+        || null;
 
     const sessionParams = resolveSessionParams(loadSettings());
 
@@ -115,11 +126,11 @@ export function mountWorkbench(root, deps) {
     const nlField = (() => {
         const wrap = el('label', 'nd-field');
         const label = el('span', 'nd-field__label');
-        setText(label, '自然语言（写提示词用）');
+        setText(label, '自然语言');
         /** @type {HTMLTextAreaElement} */
         const ta = /** @type {HTMLTextAreaElement} */ (el('textarea', 'nd-textarea'));
         ta.rows = 4;
-        ta.placeholder = '描述想要的画面；也可留空后直接手填下方结构化提示词';
+        ta.placeholder = '描述想要的画面';
         wrap.append(label, ta);
         return {
             el: wrap,
@@ -131,7 +142,7 @@ export function mountWorkbench(root, deps) {
 
     const libBox = el('div', 'nd-wb-libraries');
     const libTitle = el('span', 'nd-field__label');
-    setText(libTitle, '本次勾选的标签库（不改全局激活）');
+    setText(libTitle, '本次使用的标签库');
     libBox.appendChild(libTitle);
     /** @type {Array<{ id: string, control: ReturnType<typeof createCheckbox> }>} */
     const libChecks = [];
@@ -144,8 +155,13 @@ export function mountWorkbench(root, deps) {
             if (!r || !r.ok || !Array.isArray(r.value)) return;
             for (const lib of r.value) {
                 if (!lib || lib.id == null) continue;
+                const kind = lib.kind === 'feature'
+                    ? '特征库'
+                    : lib.kind === 'constant'
+                        ? '常驻库'
+                        : '构图库';
                 const control = createCheckbox({
-                    label: String(lib.name || lib.id),
+                    label: `${String(lib.name || lib.id)}（${kind}）`,
                     checked: lib.active === true,
                 });
                 libChecks.push({ id: String(lib.id), control });
@@ -181,163 +197,148 @@ export function mountWorkbench(root, deps) {
         initial: emptyNaiCaption(),
     });
 
+    const captionToolbar = el('div', 'nd-wb-caption-toolbar');
+    const pasteBtn = createButton({
+        label: '粘贴提示词',
+        variant: 'ghost',
+        onClick: () => { void onPastePrompt(); },
+    });
+    captionToolbar.appendChild(pasteBtn);
+
+    /**
+     * @returns {Promise<string|null>}
+     */
+    async function readClipboardText() {
+        try {
+            if (typeof navigator !== 'undefined'
+                && navigator.clipboard
+                && typeof navigator.clipboard.readText === 'function') {
+                return await navigator.clipboard.readText();
+            }
+        } catch {
+            // fall through
+        }
+        return null;
+    }
+
+    /**
+     * 剪贴板不可用时弹出文本框让用户手动粘贴。
+     * @returns {Promise<string|null>}
+     */
+    function promptManualPaste() {
+        return new Promise((resolve) => {
+            const wrap = el('div', 'nd-wb-paste-fallback');
+            const hint = el('p', 'nd-muted');
+            setText(hint, '无法读取剪贴板，请把提示词粘贴到下方后确认。');
+            /** @type {HTMLTextAreaElement} */
+            const ta = /** @type {HTMLTextAreaElement} */ (el('textarea', 'nd-textarea'));
+            ta.rows = 12;
+            ta.placeholder = '场景\n正面：…';
+            const actions = el('div', 'nd-wb-actions');
+            let settled = false;
+            /** @type {{ destroy: () => void }|null} */
+            let modalHandle = null;
+
+            const finish = (value) => {
+                if (settled) return;
+                settled = true;
+                try { modalHandle?.destroy(); } catch { /* ignore */ }
+                resolve(value);
+            };
+
+            const cancelBtn = createButton({
+                label: '取消',
+                variant: 'ghost',
+                onClick: () => finish(null),
+            });
+            const okBtn = createButton({
+                label: '确认',
+                variant: 'primary',
+                onClick: () => finish(ta.value),
+            });
+            actions.append(okBtn, cancelBtn);
+            wrap.append(hint, ta, actions);
+
+            void openModal({ host }, {
+                title: '粘贴提示词',
+                element: wrap,
+                wide: true,
+                allowVerticalScrolling: true,
+            }).then((h) => {
+                modalHandle = h;
+            }).catch(() => {
+                finish(null);
+            });
+        });
+    }
+
+    /**
+     * @returns {Promise<object[]>}
+     */
+    async function listArtists() {
+        if (!artistRepo || typeof artistRepo.list !== 'function') return [];
+        try {
+            const result = await artistRepo.list();
+            if (result && result.ok && Array.isArray(result.value)) {
+                return result.value;
+            }
+        } catch {
+            /* ignore */
+        }
+        return [];
+    }
+
+    /**
+     * @param {string} text
+     */
+    async function applyPastedText(text) {
+        const parsed = parsePromptText(text, { maxCharacters: WORKBENCH_MAX_CHARACTERS });
+        if (!parsed.ok) {
+            toast(host, 'error', parsed.error?.message || '剪贴板里不是提示词');
+            return;
+        }
+        captionEditor.setCaption(parsed.value.caption);
+
+        const artists = await listArtists();
+        const side = resolvePasteArtistAction(parsed.value, artists);
+        if (side.truncateMessage) {
+            toast(host, 'warning', side.truncateMessage);
+        }
+        toast(host, 'success', '已粘贴');
+
+        if (side.artistAction === 'matched' && side.matchedArtist) {
+            const next = mergePluginSettings(loadSettings(), {
+                activeArtistId: side.matchedArtist.id,
+            });
+            saveSettings(next);
+            toast(host, 'success', `已切换画师串：${side.matchedArtist.name}`);
+        } else if (side.artistAction === 'missing') {
+            toast(host, 'warning', '画师串库里没有这一串，未切换');
+        }
+    }
+
+    async function onPastePrompt() {
+        let text = await readClipboardText();
+        if (text == null) {
+            text = await promptManualPaste();
+        }
+        if (text == null) return;
+        await applyPastedText(text);
+    }
+
     // ── 出图区（独立；绝不调 writePrompt）──────────────────────
     // replaceCharacterKeywords：用户显式控件，程序绝不推断
     const replaceToggle = createToggle({
-        label: '是否替换角色关键字',
+        label: '替换角色关键字',
+        hint: '把提示词里的角色关键字换成该角色固定特征后再出图',
         checked: false,
     });
 
-    // 4.13 控件：默认值一律取自 domain（与 trigger-panel 选型对齐，D47）
-    const defaults = defaultNaiParams();
-    const model = createField({
-        label: '模型',
-        value: String(sessionParams.model ?? defaults.model),
-    });
-    const width = createNumberField({
-        label: '宽',
-        value: Number(sessionParams.width ?? defaults.width),
-        min: 64,
-        max: 2048,
-        step: 64,
-    });
-    const height = createNumberField({
-        label: '高',
-        value: Number(sessionParams.height ?? defaults.height),
-        min: 64,
-        max: 2048,
-        step: 64,
-    });
-    const steps = createNumberField({
-        label: 'steps',
-        value: Number(sessionParams.steps ?? defaults.steps),
-        min: 1,
-        max: 50,
-        step: 1,
-    });
-    const scale = createNumberField({
-        label: 'scale',
-        value: Number(sessionParams.scale ?? defaults.scale),
-        min: 0,
-        max: 10,
-        step: 0.1,
-    });
-    const sampler = createField({
-        label: 'sampler',
-        value: String(sessionParams.sampler ?? defaults.sampler),
-    });
-    const noise = createField({
-        label: 'noise_schedule',
-        value: String(sessionParams.noise_schedule ?? defaults.noise_schedule),
-    });
-    const seed = createNumberField({
-        label: 'seed',
-        value: Number(sessionParams.seed ?? defaults.seed),
-        min: 0,
-        max: 4294967295,
-        step: 1,
-    });
-    const seedRandom = createCheckbox({
-        label: '随机 seed',
-        checked: sessionParams.seedRandom !== false,
-    });
-    const imageFormat = createSelect({
-        label: '图片格式',
-        value: sessionParams.image_format === 'webp' ? 'webp' : 'png',
-        options: [
-            { value: 'png', label: 'png' },
-            { value: 'webp', label: 'webp' },
-        ],
-    });
-    const qualityToggle = createCheckbox({
-        label: 'qualityToggle',
-        checked: sessionParams.qualityToggle !== false,
-    });
-    const tagHintQt = createCheckbox({
-        label: 'tag_hint_qt',
-        checked: sessionParams.tag_hint_qt !== false,
-    });
-    const ucPreset = createNumberField({
-        label: 'ucPreset',
-        value: Number(sessionParams.ucPreset ?? defaults.ucPreset),
-        min: 0,
-        max: 10,
-        step: 1,
-    });
-    const tagHintUc = createCheckbox({
-        label: 'tag_hint_uc_preset',
-        checked: sessionParams.tag_hint_uc_preset !== false,
-    });
-    const cfgRescale = createNumberField({
-        label: 'cfg_rescale',
-        value: Number(sessionParams.cfg_rescale ?? defaults.cfg_rescale),
-        min: 0,
-        max: 1,
-        step: 0.01,
-    });
-    const varietyEnabled = createCheckbox({
-        label: '启用 Variety（skip_cfg_above_sigma）',
-        checked: sessionParams.skip_cfg_above_sigma != null,
-    });
-    const varietySigma = createNumberField({
-        label: 'skip_cfg_above_sigma',
-        value: sessionParams.skip_cfg_above_sigma == null
-            ? 0
-            : Number(sessionParams.skip_cfg_above_sigma),
-        min: 0,
-        max: 100,
-        step: 0.1,
-    });
-    const sm = createCheckbox({
-        label: 'sm（SMEA）',
-        checked: sessionParams.sm === true,
-    });
-    const smDyn = createCheckbox({
-        label: 'sm_dyn',
-        checked: sessionParams.sm_dyn === true,
-    });
-    const straightAlpha = createCheckbox({
-        label: 'straight_alpha',
-        checked: sessionParams.straight_alpha === true,
-    });
-    const tagHintTransparent = createCheckbox({
-        label: 'tag_hint_transparent_background',
-        checked: sessionParams.tag_hint_transparent_background === true,
-    });
-    const qualityStrategy = createSelect({
-        label: 'qualityStrategy',
-        value: sessionParams.qualityStrategy === 'caption' ? 'caption' : 'field',
-        options: [
-            { value: 'field', label: 'field' },
-            { value: 'caption', label: 'caption' },
-        ],
-    });
+    // 4.13 共用组件（与运行配置同一套）
+    const paramsForm = createNaiParamsForm(sessionParams);
 
     function readParams() {
-        return assembleWorkbenchNaiParams(sessionParams, {
-            model: model.getValue(),
-            width: width.getValue(),
-            height: height.getValue(),
-            steps: steps.getValue(),
-            scale: scale.getValue(),
-            sampler: sampler.getValue(),
-            noise_schedule: noise.getValue(),
-            seed: seed.getValue(),
-            seedRandom: seedRandom.getValue(),
-            image_format: imageFormat.getValue(),
-            qualityToggle: qualityToggle.getValue(),
-            tag_hint_qt: tagHintQt.getValue(),
-            ucPreset: ucPreset.getValue(),
-            tag_hint_uc_preset: tagHintUc.getValue(),
-            cfg_rescale: cfgRescale.getValue(),
-            varietyEnabled: varietyEnabled.getValue(),
-            skip_cfg_above_sigma: varietySigma.getValue(),
-            sm: sm.getValue(),
-            sm_dyn: smDyn.getValue(),
-            straight_alpha: straightAlpha.getValue(),
-            tag_hint_transparent_background: tagHintTransparent.getValue(),
-            qualityStrategy: qualityStrategy.getValue(),
-        });
+        return paramsForm.getValue();
     }
 
     /** @type {AbortController|null} */
@@ -475,14 +476,21 @@ export function mountWorkbench(root, deps) {
             }
             if (!result || result.ok !== true) {
                 const msg = workbenchErrorMessage(result);
-                const tid = workbenchErrorTraceId(result);
-                writeErr.setMessage(tid ? `${msg}（${tid}）` : msg);
+                writeErr.setMessage(msg);
                 statusPill.setStatus('error');
                 statusPill.setLabel('写提示词失败');
                 toast(host, 'error', msg);
                 return;
             }
             captionEditor.setCaption(result.value.caption);
+            if (result.value.width != null && result.value.height != null) {
+                const cur = paramsForm.getValue();
+                paramsForm.setValue({
+                    ...cur,
+                    width: result.value.width,
+                    height: result.value.height,
+                });
+            }
             setUnmatched(result.value.unmatchedKeys);
             if (Array.isArray(result.value.unmatchedKeys) && result.value.unmatchedKeys.length > 0) {
                 toast(host, 'warning', formatUnmatchedKeys(result.value.unmatchedKeys));
@@ -521,8 +529,7 @@ export function mountWorkbench(root, deps) {
             }
             if (!result || result.ok !== true) {
                 const msg = workbenchErrorMessage(result);
-                const tid = workbenchErrorTraceId(result);
-                genErr.setMessage(tid ? `${msg}（${tid}）` : msg);
+                genErr.setMessage(msg);
                 statusPill.setStatus('error');
                 statusPill.setLabel('出图失败');
                 toast(host, 'error', msg);
@@ -547,27 +554,19 @@ export function mountWorkbench(root, deps) {
     writeActions.append(writeBtn, writeCancelBtn);
 
     const writeSection = createFieldGroup({
-        title: '写提示词（不出图）',
+        title: '写提示词',
         children: [nlField.el, libBox, writeActions, writeErr.el, unmatchedEl],
     });
 
     const captionSection = createFieldGroup({
-        title: '当前提示词（NaiCaption）',
-        children: [captionMount],
+        title: '当前提示词',
+        children: [captionToolbar, captionMount],
     });
 
     const paramsDetails = createDetails({
-        summary: '本次出图参数（覆盖 4.13，仅作用于这一次）',
+        summary: '本次出图参数',
         open: false,
-        body: [
-            model.el, width.el, height.el, steps.el, scale.el,
-            sampler.el, noise.el, seed.el, seedRandom.el,
-            imageFormat.el, qualityToggle.el, tagHintQt.el,
-            ucPreset.el, tagHintUc.el, cfgRescale.el,
-            varietyEnabled.el, varietySigma.el,
-            sm.el, smDyn.el, straightAlpha.el, tagHintTransparent.el,
-            qualityStrategy.el,
-        ],
+        body: [paramsForm.el],
     });
 
     const genActions = el('div', 'nd-wb-actions');
@@ -585,11 +584,8 @@ export function mountWorkbench(root, deps) {
     });
 
     const header = el('div', 'nd-wb-header');
-    const title = el('h3', 'nd-wb-title');
-    setText(title, '生成工作台');
-    const hint = el('p', 'nd-muted');
-    setText(hint, '写提示词与出图彼此独立。替换角色关键字仅由下方开关决定，不根据提示词来源推断。');
-    header.append(title, statusPill.el, hint);
+    // 弹层 `.nd-popup-header` 已有「生成工作台」标题 + ×；此处只放状态
+    header.append(statusPill.el);
 
     shell.append(header, writeSection.el, captionSection.el, genSection.el);
     root.appendChild(shell);
@@ -611,28 +607,7 @@ export function mountWorkbench(root, deps) {
             for (const c of libChecks) c.control.destroy();
             captionEditor.destroy();
             replaceToggle.destroy();
-            model.destroy();
-            width.destroy();
-            height.destroy();
-            steps.destroy();
-            scale.destroy();
-            sampler.destroy();
-            noise.destroy();
-            seed.destroy();
-            seedRandom.destroy();
-            imageFormat.destroy();
-            qualityToggle.destroy();
-            tagHintQt.destroy();
-            ucPreset.destroy();
-            tagHintUc.destroy();
-            cfgRescale.destroy();
-            varietyEnabled.destroy();
-            varietySigma.destroy();
-            sm.destroy();
-            smDyn.destroy();
-            straightAlpha.destroy();
-            tagHintTransparent.destroy();
-            qualityStrategy.destroy();
+            paramsForm.destroy();
             paramsDetails.destroy();
             writeSection.destroy();
             captionSection.destroy();

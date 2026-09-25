@@ -241,11 +241,38 @@ export function installFakeDom() {
         }
 
         /**
-         * @param {string} _sel
-         * @returns {null}
+         * @param {string} sel
+         * @returns {FakeElement|null}
          */
-        querySelector(_sel) {
-            return null;
+        querySelector(sel) {
+            const walk = (/** @type {FakeElement} */ node) => {
+                for (const child of node.childNodes || []) {
+                    if (!(child instanceof FakeElement)) continue;
+                    if (matchesSelector(child, sel)) return child;
+                    const hit = walk(child);
+                    if (hit) return hit;
+                }
+                return null;
+            };
+            return walk(this);
+        }
+
+        /**
+         * @param {string} sel
+         * @returns {FakeElement[]}
+         */
+        querySelectorAll(sel) {
+            /** @type {FakeElement[]} */
+            const out = [];
+            const walk = (/** @type {FakeElement} */ node) => {
+                for (const child of node.childNodes || []) {
+                    if (!(child instanceof FakeElement)) continue;
+                    if (matchesSelector(child, sel)) out.push(child);
+                    walk(child);
+                }
+            };
+            walk(this);
+            return out;
         }
 
         after(node) {

@@ -1,17 +1,21 @@
 /**
- * L5 UI · 设计令牌（架构文档 §8.2）。W0 必须定死，后续代理不得改名。
+ * L5 UI · 设计令牌（架构文档 §8.2 / D63）。W0 必须定死，后续代理不得改名。
  * 全部定义在 :is(#nai-dbgen-root, .nd-root) 下（D52：以 .nd-root 为准；id 仅过渡），绝不碰 :root / html / body。
+ * 表层颜色照搬本地项目 app/public/styles.css，不再绑 --SmartTheme*。
  * 归属：W0 契约冻结（tokens）；样式消费归 W1-E / W2-*。
  */
 
 :is(#nai-dbgen-root, .nd-root) {
-    /* 表层：跟随酒馆主题，保证在任何主题下都不突兀。均带兜底值 */
-    --nd-text: var(--SmartThemeBodyColor, #4b3040);
-    --nd-surface: var(--SmartThemeBlurTintColor, #fffdfd);
-    --nd-surface-2: var(--SmartThemeBotMesBlurTintColor, #fff0f6);
-    --nd-line: var(--SmartThemeBorderColor, rgba(123, 70, 96, 0.21));
-    --nd-muted: var(--SmartThemeEmColor, #7f5f70);
-    --nd-shadow-c: var(--SmartThemeShadowColor, rgba(123, 70, 96, 0.16));
+    /* 表层：照搬本地项目（D63），直接取值，不跟随宿主主题 */
+    --nd-bg: #fff7fb;
+    --nd-surface: #fffdfd;
+    --nd-surface-2: #fff0f6;
+    --nd-text: #4b3040;
+    --nd-muted: #7f5f70;
+    --nd-soft: #735466;
+    --nd-line: rgba(123, 70, 96, 0.21);
+    --nd-line-strong: rgba(123, 70, 96, 0.36);
+    --nd-shadow-c: rgba(123, 70, 96, 0.16);
 
     /* 身份层：家族基因，不跟主题变 */
     --nd-accent: #c13d75;
@@ -19,37 +23,90 @@
     --nd-accent-soft: #f47eae;
     --nd-danger: #d94f72;
 
-    /* 形状与尺寸：照搬本地项目 */
-    --nd-radius: 18px;
-    --nd-control-radius: 10px;
+    /*
+     * 圆角令牌（D69）：四档递减 + pill；外层 ≥ 内层，嵌套内层用更小档。
+     * lg 弹窗/抽屉/大面板 · md 卡片/分组/查看器图 · sm 按钮/输入/下拉/标签 · xs 徽标/关闭/复选
+     */
+    --nd-radius-lg: 16px;
+    --nd-radius-md: 12px;
+    --nd-radius-sm: 8px;
+    --nd-radius-xs: 6px;
+    --nd-radius-pill: 999px;
     --nd-h-micro: 28px;
     --nd-h-icon: 32px;
     --nd-h: 36px;
     --nd-h-primary: 40px;
 
+    /* 弹层/面板内边距与纵向节奏（管理台 / 工作台 / 浮层共用） */
+    --nd-space-panel: 20px;
+    --nd-space-stack: 12px;
+
+    /*
+     * 滚动条（压过酒馆全局 ::-webkit-scrollbar）：细滑块、透明轨道、主题半透明色。
+     * 不跟宿主 grey 滑块；内容不足一屏时不应出现任何槽痕迹。
+     */
+    --nd-scroll-size: 8px;
+    --nd-scroll-thumb: color-mix(in srgb, var(--nd-accent) 32%, transparent);
+    --nd-scroll-thumb-hover: color-mix(in srgb, var(--nd-accent) 52%, transparent);
+    --nd-scroll-thumb-active: color-mix(in srgb, var(--nd-accent-deep) 62%, transparent);
+    --nd-scroll-track: transparent;
+
     /* 派生结构令牌（components.css 只消费变量，不写死色值） */
-    --nd-soft: var(--SmartThemeEmColor, #735466);
-    --nd-line-strong: color-mix(in srgb, var(--nd-line) 70%, var(--nd-text));
     --nd-on-accent: #ffffff;
     --nd-shadow: 0 22px 60px var(--nd-shadow-c);
     --nd-shadow-card: 0 18px 50px color-mix(in srgb, var(--nd-shadow-c) 60%, transparent);
-    --nd-cover-grad-a: #f9d7e6;
-    --nd-cover-grad-b: #f0e2fa;
+    /* 封面渐变：照搬 lab.css `.style-cover` 三停色 */
+    --nd-cover-grad-a: #fde6f0;
+    --nd-cover-grad-b: #fff7fa;
+    --nd-cover-grad-c: #eddcf8;
+    /* 首字水印：lab.css `.cover-monogram` 字号（不跟宿主累乘；下限另议） */
+    --nd-cover-mono-size: 84px;
     --nd-accent-wash: color-mix(in srgb, var(--nd-accent-soft) 18%, var(--nd-surface));
     --nd-accent-ring: color-mix(in srgb, var(--nd-accent) 28%, transparent);
     --nd-danger-wash: color-mix(in srgb, var(--nd-danger) 6%, var(--nd-surface));
     --nd-danger-ring: color-mix(in srgb, var(--nd-danger) 22%, transparent);
-    --nd-toggle-track: color-mix(in srgb, var(--nd-muted) 28%, var(--nd-surface));
-    --nd-toggle-knob: color-mix(in srgb, var(--nd-muted) 55%, var(--nd-surface));
+    /* 开关轨/钮：照搬 styles.css .toggle-row i */
+    --nd-toggle-track: #eadde4;
+    --nd-toggle-knob: #a88e9c;
     --nd-status-idle: color-mix(in srgb, var(--nd-muted) 45%, var(--nd-surface));
-    --nd-input-bg: var(--nd-surface);
+    /* 输入底：照搬 .prompt-input / select 的 #fff */
+    --nd-input-bg: #ffffff;
+    /* ghost 按钮 hover：照搬 .button-ghost:hover */
+    --nd-ghost-hover: #ffe5f0;
+    /* picker option hover 边：照搬 #f0d1df */
+    --nd-picker-hover-line: #f0d1df;
     --nd-serif: Georgia, "Songti SC", "Noto Serif SC", serif;
 
-    /* 字号跟宿主缩放，字族留自己 */
-    font-size: var(--mainFontSize, 15px);
+    /*
+     * 字号令牌（D64）：全部从 --mainFontSize 直算，禁止嵌套 em 累乘。
+     * 档位反推自 app/public/styles.css 控件词汇（相对默认 15px）：
+     *   9 caption / 11 text·icon·field / 12 button / 14 brand / 18 section / 25 panel-h2
+     * 下限 11px：宿主字号再小也不掉到不可读。
+     */
+    --nd-fs-base: max(11px, var(--mainFontSize, 15px));
+    --nd-fs-xs: max(11px, calc(var(--mainFontSize, 15px) * 9 / 15));
+    --nd-fs-sm: max(11px, calc(var(--mainFontSize, 15px) * 11 / 15));
+    --nd-fs-md: max(11px, calc(var(--mainFontSize, 15px) * 12 / 15));
+    --nd-fs-lg: max(11px, calc(var(--mainFontSize, 15px) * 14 / 15));
+    --nd-fs-title: max(11px, calc(var(--mainFontSize, 15px) * 18 / 15));
+    --nd-fs-display: max(11px, calc(var(--mainFontSize, 15px) * 25 / 15));
+
+    /*
+     * 两层列表子行高：两行文字（fs-md + fs-sm，lh 1.25）+ 行距 2px + 上下余量。
+     * 默认字号下 ≈ 12*1.25 + 11*1.25 + 2 + 13 = 44；须与 nested-list NESTED_CHILD_ROW_HEIGHT 一致。
+     */
+    --nd-nested-child-h: 44px;
+
+    /* 字号跟宿主缩放，字族留自己（D63 唯一保留的宿主联动；算法见上 D64） */
+    font-size: var(--nd-fs-base);
     font-family: Aptos, "Microsoft YaHei UI", "PingFang SC", system-ui, sans-serif;
     color: var(--nd-text);
+    background: var(--nd-bg);
     box-sizing: border-box;
+
+    /* D66：布局断点按容器宽（与 slot-widget 的 nd-slot 同手法） */
+    container-type: inline-size;
+    container-name: nd-root;
 }
 
 :is(#nai-dbgen-root, .nd-root) *,

@@ -1,10 +1,11 @@
 /**
- * L5 UI · 生图/召回预设 管理面板。
- * 归属：W2-H 面板代理实现。W0 仅冻结签名。
+ * L5 UI · 生图/召回/单图预设 管理面板。
+ * 四种预设按子标签分开展示；cover:false（无图类型）。
  */
 
-import { createButton, createField, createSelect, createCheckbox } from '../../common/controls.js';
+import { createButton, createField, createSegmentedTabs, createSelect, createCheckbox } from '../../common/controls.js';
 import { createPreset, importFromSillyTavernPreset } from '../../../domain/model/preset.js';
+import { listRegisteredVariables } from '../../../domain/template/variable-map.js';
 import { mountLibraryView } from '../library-view.js';
 import { applyFormFields, mergePresetPrompt } from '../_lib/library-logic.js';
 import {
@@ -19,6 +20,34 @@ import {
     awaitRepo,
     toast,
 } from '../_lib/panel-kit.js';
+
+/** @typedef {'imagegen'|'recall'|'single-imagegen'|'single-recall'} PresetKindTab */
+
+/** @type {{ id: PresetKindTab, label: string, activeKey: string }[]} */
+const PRESET_TABS = Object.freeze([
+    { id: 'imagegen', label: '生图预设', activeKey: 'activeImagegenPresetId' },
+    { id: 'recall', label: '召回预设', activeKey: 'activeRecallPresetId' },
+    { id: 'single-imagegen', label: '单图生图预设', activeKey: 'activeSingleImagegenPresetId' },
+    { id: 'single-recall', label: '单图召回预设', activeKey: 'activeSingleRecallPresetId' },
+]);
+
+const KIND_LABEL = Object.freeze({
+    imagegen: '生图预设',
+    recall: '召回预设',
+    'single-imagegen': '单图生图预设',
+    'single-recall': '单图召回预设',
+});
+
+const PRESET_KIND_STORAGE_KEY = 'nai-dbgen:preset-kind';
+
+/**
+ * @param {string} kind
+ * @returns {string}
+ */
+function activeKeyForKind(kind) {
+    const tab = PRESET_TABS.find((t) => t.id === kind);
+    return tab ? tab.activeKey : 'activeImagegenPresetId';
+}
 
 /**
  * @param {Element} root
@@ -37,26 +66,45 @@ export function mountPresetPanel(root, deps) {
     const settings = settingsApi(deps);
 
     const shell = el('div', 'nd-panel nd-panel--preset');
-    root.appendChild(shell);
+    const listHost = el('div', 'nd-subpanel');
 
     /** @type {(() => void)[]} */
     const cleanups = [];
     let destroyed = false;
 
-    const view = mountLibraryView(shell, {
+    const segments = createSegmentedTabs({
+        ariaLabel: '预设类型',
+        storageKey: PRESET_KIND_STORAGE_KEY,
+        items: PRESET_TABS.map((t) => ({ id: t.id, label: t.label })),
+        onChange: () => void view.refresh(),
+    });
+    shell.append(segments.el, listHost);
+    root.appendChild(shell);
+
+    /** @type {PresetKindTab} */
+    function currentKind() {
+        const v = segments.getValue();
+        return /** @type {PresetKindTab} */ (
+            PRESET_TABS.some((t) => t.id === v) ? v : 'imagegen'
+        );
+    }
+
+    const view = mountLibraryView(listHost, {
         list: async () => {
+            const kind = currentKind();
             const items = await awaitRepo(host, repo.list(), '读取预设失败') || [];
             const s = settings.load();
-            return items.map((item) => ({
-                ...item,
-                __active:
-                    (item.kind === 'imagegen'
-                        && s.activeImagegenPresetId != null
-                        && String(s.activeImagegenPresetId) === String(item.id))
-                    || (item.kind === 'recall'
-                        && s.activeRecallPresetId != null
-                        && String(s.activeRecallPresetId) === String(item.id)),
-            }));
+            const activeKey = activeKeyForKind(kind);
+            const activeId = s[activeKey];
+            return items
+                .filter((item) => item && item.kind === kind)
+                .map((item) => ({
+                    ...item,
+                    __active: activeId != null && String(activeId) === String(item.id),
+                    __chips: activeId != null && String(activeId) === String(item.id)
+                        ? ['当前使用']
+                        : [],
+                }));
         },
         onCreate: () => void openEditor(null),
         onEdit: (item) => void openEditor(item),
@@ -64,20 +112,14 @@ export function mountPresetPanel(root, deps) {
         onImport: () => void openImport(),
         onExport: () => void openImport(),
     }, {
+        cover: false,
         searchKeys: ['name', 'kind'],
-        columns: [
-            { key: 'name', label: '名称' },
-            {
-                key: 'kind',
-                label: '类型',
-                render: (item) => (item.kind === 'recall' ? '召回预设' : '生图预设'),
-            },
-            {
-                key: 'prompts',
-                label: '段数',
-                render: (item) => `${Array.isArray(item.prompts) ? item.prompts.length : 0} 段`,
-            },
-        ],
+        cardMeta: (item) => ({
+            subtitle: `${KIND_LABEL[item.kind] || item.kind || '—'} · ${
+                Array.isArray(item.prompts) ? item.prompts.length : 0
+            } 段`,
+            chips: Array.isArray(item.__chips) ? item.__chips : [],
+        }),
     });
 
     /**
@@ -90,15 +132,10 @@ export function mountPresetPanel(root, deps) {
             const existing = await awaitRepo(host, repo.get(id));
             await awaitRepo(host, repo.remove(id), '删除失败');
             if (!existing) continue;
-            if (existing.kind === 'imagegen'
-                && settings.load().activeImagegenPresetId != null
-                && String(settings.load().activeImagegenPresetId) === String(id)) {
-                settings.patch({ activeImagegenPresetId: null });
-            }
-            if (existing.kind === 'recall'
-                && settings.load().activeRecallPresetId != null
-                && String(settings.load().activeRecallPresetId) === String(id)) {
-                settings.patch({ activeRecallPresetId: null });
+            const key = activeKeyForKind(existing.kind);
+            const cur = settings.load()[key];
+            if (cur != null && String(cur) === String(id)) {
+                settings.patch({ [key]: null });
             }
         }
         await view.refresh();
@@ -109,13 +146,14 @@ export function mountPresetPanel(root, deps) {
      */
     async function openEditor(item) {
         const nameField = createField({ label: '名称', value: item?.name ?? '' });
+        const defaultKind = item?.kind && KIND_LABEL[item.kind] ? item.kind : currentKind();
         const kindSelect = createSelect({
             label: '类型',
-            value: item?.kind === 'recall' ? 'recall' : 'imagegen',
-            options: [
-                { value: 'imagegen', label: '生图预设（引用世界书/上下文/角色库/标签库）' },
-                { value: 'recall', label: '召回预设（上下文 + 候选 key）' },
-            ],
+            value: defaultKind,
+            options: PRESET_TABS.map((t) => ({
+                value: t.id,
+                label: KIND_LABEL[t.id],
+            })),
         });
 
         // D45：整段对象保留；表单只改展示字段，injection_* 等原样带回
@@ -137,6 +175,32 @@ export function mountPresetPanel(root, deps) {
         let promptOrder = Array.isArray(item?.prompt_order)
             ? item.prompt_order.map((o) => ({ ...o }))
             : [];
+        prompts = orderPrompts(prompts, promptOrder);
+
+        /**
+         * 编辑列表按 prompt_order 排，和发给模型的顺序一致。
+         * @param {object[]} list
+         * @param {object[]} order
+         */
+        function orderPrompts(list, order) {
+            if (!Array.isArray(order) || !order.length) return list;
+            const byId = new Map(list.map((p) => [String(p.identifier), p]));
+            /** @type {object[]} */
+            const out = [];
+            const used = new Set();
+            for (const row of order) {
+                const id = String(row?.identifier ?? '');
+                const prompt = byId.get(id);
+                if (!prompt || used.has(id)) continue;
+                out.push(prompt);
+                used.add(id);
+            }
+            for (const prompt of list) {
+                const id = String(prompt?.identifier ?? '');
+                if (!used.has(id)) out.push(prompt);
+            }
+            return out;
+        }
 
         const promptsHost = el('div', 'nd-preset-prompts');
         /** @type {{ name: ReturnType<typeof createField>, content: ReturnType<typeof labeledTextarea>, enabled: ReturnType<typeof createCheckbox>, role: ReturnType<typeof createSelect> }[]} */
@@ -145,7 +209,7 @@ export function mountPresetPanel(root, deps) {
         function paintPrompts() {
             promptsHost.replaceChildren();
             const title = el('h4', 'nd-field-group__title');
-            setText(title, '提示词段（对齐酒馆 prompts）');
+            setText(title, '提示词段');
             promptsHost.appendChild(title);
             promptControls = [];
             prompts.forEach((p, index) => {
@@ -156,12 +220,12 @@ export function mountPresetPanel(root, deps) {
                 });
                 const roleVal = p.role === 'user' || p.role === 'assistant' ? p.role : 'system';
                 const role = createSelect({
-                    label: 'role',
+                    label: '角色',
                     value: roleVal,
                     options: [
-                        { value: 'system', label: 'system' },
-                        { value: 'user', label: 'user' },
-                        { value: 'assistant', label: 'assistant' },
+                        { value: 'system', label: '系统' },
+                        { value: 'user', label: '用户' },
+                        { value: 'assistant', label: '助手' },
                     ],
                 });
                 const enabled = createCheckbox({
@@ -175,6 +239,34 @@ export function mountPresetPanel(root, deps) {
                 );
                 promptControls.push({ name, content, enabled, role });
                 block.append(name.el, role.el, enabled.el, content.el);
+                const moveRow = el('div', 'nd-form__actions');
+                if (index > 0) {
+                    moveRow.appendChild(createButton({
+                        label: '上移',
+                        variant: 'ghost',
+                        onClick: () => movePrompt(index, -1),
+                    }));
+                }
+                if (index < prompts.length - 1) {
+                    moveRow.appendChild(createButton({
+                        label: '下移',
+                        variant: 'ghost',
+                        onClick: () => movePrompt(index, 1),
+                    }));
+                }
+                moveRow.append(
+                    createButton({
+                        label: '在上方插入',
+                        variant: 'ghost',
+                        onClick: () => insertPrompt(index, 0),
+                    }),
+                    createButton({
+                        label: '在下方插入',
+                        variant: 'ghost',
+                        onClick: () => insertPrompt(index, 1),
+                    }),
+                );
+                block.appendChild(moveRow);
                 block.appendChild(createButton({
                     label: '删除段',
                     variant: 'danger',
@@ -200,23 +292,52 @@ export function mountPresetPanel(root, deps) {
             promptsHost.appendChild(createButton({
                 label: '＋添加段',
                 variant: 'ghost',
-                onClick: () => {
-                    prompts = [
-                        ...readPrompts(),
-                        {
-                            identifier: ids.id('pp'),
-                            name: '新段',
-                            role: 'system',
-                            content: '',
-                            enabled: true,
-                            injection_position: 0,
-                            injection_depth: 0,
-                            injection_order: 100 + prompts.length,
-                        },
-                    ];
-                    paintPrompts();
-                },
+                onClick: () => insertPrompt(readPrompts().length, 0),
             }));
+        }
+
+        /**
+         * @param {number} index 插入点。offset 0 插在该段前面，1 插在后面。index 等于长度时追加到末尾。
+         * @param {number} offset
+         */
+        function insertPrompt(index, offset) {
+            const next = readPrompts();
+            const at = Math.max(0, Math.min(next.length, index + offset));
+            next.splice(at, 0, {
+                identifier: ids.id('pp'),
+                name: '新段',
+                role: 'system',
+                content: '',
+                enabled: true,
+                injection_position: 0,
+                injection_depth: 0,
+                injection_order: 100 + next.length,
+            });
+            prompts = next;
+            promptOrder = next.map((p) => ({
+                identifier: p.identifier,
+                enabled: p.enabled !== false,
+            }));
+            paintPrompts();
+        }
+
+        /**
+         * @param {number} index
+         * @param {number} delta
+         */
+        function movePrompt(index, delta) {
+            const next = readPrompts();
+            const target = index + delta;
+            if (target < 0 || target >= next.length) return;
+            const current = next[index];
+            next[index] = next[target];
+            next[target] = current;
+            prompts = next;
+            promptOrder = next.map((p) => ({
+                identifier: p.identifier,
+                enabled: p.enabled !== false,
+            }));
+            paintPrompts();
         }
 
         function readPrompts() {
@@ -246,23 +367,32 @@ export function mountPresetPanel(root, deps) {
         }
         paintPrompts();
 
-        const stPaste = labeledTextarea('从酒馆预设 JSON 粘贴导入（可选）', '', 4);
+        const stPaste = labeledTextarea('从酒馆预设粘贴', '', 4);
+        const varsHint = el('p', 'nd-preset-vars-hint');
+        setText(
+            varsHint,
+            `可用变量：${listRegisteredVariables().map((n) => `{{${n}}}`).join(' ')}`,
+        );
         const form = el('div', 'nd-form');
-        form.append(nameField.el, kindSelect.el, promptsHost, stPaste.el);
+        form.append(nameField.el, kindSelect.el, varsHint, promptsHost, stPaste.el);
         const modal = await openFormModal(deps, item ? '编辑预设' : '新建预设', form);
 
         const actions = el('div', 'nd-form__actions');
         actions.append(
             createButton({ label: '取消', variant: 'ghost', onClick: () => modal.destroy() }),
             createButton({
-                label: '解析酒馆 JSON',
+                label: '解析粘贴',
                 variant: 'ghost',
                 onClick: () => {
                     try {
                         const raw = JSON.parse(stPaste.getValue());
+                        const selectedKind = /** @type {PresetKindTab} */ (kindSelect.getValue());
                         const imported = importFromSillyTavernPreset(
                             raw,
-                            { kind: kindSelect.getValue() === 'recall' ? 'recall' : 'imagegen', name: nameField.getValue() || undefined },
+                            {
+                                kind: KIND_LABEL[selectedKind] ? selectedKind : 'imagegen',
+                                name: nameField.getValue() || undefined,
+                            },
                             { id: ids.id('pr'), now: ids.now() },
                         );
                         if (!imported.ok) {
@@ -275,6 +405,7 @@ export function mountPresetPanel(root, deps) {
                         promptOrder = Array.isArray(imported.value.prompt_order)
                             ? imported.value.prompt_order.map((o) => ({ ...o }))
                             : [];
+                        prompts = orderPrompts(prompts, promptOrder);
                         paintPrompts();
                         toast(host, 'success', '已解析酒馆预设');
                     } catch (e) {
@@ -288,11 +419,8 @@ export function mountPresetPanel(root, deps) {
                 onClick: async () => {
                     const saved = await save();
                     if (!saved) return;
-                    if (saved.kind === 'recall') {
-                        settings.patch({ activeRecallPresetId: saved.id });
-                    } else {
-                        settings.patch({ activeImagegenPresetId: saved.id });
-                    }
+                    const key = activeKeyForKind(saved.kind);
+                    settings.patch({ [key]: saved.id });
                     toast(host, 'success', '已设为当前预设');
                     await view.refresh();
                 },
@@ -317,7 +445,8 @@ export function mountPresetPanel(root, deps) {
                 modal.setError('请填写预设名称');
                 return null;
             }
-            const kind = kindSelect.getValue() === 'recall' ? 'recall' : 'imagegen';
+            const selected = /** @type {PresetKindTab} */ (kindSelect.getValue());
+            const nextKind = KIND_LABEL[selected] ? selected : 'imagegen';
             const promptList = readPrompts();
             const orderList = mergePromptOrder(promptList);
             promptOrder = orderList;
@@ -325,13 +454,13 @@ export function mountPresetPanel(root, deps) {
             const entity = item
                 ? applyFormFields(item, {
                     name,
-                    kind,
+                    kind: nextKind,
                     prompts: promptList,
                     prompt_order: orderList,
                     updatedAt: ids.now(),
                 })
                 : createPreset(
-                    { name, kind, prompts: promptList, prompt_order: orderList },
+                    { name, kind: nextKind, prompts: promptList, prompt_order: orderList },
                     { id: ids.id('pr'), now: ids.now() },
                 );
             return awaitRepo(host, repo.put(entity), '保存失败');
@@ -343,8 +472,11 @@ export function mountPresetPanel(root, deps) {
             deps,
             '导入预设',
             'preset',
-            async (data, strategy) => {
-                const r = await repo.importJson(data, { strategy });
+            async (data, strategy, progress) => {
+                const r = await repo.importJson(data, {
+                    strategy,
+                    onProgress: progress?.onProgress,
+                });
                 if (!r.ok) throw new Error(r.error?.message || '导入失败');
                 return r.value;
             },
@@ -367,6 +499,7 @@ export function mountPresetPanel(root, deps) {
             destroyed = true;
             for (const fn of cleanups) fn();
             view.destroy();
+            segments.destroy();
             shell.remove();
         },
     };

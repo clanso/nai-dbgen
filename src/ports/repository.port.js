@@ -35,7 +35,7 @@ import { requireArg } from '../infra/validate.js';
 /**
  * 设置 store 工厂依赖（裁决 D15）。
  * 存取一律经 `HostPort.loadSettings` / `saveSettings`，本 store 只做
- * PluginSettings 的 migrate / merge / 单键 get/set。**禁止**再直接吃 `getContext`。
+ * PluginSettings 的 merge / 单键 get/set。**禁止**再直接吃 `getContext`。
  *
  * @typedef {object} SettingsStoreDeps
  * @property {import('./host.port.js').HostPort} host
@@ -51,8 +51,8 @@ import { requireArg } from '../infra/validate.js';
 
 /**
  * 统一 CRUD + 导入导出形状（单实体仓库）。
- * 失败：ConfigError（校验）、HostError（存储不可用）、DomainError（迁移失败）。
- * 存储载体见宿主能力基线 §9（IndexedDB / message.extra / extension_settings）。
+ * 失败：ConfigError（校验）、HostError（存储不可用）、DomainError（格式/业务校验失败）。
+ * 存储载体见宿主能力基线 §9 与需求 4.17（服务器文件 / IndexedDB 图片缓存 / extension_settings）。
  * 仓库实现须将 `IdbClient` 的抛错统一包成 `Result`（裁决 D16）。
  *
  * @template T
@@ -112,14 +112,14 @@ import { requireArg } from '../infra/validate.js';
  */
 
 /**
- * Slot 仓库：主键 (messageId, slotId)。
+ * Slot 仓库：会话内主键 slotId（记录里保留 messageId）。
  *
- * **双写职责（裁决 D12 / 基线 §9）**：
- * - **权威记录**写在 `message.extra['nai-dbgen']`（随 swipe 克隆、随聊天导出走）。
- * - IndexedDB 仅存检索索引与派生数据（可从 extra 重建）；**不得**把权威 caption 只放在 IDB。
- * - 图片二进制只走 `ImageRepository`；本仓库只存 `imageRef` 引用。
+ * **权威记录**在服务器会话文件（需求 4.17）；不写 message.extra。
+ * 图片二进制只走 `ImageRepository`；本仓库只存 `imageRef` 引用。
  *
  * @typedef {object} SlotRepository
+ * @property {() => Promise<import('../infra/result.js').Ok<SlotRecord[]>|import('../infra/result.js').Err<import('../infra/errors.js').AppError>>} listRetained
+ *   当前会话保留范围内的全部记录。
  * @property {(messageId: number) => Promise<import('../infra/result.js').Ok<SlotRecord[]>|import('../infra/result.js').Err<import('../infra/errors.js').AppError>>} getByMessage
  * @property {(messageId: number, slotId: number) => Promise<import('../infra/result.js').Ok<SlotRecord|null>|import('../infra/result.js').Err<import('../infra/errors.js').AppError>>} get
  * @property {(messageId: number, records: SlotRecord[]) => Promise<import('../infra/result.js').Ok<void>|import('../infra/result.js').Err<import('../infra/errors.js').AppError>>} put
@@ -128,7 +128,7 @@ import { requireArg } from '../infra/validate.js';
  */
 
 /**
- * 图片 blob 仓库（IndexedDB）。基线 §9：不写 extra.media，自管 GC。
+ * 图片 blob 仓库（IndexedDB）+ (sessionId, slotId) 缓存索引。
  *
  * @typedef {object} ImageRepository
  * @property {(blob: Blob) => Promise<import('../infra/result.js').Ok<ImageRef>|import('../infra/result.js').Err<import('../infra/errors.js').AppError>>} put
@@ -137,14 +137,12 @@ import { requireArg } from '../infra/validate.js';
  * @property {(liveRefs: ImageRef[], opts?: { force?: boolean }) => Promise<import('../infra/result.js').Ok<{ removed: number }>|import('../infra/result.js').Err<import('../infra/errors.js').AppError>>} gc
  *   删除不在 `liveRefs` 中的 blob。
  *
- *   **liveRefs 收集范围（裁决 D23）**：必须覆盖**全部 swipe**——
- *   `message.extra['nai-dbgen']` **与** `message.swipe_info[].extra['nai-dbgen']`
- *   两处的全部 `imageRef`。只扫当前 extra 会删掉其他 swipe 仍引用的图。
- *   实现侧应提供 `collectLiveRefs(message)` 工具，调用方不得手写遗漏。
+ *   **liveRefs**：须覆盖当前会话保留范围内记录的 imageRef **以及**
+ *   `slot_image_cache` 中仍需展示的缓存图引用（超出保留范围但浏览器仍有图）。
  *
  *   **空输入安全（裁决 D22）**：`liveRefs` 为 `undefined` / 非数组 / **空数组**时
  *   必须返回 `Err`，**绝不得**解释为「清空全库」。要清空必须显式
- *   `opts.force === true`（且仍建议附带审计用的 trace/context）。
+ *   `opts.force === true`。
  */
 
 /** @type {readonly string[]} */
@@ -168,7 +166,7 @@ const TAG_REPO_METHODS = Object.freeze([
 
 /** @type {readonly string[]} */
 const SLOT_REPO_METHODS = Object.freeze([
-    'getByMessage', 'get', 'put', 'recordImage', 'onChanged',
+    'listRetained', 'getByMessage', 'get', 'put', 'recordImage', 'onChanged',
 ]);
 
 /** @type {readonly string[]} */

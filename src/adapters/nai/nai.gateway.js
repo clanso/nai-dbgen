@@ -9,6 +9,7 @@ import {
     transportError,
     upstreamFromHttpStatus,
 } from '../../infra/errors.js';
+import { apiConfigDisplayName } from '../../domain/model/api-config.js';
 
 const DEFAULT_MAX_ATTEMPTS = 3;
 const BASE_BACKOFF_MS = 2000;
@@ -52,8 +53,8 @@ export function createNaiGateway(deps) {
             if (!transport || typeof transport.send !== 'function') {
                 return Err(configError({
                     code: 'NAI_TRANSPORT_MISSING',
-                    message: `未注册传输通道：${transportName}`,
-                    hint: '请检查 container 传输注册表',
+                    message: `生图传输通道不可用：${transportName}`,
+                    hint: '请刷新页面或重新启用插件后重试',
                     traceId,
                     context: { transport: transportName },
                 }));
@@ -237,7 +238,7 @@ export function createNaiGateway(deps) {
                 error: lastError ?? transportError({
                     code: 'NAI_PROBE_FAILED',
                     message: 'NAI 连通性自检失败',
-                    hint: '直连失败时请开启 config.yaml 的 enableCorsProxy 并改用 st-cors-proxy',
+                    hint: '直连失败时：在 config.yaml 开启 enableCorsProxy 并重启，再把传输方式改为「酒馆 CORS 代理」',
                 }),
             };
         },
@@ -266,22 +267,23 @@ function validateNaiConfig(config) {
     if (!config || typeof config !== 'object') {
         return configError({
             code: 'NAI_CONFIG_MISSING',
-            message: '未提供 NAI 接口配置',
+            message: '未提供 NAI API',
             hint: '请先在 NAI API 库中新增并激活一条配置',
         });
     }
+    const label = apiConfigDisplayName(config);
     if (!String(config.baseUrl || '').trim()) {
         return configError({
             code: 'NAI_CONFIG_URL',
-            message: 'NAI 接口地址为空',
-            hint: '请填写 baseUrl（官方或中转）',
+            message: `「${label}」还没填接口地址`,
+            hint: '请到管理台 → API 库中填写接口地址',
         });
     }
     if (!String(config.apiKey || '').trim()) {
         return configError({
             code: 'NAI_CONFIG_KEY',
-            message: 'NAI API Key 为空',
-            hint: '请填写 Persistent API token（Bearer pst-…）',
+            message: `「${label}」还没填 API 密钥`,
+            hint: '请到管理台 → API 库中填写 API 密钥',
         });
     }
     return null;
@@ -291,12 +293,26 @@ function validateNaiConfig(config) {
  * @param {import('../../domain/model/nai-params.js').NaiRequest} req
  * @returns {Record<string, unknown>}
  */
+const NAI_INT_FIELDS = ['tag_hint_qt', 'tag_hint_uc_preset'];
+
 function toWirePayload(req) {
+    /** @type {Record<string, unknown>} */
+    const parameters = req.parameters && typeof req.parameters === 'object'
+        ? { ...req.parameters }
+        : req.parameters;
+    if (parameters && typeof parameters === 'object') {
+        for (const key of NAI_INT_FIELDS) {
+            if (typeof parameters[key] === 'boolean') {
+                parameters[key] = parameters[key] ? 1 : 0;
+            }
+        }
+    }
     /** @type {Record<string, unknown>} */
     const wire = {
         input: req.input,
         model: req.model,
-        parameters: req.parameters,
+        action: 'generate',
+        parameters,
     };
     // 顶层 negative_prompt 仅作领域镜像；上游以 parameters.negative_prompt 为准
     if (req.extra && typeof req.extra === 'object') {
@@ -371,8 +387,8 @@ async function decodeResponse(response, decoderPref, decoders, traceId) {
     if (!decoder || typeof decoder.decode !== 'function') {
         return Err(configError({
             code: 'NAI_DECODER_MISSING',
-            message: `未注册解码器：${choice}`,
-            hint: '请检查 container 解码注册表',
+            message: `图片解码方式不可用：${choice}`,
+            hint: '请刷新页面或重新启用插件后重试',
             traceId,
             context: { decoder: choice },
         }));

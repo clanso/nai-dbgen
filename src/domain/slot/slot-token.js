@@ -62,8 +62,35 @@ export function stripSlotTokens(text) {
  * @returns {string}
  */
 export function slotWidgetReplaceTemplate() {
-    return '<div class="nai-slot" data-slot="$1">'
-        + '<button class="nai-slot-btn"></button>'
+    const buttonStyle = [
+        'appearance:none !important',
+        '-webkit-appearance:none !important',
+        'display:inline-flex !important',
+        'align-items:center !important',
+        'justify-content:center !important',
+        'box-sizing:border-box !important',
+        'width:auto !important',
+        'min-width:0 !important',
+        'height:36px !important',
+        'min-height:36px !important',
+        'margin:0.45em 0 !important',
+        'padding:0 16px !important',
+        'border:0 !important',
+        'border-radius:8px !important',
+        'background:#c13d75 !important',
+        'color:#fff !important',
+        'font-size:14px !important',
+        'font-weight:700 !important',
+        'line-height:1 !important',
+        'letter-spacing:0 !important',
+        'text-transform:none !important',
+        'box-shadow:none !important',
+        'cursor:pointer !important',
+    ].join(';');
+    return '```html\n'
+        + '<div class="nai-slot" data-slot="$1">'
+        + `<button type="button" class="nai-slot-btn" style="${buttonStyle}" onclick="top.postMessage({source:'nai-dbgen',action:'generate',slot:'$1'},'*')">生成</button>`
         + '<div class="nai-slot-img"></div>'
-        + '</div>';
+        + '</div>\n'
+        + '```';
 }

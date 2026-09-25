@@ -29,8 +29,8 @@ export function prefixArtist(caption, artist) {
         return cloneCaption(String(posBase), posChars, String(negBase), negChars);
     }
 
-    const posArtist = String(artist.positive ?? '').trim();
-    const negArtist = String(artist.negative ?? '').trim();
+    const posArtist = String(artist.positivePrompt ?? '').trim();
+    const negArtist = String(artist.negativePrompt ?? '').trim();
     if (!posArtist && !negArtist) {
         return cloneCaption(String(posBase), posChars, String(negBase), negChars);
     }

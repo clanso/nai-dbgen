@@ -1,10 +1,13 @@
 /**
- * L5 UI · 当前项选择器（封面 + 搜索 + 高亮 + 清除）。
+ * L5 UI · 当前项选择器（可选封面 + 搜索 + 高亮 + 清除）。
  * 归属：W1-E 组件代理实现。W0 仅冻结签名。
+ *
+ * 封面由调用方显式 `cover: true` 开启（仅领域模型有图片字段的类型，如画师串）；
+ * 无图类型不得生成封面 DOM。
  */
 
 import { t } from '../i18n/zh-CN.js';
-import { paintSafeCover, pickCoverField } from './safe-url.js';
+import { paintSafeCover } from './safe-url.js';
 
 /**
  * @param {object} item
@@ -32,22 +35,25 @@ function idOf(item) {
 }
 
 /**
- * @param {HTMLElement} coverEl
- * @param {object|null|undefined} item
- * @param {string} label
- */
-function paintCover(coverEl, item, label) {
-    paintSafeCover(coverEl, pickCoverField(item), label);
-}
-
-/**
  * @param {Element} root
  * @param {object} deps
  * @param {() => Promise<object[]>} deps.list
  * @param {() => string|null} deps.getActiveId
  * @param {(id: string|null) => void} deps.setActiveId
  * @param {(item: object) => string} [deps.getLabel]
+ * @param {boolean} [deps.cover=false] 仅有图片字段的类型传 true；false 时不生成封面节点
+ * @param {(item: object|null|undefined) => (string|null|Promise<string|null>)} [deps.resolveCover]
+ *   有图类型须注入（画师串经 artistFileUrl.cardUrl）；未传则无图占位
  * @returns {{ destroy: () => void, refresh: () => Promise<void> }}
+ *
+ * D60：不自动订阅设置变更。外部（抽屉 / 管理台）改了激活项或列表后，
+ * 必须调用返回的 `refresh()`，否则搜索框/封面会显示旧当前项。
+ *
+ * `refresh(): Promise<void>`
+ * - 重新 `await deps.list()` 刷新候选项
+ * - 用当前 `deps.getActiveId()` 同步封面与关闭态下的搜索框文案
+ * - 若结果面板开着，按当前 query 重渲选项
+ * - destroy 之后调用为 no-op
  */
 export function mountCurrentPicker(root, deps) {
     if (!(root instanceof Element)) {
@@ -58,16 +64,22 @@ export function mountCurrentPicker(root, deps) {
     const getActiveId = typeof deps?.getActiveId === 'function' ? deps.getActiveId : () => null;
     const setActiveId = typeof deps?.setActiveId === 'function' ? deps.setActiveId : () => {};
     const getLabel = deps?.getLabel;
+    const showCover = deps?.cover === true;
+    const resolveCover = typeof deps?.resolveCover === 'function' ? deps.resolveCover : null;
 
     const shell = document.createElement('div');
     shell.className = 'nd-picker';
 
     const control = document.createElement('div');
-    control.className = 'nd-picker__control';
+    control.className = showCover ? 'nd-picker__control' : 'nd-picker__control nd-picker__control--no-cover';
 
-    const cover = document.createElement('div');
-    cover.className = 'nd-picker__cover';
-    cover.setAttribute('aria-hidden', 'true');
+    /** @type {HTMLElement|null} */
+    let cover = null;
+    if (showCover) {
+        cover = document.createElement('div');
+        cover.className = 'nd-picker__cover';
+        cover.setAttribute('aria-hidden', 'true');
+    }
 
     const input = document.createElement('input');
     input.type = 'search';
@@ -82,7 +94,11 @@ export function mountCurrentPicker(root, deps) {
     clearBtn.title = t('picker.clear');
     clearBtn.setAttribute('aria-label', t('picker.clear'));
 
-    control.append(cover, input, clearBtn);
+    if (cover) {
+        control.append(cover, input, clearBtn);
+    } else {
+        control.append(input, clearBtn);
+    }
 
     const results = document.createElement('div');
     results.className = 'nd-picker__results nd-hidden';
@@ -95,6 +111,29 @@ export function mountCurrentPicker(root, deps) {
     let items = [];
     let destroyed = false;
     let resultsOpen = false;
+
+    /**
+     * @param {HTMLElement} coverEl
+     * @param {object|null|undefined} item
+     * @param {string} label
+     */
+    function paintCover(coverEl, item, label) {
+        const gen = (Number(coverEl.dataset.coverGen) || 0) + 1;
+        coverEl.dataset.coverGen = String(gen);
+        paintSafeCover(coverEl, null, label, { emptyVariant: 'mark' });
+        if (!resolveCover) {
+            return;
+        }
+        Promise.resolve(resolveCover(item))
+            .then((url) => {
+                if (destroyed || coverEl.dataset.coverGen !== String(gen)) return;
+                paintSafeCover(coverEl, url, label, { emptyVariant: 'mark' });
+            })
+            .catch(() => {
+                if (destroyed || coverEl.dataset.coverGen !== String(gen)) return;
+                paintSafeCover(coverEl, null, label, { emptyVariant: 'mark' });
+            });
+    }
 
     /**
      * @param {boolean} open
@@ -113,7 +152,9 @@ export function mountCurrentPicker(root, deps) {
     function syncControl() {
         const current = activeItem();
         const label = labelOf(current, getLabel);
-        paintCover(cover, current, label);
+        if (cover) {
+            paintCover(cover, current, label);
+        }
         if (!resultsOpen) {
             input.value = label;
         }
@@ -143,7 +184,9 @@ export function mountCurrentPicker(root, deps) {
         for (const item of filtered) {
             const btn = document.createElement('button');
             btn.type = 'button';
-            btn.className = 'nd-picker-option';
+            btn.className = showCover
+                ? 'nd-picker-option'
+                : 'nd-picker-option nd-picker-option--no-cover';
             btn.setAttribute('role', 'option');
             const id = idOf(item);
             if (activeId != null && String(activeId) === id) {
@@ -153,10 +196,16 @@ export function mountCurrentPicker(root, deps) {
                 btn.setAttribute('aria-selected', 'false');
             }
 
-            const mini = document.createElement('div');
-            mini.className = 'nd-mini-cover';
             const label = labelOf(item, getLabel);
-            paintCover(mini, item, label);
+            /** @type {HTMLElement[]} */
+            const parts = [];
+
+            if (showCover) {
+                const mini = document.createElement('div');
+                mini.className = 'nd-mini-cover';
+                paintCover(mini, item, label);
+                parts.push(mini);
+            }
 
             const meta = document.createElement('span');
             meta.className = 'nd-picker-option__meta';
@@ -168,8 +217,9 @@ export function mountCurrentPicker(root, deps) {
                 small.textContent = String(item.category ?? item.subtitle);
                 meta.appendChild(small);
             }
+            parts.push(meta);
 
-            btn.append(mini, meta);
+            btn.append(...parts);
             btn.addEventListener('click', () => {
                 setActiveId(id || null);
                 setResultsOpen(false);

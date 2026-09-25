@@ -1,0 +1,240 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>nai-dbgen 预览沙箱</title>
+  <!-- 真插件样式（tokens / components / panels / drawer / workbench / slot） -->
+  <link rel="stylesheet" href="../style.css?v=20260925d" />
+  <link rel="stylesheet" href="./preview.css?v=20260924a" />
+  <!-- D29：模拟酒馆对全局 input/button/p/img 的皮；默认关闭 -->
+  <style id="pv-host-css-inject" disabled>
+    /* 刻意粗暴：全局皮穿透未硬化控件 */
+    body.pv-host-css-on input {
+      all: unset;
+      background: lime !important;
+      border: 4px dashed magenta !important;
+      color: navy !important;
+      font-size: 22px !important;
+      padding: 12px !important;
+    }
+    body.pv-host-css-on button {
+      all: unset;
+      background: yellow !important;
+      color: red !important;
+      border: 3px solid blue !important;
+      font-family: "Comic Sans MS", cursive !important;
+      font-size: 20px !important;
+      padding: 10px 16px !important;
+      border-radius: 0 !important;
+    }
+    body.pv-host-css-on p {
+      color: orange !important;
+      font-family: Impact, sans-serif !important;
+      letter-spacing: 2px !important;
+    }
+    body.pv-host-css-on img {
+      border: 8px groove lime !important;
+      border-radius: 50% !important;
+      filter: hue-rotate(90deg) contrast(1.4) !important;
+      max-width: 120px !important;
+    }
+    body.pv-host-css-on input[type="checkbox"],
+    body.pv-host-css-on input[type="range"] {
+      width: 48px !important;
+      height: 48px !important;
+      accent-color: lime !important;
+    }
+  </style>
+</head>
+<body>
+  <!-- 右上角浮动 toast（几秒后消失）；历史仍进调试抽屉 #pv-toasts -->
+  <div id="pv-toast-live" class="pv-toast-live" aria-live="polite"></div>
+
+  <!-- 首次提示：指向右侧悬浮球；localStorage 键 nai-dbgen:preview-hint-dismissed -->
+  <div id="pv-fab-hint" class="pv-fab-hint" hidden>
+    <button type="button" id="pv-fab-hint-dismiss" class="pv-fab-hint__close" aria-label="关闭提示">×</button>
+    <p class="pv-fab-hint__text">单击配置 · 双击本楼生图 · 长按切换画师串 · 可拖动</p>
+  </div>
+
+  <!-- 仿 SillyTavern 聊天壳：默认视图只露聊天 + 悬浮球 -->
+  <div class="pv-st">
+    <header class="pv-st-topbar" role="banner">
+      <div class="pv-st-topbar__left" aria-hidden="true">
+        <span class="pv-st-icon" title="角色">👤</span>
+        <span class="pv-st-icon" title="世界书">📘</span>
+        <span class="pv-st-icon" title="预设">⚙️</span>
+      </div>
+      <div class="pv-st-topbar__title">预览聊天</div>
+      <div class="pv-st-topbar__right">
+        <button
+          type="button"
+          id="pv-ext-toggle"
+          class="pv-st-icon-btn"
+          title="扩展"
+          aria-expanded="false"
+          aria-controls="pv-ext-panel"
+        >🧩</button>
+        <button
+          type="button"
+          id="pv-dev-toggle"
+          class="pv-st-icon-btn pv-st-icon-btn--quiet"
+          title="开发者调试"
+          aria-expanded="false"
+          aria-controls="pv-dev-drawer"
+        >⚙</button>
+      </div>
+
+      <!-- 模拟酒馆「扩展」面板：点顶栏图标才展开；#pv-settings-mount 必须常在 DOM 里 -->
+      <div id="pv-ext-panel" class="pv-ext-panel" hidden>
+        <div class="pv-ext-panel__head">扩展设置 · nai-dbgen</div>
+        <div id="pv-settings-mount" class="pv-settings-mount"></div>
+      </div>
+    </header>
+
+    <main class="pv-st-main">
+      <div class="pv-st-chat-col">
+        <div id="chat" class="pv-chat"></div>
+      </div>
+    </main>
+
+    <footer class="pv-st-send" aria-label="输入区占位">
+      <div class="pv-st-send__box">
+        <textarea
+          class="pv-st-send__input"
+          rows="2"
+          placeholder="输入消息…（预览占位，不可发送）"
+          disabled
+        ></textarea>
+        <button type="button" class="pv-st-send__btn" disabled>发送</button>
+      </div>
+    </footer>
+  </div>
+
+  <!-- 开发者调试抽屉：默认关闭；?dev=1 时展开。功能 id 与行为全部保留 -->
+  <div id="pv-dev-drawer" class="pv-dev-drawer" aria-hidden="true">
+    <div id="pv-dev-backdrop" class="pv-dev-drawer__backdrop" tabindex="-1"></div>
+    <aside class="pv-dev-drawer__panel nd-root" role="dialog" aria-label="开发者调试">
+      <div class="pv-dev-drawer__header">
+        <strong>开发者调试</strong>
+        <span id="pv-status" class="pv-dev-status">启动中…</span>
+        <button type="button" id="pv-dev-close" class="pv-dev-close" aria-label="关闭">×</button>
+      </div>
+
+      <div class="pv-dev-drawer__body">
+        <section class="pv-tool-block">
+          <h3>关于本页</h3>
+          <p class="pv-dev-note">
+            真组件 · 真应用层 · 预览端口。在 <code>nai-dbgen</code> 目录执行
+            <code>npm run preview</code>，打开
+            <code>http://127.0.0.1:8765/nai-dbgen/preview/</code>
+            （静态根为仓库上级，以便读取 <code>ref/</code> 画师串；file:// 下 ESM 会被 CORS 拦住）。
+          </p>
+          <p class="pv-dev-note">
+            默认视图仿酒馆聊天；插件入口是右侧<strong>悬浮球</strong>。
+            楼 2 已预置生图标记（可直接点生图）。楼 3 尚无标记，双击悬浮球或「生成提示词 · 楼3」走完整链路。
+            启动时会走插件真实流程导入 <code>ref/画师串、标签库等/画师串.json</code>（进度见导入弹层）；取不到文件时有明确提示，其它功能仍可用。
+          </p>
+        </section>
+
+        <section class="pv-tool-block">
+          <h3>入口</h3>
+          <div class="pv-row">
+            <button type="button" id="pv-open-mgmt" class="nd-button">打开管理台</button>
+            <button type="button" id="pv-open-wb" class="nd-button nd-button--primary">打开工作台</button>
+            <button type="button" id="pv-write-slot" class="nd-button">生成提示词 · 楼3</button>
+            <button type="button" id="pv-write-slot-2" class="nd-button">重新生成提示词 · 楼2</button>
+          </div>
+        </section>
+
+        <section class="pv-tool-block">
+          <h3>主题 / 字号</h3>
+          <div class="pv-row">
+            <button type="button" id="pv-theme-dark" class="nd-button">深色</button>
+            <button type="button" id="pv-theme-light" class="nd-button">浅色</button>
+            <button type="button" id="pv-theme-contrast" class="nd-button">高对比</button>
+          </div>
+          <label class="pv-inline">
+            --mainFontSize
+            <input id="pv-font-size" type="range" min="12" max="22" value="15" />
+            <span id="pv-font-size-val">15px</span>
+          </label>
+        </section>
+
+        <section class="pv-tool-block">
+          <h3>宿主 CSS 干扰</h3>
+          <label class="pv-inline">
+            <input id="pv-host-css" type="checkbox" />
+            注入全局 input/button/p/img 规则
+          </label>
+        </section>
+
+        <section class="pv-tool-block">
+          <h3>预览端口延迟</h3>
+          <label class="pv-inline">
+            LLM ms
+            <input id="pv-llm-delay" type="number" min="0" step="100" value="700" />
+          </label>
+          <label class="pv-inline">
+            NAI ms
+            <input id="pv-nai-delay" type="number" min="0" step="100" value="1400" />
+          </label>
+        </section>
+
+        <section class="pv-tool-block">
+          <h3>错误 / 边界注入</h3>
+          <label class="pv-inline">
+            LLM 模式
+            <select id="pv-llm-mode">
+              <option value="ok">正常</option>
+              <option value="invalid-json">非法 JSON</option>
+              <option value="fabricated-keys">伪造构图关键字</option>
+              <option value="abort">用户取消 (Abort)</option>
+            </select>
+          </label>
+          <label class="pv-inline">
+            NAI 模式
+            <select id="pv-nai-mode">
+              <option value="ok">正常</option>
+              <option value="401">401</option>
+              <option value="429">429</option>
+              <option value="timeout">超时</option>
+              <option value="abort">用户取消 (Abort)</option>
+            </select>
+          </label>
+          <label class="pv-inline">
+            <input id="pv-worldinfo-fail" type="checkbox" />
+            世界书取不到（降级）
+          </label>
+          <div class="pv-row">
+            <button type="button" id="pv-empty-config" class="nd-button">空配置起步</button>
+            <button type="button" id="pv-restore-config" class="nd-button">恢复示例配置</button>
+            <button type="button" id="pv-clear-pipeline" class="nd-button">清空链路面板</button>
+          </div>
+        </section>
+
+        <section class="pv-tool-block">
+          <h3>最近一次提示词请求</h3>
+          <p class="pv-dev-note">演示调试用：展开「常驻标签」「近期生图记录」等注入块（不进插件 UI）。</p>
+          <div class="pv-row">
+            <button type="button" id="pv-show-last-prompt" class="nd-button">查看最近一次提示词请求</button>
+          </div>
+          <pre id="pv-last-prompt-view" class="pv-last-prompt-view" aria-live="polite">尚未发出提示词请求。</pre>
+        </section>
+
+        <section class="pv-tool-block">
+          <h3>Toast 历史</h3>
+          <div id="pv-toasts" class="pv-toasts" aria-live="off"></div>
+        </section>
+
+        <section class="pv-tool-block pv-tool-block--pipeline">
+          <h3>链路面板</h3>
+          <div id="pv-pipeline" class="pv-pipeline"></div>
+        </section>
+      </div>
+    </aside>
+  </div>
+
+  <script type="module" src="./preview.js"></script>
+</body>
+</html>

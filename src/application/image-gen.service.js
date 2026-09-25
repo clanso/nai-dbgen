@@ -2,11 +2,16 @@
  * L4 应用层 · 4.14 唯一生图入口（对外 window.NaiDbGen.generate / 用例内部共用）。
  * 不跑四块、不写 slot、不改正文；必填 replaceCharacterKeywords。
  * 归属：W2-F 用例代理实现。W0 仅冻结签名。
+ *
+ * 参数合并规则（对外）：
+ * - 未传的采样字段取运行配置 4.13；若继承项与最终模型不匹配 → 回退该模型默认（不报错）。
+ * - 调用方显式传入且与模型不匹配 → Err(DomainError / NAI_PARAMS_INVALID)，不调 NAI。
  */
 
 import { Ok, Err } from '../infra/result.js';
 import { configError } from '../infra/errors.js';
 import { assembleNaiPayload } from '../domain/nai/payload-assembler.js';
+import { mergeNaiParamsForGenerate } from '../domain/nai/param-options.js';
 import {
     abortErrIfNeeded,
     attachTraceId,
@@ -24,7 +29,9 @@ import {
 /**
  * @typedef {object} ImageGenRequest
  * @property {NaiCaption} caption
- * @property {Partial<NaiParams>|Record<string, unknown>} [params] 按次覆盖；多传原生字段原样带上
+ * @property {Partial<NaiParams>|Record<string, unknown>} [params]
+ *   按次覆盖。未传字段用 4.13；显式传入且与模型不匹配时返回校验错误（不扣费）。
+ *   多传的 NAI 原生字段仍原样带上。
  * @property {boolean} replaceCharacterKeywords 必填，无默认值
  * @property {ArtistString|null|undefined} [artist]
  *   画师串三态（裁决 D9），必须按此语义实现，禁止另解：
@@ -96,8 +103,8 @@ export function createImageGenService(deps) {
             if (!settings.activeNaiConfigId) {
                 return Err(configError({
                     code: 'NAI_CONFIG_UNSET',
-                    message: '未选择 NAI API 配置',
-                    hint: '请在 NAI API 库中激活一条配置',
+                    message: '未选择 NAI API',
+                    hint: '请在 NAI API 库中设为当前一条',
                     traceId,
                 }));
             }
@@ -109,8 +116,8 @@ export function createImageGenService(deps) {
             if (!naiCfgR.value) {
                 return Err(configError({
                     code: 'NAI_CONFIG_MISSING',
-                    message: '当前 NAI 配置不存在',
-                    hint: '请重新选择 NAI API 配置',
+                    message: '当前 NAI API 不存在',
+                    hint: '请重新选择 NAI API',
                     traceId,
                     context: { id: settings.activeNaiConfigId },
                 }));
@@ -136,7 +143,7 @@ export function createImageGenService(deps) {
                     return Err(configError({
                         code: 'CHARACTER_REPO_REQUIRED',
                         message: '替换角色关键字需要角色库',
-                        hint: '请检查插件装配是否注入了 characterRepo',
+                        hint: '请确认角色库可用后重试',
                         traceId,
                     }));
                 }
@@ -154,10 +161,15 @@ export function createImageGenService(deps) {
                 ? { ...req.params }
                 : {};
 
+            const mergedR = mergeNaiParamsForGenerate(baseParams, overrides);
+            if (!mergedR.ok) {
+                return attachTraceId(mergedR, traceId);
+            }
+
             const payload = assembleNaiPayload({
                 caption: req.caption,
-                params: baseParams,
-                paramOverrides: overrides,
+                params: mergedR.value.params,
+                paramOverrides: mergedR.value.extras,
                 replaceCharacterKeywords: req.replaceCharacterKeywords,
                 artist,
                 groups,

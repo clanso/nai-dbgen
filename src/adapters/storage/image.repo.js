@@ -1,9 +1,13 @@
 /**
- * L2 适配器 · 图片 blob 仓库（IndexedDB）。
- * 归属：W1-D 存储代理实现。W0 仅冻结签名。
+ * L2 适配器 · 图片 blob 仓库（IndexedDB）+ 按会话 slot 的缓存索引。
  *
- * 风险 R-07：配额压力靠 gc(liveRefs) + estimateUsage；object URL 必须配套 revoke。
- * 裁决 D22：空 liveRefs 禁止清空全库；D23：liveRefs 必须覆盖全部 swipe。
+ * 展示规则（需求 4.17）：
+ * - 记录在 + 缓存在 → 正常已生图
+ * - 记录在 + 缓存无 → 未生图（可再出）
+ * - 记录无 + 缓存在 → 照常显示图，不可再出图（超出保留范围）
+ * - 记录无 + 缓存无 → 「已超出保留范围」
+ *
+ * 裁决 D22：gc 空 liveRefs 必须 Err。
  */
 
 import { Ok, Err } from '../../infra/result.js';
@@ -12,67 +16,42 @@ import { newId } from '../../infra/id.js';
 import { nowIso } from '../../infra/clock.js';
 import { mapIdbError, IDB_STORES } from './idb.js';
 import { catchToResult } from './import-export.js';
-import { MESSAGE_EXTRA_NS, normalizeNaiExtra } from './message-extra.store.js';
 
 /**
- * 收集一楼在**全部 swipe** 上仍存活的 imageRef（裁决 D23）。
- * 扫描范围：
- * - `message.extra['nai-dbgen']`
- * - `message.swipe_info[].extra['nai-dbgen']`（每一项）
- *
- * 调用方做 GC 前必须用本函数（或等价全量扫描），禁止只读当前 extra。
- *
- * @param {object|null|undefined} message 酒馆 chat 楼对象
- * @returns {string[]} 去重后的 ImageRef 列表（可能为空——空时 gc 须 force）
+ * 从会话 slot 记录收集仍存活的 imageRef。
+ * @param {Iterable<{ images?: Array<{ imageRef?: string }> }>} records
+ * @returns {string[]}
  */
-export function collectLiveRefs(message) {
+export function collectLiveRefsFromRecords(records) {
     /** @type {Set<string>} */
     const refs = new Set();
-
-    /**
-     * @param {unknown} ns
-     */
-    function absorbNamespace(ns) {
-        // 软归一化：坏片段跳过，不拖垮整楼收集
-        const payload = normalizeNaiExtra(ns);
-        for (const slot of payload.slots) {
-            if (!Array.isArray(slot.images)) {
-                continue;
-            }
-            for (const entry of slot.images) {
-                if (entry?.imageRef != null && entry.imageRef !== '') {
-                    refs.add(String(entry.imageRef));
-                }
+    if (records == null) {
+        return [];
+    }
+    for (const slot of records) {
+        if (!slot || !Array.isArray(slot.images)) {
+            continue;
+        }
+        for (const entry of slot.images) {
+            if (entry?.imageRef != null && entry.imageRef !== '') {
+                refs.add(String(entry.imageRef));
             }
         }
     }
-
-    if (message && typeof message === 'object') {
-        const extra = /** @type {{ extra?: Record<string, unknown> }} */ (message).extra;
-        if (extra && typeof extra === 'object' && MESSAGE_EXTRA_NS in extra) {
-            absorbNamespace(extra[MESSAGE_EXTRA_NS]);
-        }
-        const swipeInfo = /** @type {{ swipe_info?: unknown }} */ (message).swipe_info;
-        if (Array.isArray(swipeInfo)) {
-            for (const info of swipeInfo) {
-                if (!info || typeof info !== 'object') {
-                    continue;
-                }
-                const siExtra = /** @type {{ extra?: Record<string, unknown> }} */ (info).extra;
-                if (siExtra && typeof siExtra === 'object' && MESSAGE_EXTRA_NS in siExtra) {
-                    absorbNamespace(siExtra[MESSAGE_EXTRA_NS]);
-                }
-            }
-        }
-    }
-
     return [...refs];
 }
 
 /**
  * @param {object} deps
  * @param {object} deps.db openIdb 返回值
- * @returns {import('../../ports/repository.port.js').ImageRepository}
+ * @returns {import('../../ports/repository.port.js').ImageRepository & {
+ *   linkSlot: (sessionId: string, slotId: number, imageRef: string) => Promise<import('../../infra/result.js').Ok<void>|import('../../infra/result.js').Err<import('../../infra/errors.js').AppError>>,
+ *   clearSlot: (sessionId: string, slotId: number) => Promise<import('../../infra/result.js').Ok<void>|import('../../infra/result.js').Err<import('../../infra/errors.js').AppError>>,
+ *   getSlotImageRef: (sessionId: string, slotId: number) => Promise<import('../../infra/result.js').Ok<string|null>|import('../../infra/result.js').Err<import('../../infra/errors.js').AppError>>,
+ *   listCacheRefs: (sessionId?: string|null) => Promise<import('../../infra/result.js').Ok<string[]>|import('../../infra/result.js').Err<import('../../infra/errors.js').AppError>>,
+ *   collectLiveRefs: (records: Iterable<object>, sessionId?: string|null) => Promise<import('../../infra/result.js').Ok<string[]>|import('../../infra/result.js').Err<import('../../infra/errors.js').AppError>>,
+ *   trimToLimit: (limit: number) => Promise<import('../../infra/result.js').Ok<{ removed: number, removedRefs: string[] }>|import('../../infra/result.js').Err<import('../../infra/errors.js').AppError>>,
+ * }}
  */
 export function createImageRepo(deps) {
     const db = deps?.db;
@@ -109,7 +88,7 @@ export function createImageRepo(deps) {
     }
 
     const repo = {
-        async put(blob) {
+        async put(blob, opts) {
             if (typeof Blob === 'undefined' || !(blob instanceof Blob)) {
                 return Err(configError({
                     code: 'IMAGE_BLOB_REQUIRED',
@@ -124,9 +103,32 @@ export function createImageRepo(deps) {
                     mimeType: blob.type || 'application/octet-stream',
                     size: blob.size,
                     createdAt: nowIso(),
+                    pinned: opts?.pinned === true,
                 };
                 await db.put(IDB_STORES.IMAGES, record);
                 return id;
+            }, mapErr, Ok, Err);
+        },
+
+        async remove(ref) {
+            if (ref == null || ref === '') {
+                return Ok(undefined);
+            }
+            const key = String(ref);
+            return catchToResult(async () => {
+                await db.delete(IDB_STORES.IMAGES, key);
+                revokeCached(key);
+            }, mapErr, Ok, Err);
+        },
+
+        async getBlob(ref) {
+            if (ref == null || ref === '') {
+                return Ok(null);
+            }
+            const key = String(ref);
+            return catchToResult(async () => {
+                const row = await db.get(IDB_STORES.IMAGES, key);
+                return row?.blob || null;
             }, mapErr, Ok, Err);
         },
 
@@ -153,6 +155,118 @@ export function createImageRepo(deps) {
         },
 
         /**
+         * 绑定会话 slot → imageRef（出图成功后）。
+         * @param {string} sessionId
+         * @param {number} slotId
+         * @param {string} imageRef
+         */
+        async linkSlot(sessionId, slotId, imageRef) {
+            const sid = String(sessionId ?? '');
+            const id = Number(slotId);
+            if (!sid || !Number.isInteger(id) || id < 1) {
+                return Err(configError({
+                    code: 'SLOT_IMAGE_KEY',
+                    message: 'linkSlot 需要有效 sessionId 与 slotId',
+                }));
+            }
+            return catchToResult(async () => {
+                await db.put(IDB_STORES.SLOT_IMAGE_CACHE, {
+                    sessionId: sid,
+                    slotId: id,
+                    imageRef: String(imageRef),
+                    updatedAt: nowIso(),
+                });
+            }, mapErr, Ok, Err);
+        },
+
+        /**
+         * 编号复用或显式清缓存。
+         * @param {string} sessionId
+         * @param {number} slotId
+         */
+        async clearSlot(sessionId, slotId) {
+            const sid = String(sessionId ?? '');
+            const id = Number(slotId);
+            return catchToResult(async () => {
+                const row = await db.get(IDB_STORES.SLOT_IMAGE_CACHE, [sid, id]);
+                if (row?.imageRef) {
+                    const ref = String(row.imageRef);
+                    await db.delete(IDB_STORES.IMAGES, ref);
+                    revokeCached(ref);
+                }
+                await db.delete(IDB_STORES.SLOT_IMAGE_CACHE, [sid, id]);
+            }, mapErr, Ok, Err);
+        },
+
+        /**
+         * @param {string} sessionId
+         * @param {number} slotId
+         */
+        async getSlotImageRef(sessionId, slotId) {
+            const sid = String(sessionId ?? '');
+            const id = Number(slotId);
+            return catchToResult(async () => {
+                const row = await db.get(IDB_STORES.SLOT_IMAGE_CACHE, [sid, id]);
+                if (!row?.imageRef) {
+                    return null;
+                }
+                const ref = String(row.imageRef);
+                const img = await db.get(IDB_STORES.IMAGES, ref);
+                if (!img?.blob) {
+                    return null;
+                }
+                return ref;
+            }, mapErr, Ok, Err);
+        },
+
+        /**
+         * @param {string|null} [sessionId]
+         */
+        async listCacheRefs(sessionId) {
+            return catchToResult(async () => {
+                /** @type {any[]} */
+                let rows;
+                if (sessionId != null && sessionId !== '' && typeof db.getAllByIndex === 'function') {
+                    rows = await db.getAllByIndex(
+                        IDB_STORES.SLOT_IMAGE_CACHE,
+                        'by_sessionId',
+                        String(sessionId),
+                    );
+                } else {
+                    rows = await db.getAll(IDB_STORES.SLOT_IMAGE_CACHE);
+                }
+                /** @type {Set<string>} */
+                const refs = new Set();
+                for (const row of rows) {
+                    if (row?.imageRef) {
+                        refs.add(String(row.imageRef));
+                    }
+                }
+                return [...refs];
+            }, mapErr, Ok, Err);
+        },
+
+        /**
+         * 合并会话记录引用 + 缓存索引引用（供 GC）。
+         * @param {Iterable<object>} records
+         * @param {string|null} [sessionId]
+         */
+        async collectLiveRefs(records, sessionId) {
+            return catchToResult(async () => {
+                /** @type {Set<string>} */
+                const refs = new Set(collectLiveRefsFromRecords(records));
+                const cacheR = await repo.listCacheRefs(sessionId);
+                if (!cacheR.ok) {
+                    throw cacheR.error;
+                }
+                for (const ref of cacheR.value) {
+                    refs.add(ref);
+                }
+                return [...refs];
+            }, mapErr, Ok, Err);
+        },
+
+        /**
          * @param {import('../../domain/model/slot.js').ImageRef[]} liveRefs
          * @param {{ force?: boolean }} [opts]
          */
@@ -161,7 +275,7 @@ export function createImageRepo(deps) {
                 return Err(configError({
                     code: 'IMAGE_GC_INVALID_LIVE_REFS',
                     message: 'gc 需要 liveRefs 数组',
-                    hint: '请用 collectLiveRefs(message) 收集全部 swipe 引用；确需清空传 { force: true }',
+                    hint: '请先收集仍在使用的图片引用；确需强制清空请确认操作',
                     context: { typeofLiveRefs: typeof liveRefs },
                 }));
             }
@@ -172,12 +286,11 @@ export function createImageRepo(deps) {
                     .map((r) => String(r)),
             );
 
-            // 裁决 D22：空集合绝不解释为清空全库
             if (live.size === 0 && opts?.force !== true) {
                 return Err(configError({
                     code: 'IMAGE_GC_EMPTY_LIVE_REFS',
                     message: 'gc 拒绝空 liveRefs（防止误删全库）',
-                    hint: '请用 collectLiveRefs(message) 扫齐当前楼全部 swipe；确需清空必须显式 { force: true }',
+                    hint: '请先收集仍在使用的图片引用；确需强制清空请确认操作',
                     context: { force: false, inputLength: liveRefs.length },
                 }));
             }
@@ -193,14 +306,30 @@ export function createImageRepo(deps) {
                         removed += 1;
                     }
                 }
+                // 同步清掉指向已删 blob 的缓存索引
+                const cacheRows = await db.getAll(IDB_STORES.SLOT_IMAGE_CACHE);
+                for (const row of cacheRows) {
+                    if (row?.imageRef && !live.has(String(row.imageRef))) {
+                        await db.delete(IDB_STORES.SLOT_IMAGE_CACHE, [row.sessionId, row.slotId]);
+                    }
+                }
                 return { removed };
             }, mapErr, Ok, Err);
         },
 
-        /**
-         * 容量估算（端口外辅助，供容量面板）。
-         * @returns {Promise<{ ok: true, value: { bytes: number, count: number, quota: number|null, usage: number|null } } | { ok: false, error: import('../../infra/errors.js').AppError }>}
-         */
+        async listMeta() {
+            return catchToResult(async () => {
+                const all = await db.getAll(IDB_STORES.IMAGES);
+                return all.map((row) => ({
+                    id: String(row.id),
+                    size: Number(row.size) || (row.blob && row.blob.size) || 0,
+                    createdAt: row.createdAt || '',
+                    pinned: row.pinned === true,
+                    mimeType: row.mimeType || '',
+                })).sort((a, b) => String(b.createdAt).localeCompare(String(a.createdAt)));
+            }, mapErr, Ok, Err);
+        },
+
         async estimateUsage() {
             return catchToResult(async () => {
                 const all = await db.getAll(IDB_STORES.IMAGES);
@@ -224,8 +353,55 @@ export function createImageRepo(deps) {
         },
 
         /**
-         * 释放全部缓存的 object URL（页面卸载 / 切聊天时可调）。
+         * 按张数上限裁剪：全部图按 createdAt 从老到新，删掉超出上限的最老部分。
+         * 同步删 SLOT_IMAGE_CACHE 中指向被删图的行，并 revoke object URL。
+         * @param {number} limit 整数 ≥1
+         * @returns {Promise<import('../../infra/result.js').Ok<{ removed: number, removedRefs: string[] }>|import('../../infra/result.js').Err<import('../../infra/errors.js').AppError>>}
          */
+        async trimToLimit(limit) {
+            const n = Number(limit);
+            if (!Number.isInteger(n) || n < 1) {
+                return Err(configError({
+                    code: 'IMAGE_CACHE_LIMIT',
+                    message: '图片缓存上限必须是 ≥1 的整数',
+                }));
+            }
+            return catchToResult(async () => {
+                const all = (await db.getAll(IDB_STORES.IMAGES)).filter((row) => row?.pinned !== true);
+                if (all.length <= n) {
+                    return { removed: 0, removedRefs: /** @type {string[]} */ ([]) };
+                }
+                const sorted = [...all].sort((a, b) => {
+                    const ca = String(a?.createdAt ?? '');
+                    const cb = String(b?.createdAt ?? '');
+                    if (ca !== cb) {
+                        return ca < cb ? -1 : 1;
+                    }
+                    return String(a?.id ?? '').localeCompare(String(b?.id ?? ''));
+                });
+                const excess = sorted.length - n;
+                const toRemove = sorted.slice(0, excess);
+                /** @type {string[]} */
+                const removedRefs = [];
+                /** @type {Set<string>} */
+                const removedSet = new Set();
+                for (const row of toRemove) {
+                    const id = String(row.id);
+                    await db.delete(IDB_STORES.IMAGES, id);
+                    revokeCached(id);
+                    removedRefs.push(id);
+                    removedSet.add(id);
+                }
+                const cacheRows = await db.getAll(IDB_STORES.SLOT_IMAGE_CACHE);
+                for (const row of cacheRows) {
+                    if (row?.imageRef && removedSet.has(String(row.imageRef))) {
+                        await db.delete(IDB_STORES.SLOT_IMAGE_CACHE, [row.sessionId, row.slotId]);
+                    }
+                }
+                return { removed: removedRefs.length, removedRefs };
+            }, mapErr, Ok, Err);
+        },
+
         revokeAllUrls() {
             for (const ref of [...urlCache.keys()]) {
                 revokeCached(ref);

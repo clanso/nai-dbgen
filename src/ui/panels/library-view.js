@@ -25,12 +25,28 @@ import { el, setText } from './_lib/panel-kit.js';
  * @property {() => void} [onImport]
  * @property {() => void} [onExport]
  * @property {(item: object, active: boolean) => void} [onToggleActive]
+ * @property {(item: object) => void} [onCoverClick]
  */
 
 /**
  * @param {Element} root
  * @param {LibraryViewDeps} deps
- * @param {{ columns?: LibraryColumn[], searchKeys?: string[] }} [opts]
+ * @param {{
+ *   columns?: LibraryColumn[],
+ *   searchKeys?: string[],
+ *   cover?: boolean,
+ *   titleBadge?: (item: object) => string|null|undefined,
+ *   cardMeta?: (item: object) => {
+ *     subtitle?: string,
+ *     chips?: string[],
+ *     status?: string,
+ *   }|null|undefined,
+ *   sortOptions?: { value: string, label: string }[],
+ *   defaultSort?: string,
+ * }} [opts]
+ *   `cover: true` 画师串等应有图的类型（无图也保留同比例占位）；缺省/false 为紧凑文字卡
+ *   `titleBadge` 返回名字旁 muted 提示（如未填 Key）
+ *   `cardMeta` 覆盖 columns 拼副标题：分行副标题 + 用途徽标 + 状态
  * @returns {{ destroy: () => void, refresh: () => Promise<void> }}
  */
 export function mountLibraryView(root, deps, opts) {
@@ -39,10 +55,19 @@ export function mountLibraryView(root, deps, opts) {
     }
 
     const searchKeys = opts?.searchKeys || ['name', 'key', 'model', 'baseUrl'];
+    const showCover = opts?.cover === true;
+    const defaultSort = opts?.defaultSort != null ? String(opts.defaultSort) : 'name-asc';
+    const sortOptions = Array.isArray(opts?.sortOptions) && opts.sortOptions.length
+        ? opts.sortOptions
+        : [
+            { value: 'name-asc', label: '名称' },
+            { value: 'name-desc', label: '名称倒序' },
+            { value: 'updated-desc', label: '最近更新' },
+        ];
     const store = createStore({
         query: '',
         filter: '',
-        sort: 'name-asc',
+        sort: defaultSort,
         items: /** @type {object[]} */ ([]),
     });
 
@@ -50,19 +75,18 @@ export function mountLibraryView(root, deps, opts) {
     const toolbar = createLibraryToolbar({
         onSearch: (q) => store.set((s) => ({ ...s, query: q })),
         onSort: (v) => store.set((s) => ({ ...s, sort: v })),
-        sortOptions: [
-            { value: 'name-asc', label: '名称 A→Z' },
-            { value: 'name-desc', label: '名称 Z→A' },
-            { value: 'updated-desc', label: '最近更新' },
-        ],
+        sortOptions,
+        sortValue: defaultSort,
         onCreate: deps.onCreate,
         onImport: deps.onImport,
         onExport: deps.onExport,
     });
-    const grid = el('div', 'nd-style-grid');
+    const grid = el('div', showCover ? 'nd-style-grid' : 'nd-style-grid nd-style-grid--text');
     const status = el('div', 'nd-library-view__status');
     status.setAttribute('aria-live', 'polite');
-    shell.append(toolbar.el, status, grid);
+    const scroller = el('div', 'nd-library-view__scroller');
+    scroller.appendChild(grid);
+    shell.append(toolbar.el, status, scroller);
     root.appendChild(shell);
 
     /** @type {{ destroy: () => void }[]} */
@@ -92,8 +116,8 @@ export function mountLibraryView(root, deps, opts) {
 
         if (!visible.length) {
             const empty = createEmptyState({
-                title: '这里还是空的',
-                description: '没有匹配的条目，换一个筛选条件试试。',
+                title: '暂无内容',
+                description: '没有匹配的条目，换个筛选条件试试。',
             });
             grid.appendChild(empty.el);
             cards.push(empty);
@@ -101,30 +125,59 @@ export function mountLibraryView(root, deps, opts) {
         }
 
         for (const item of visible) {
-            const subtitleParts = [];
-            const columns = Array.isArray(opts?.columns) ? opts.columns : [];
-            for (const col of columns) {
-                if (col.key === 'name') continue;
-                let text = '';
-                if (typeof col.render === 'function') {
-                    const rendered = col.render(item);
-                    text = typeof rendered === 'string' ? rendered : '';
-                } else if (item && item[col.key] != null) {
-                    text = String(item[col.key]);
+            /** @type {string|undefined} */
+            let subtitle;
+            /** @type {string[]|undefined} */
+            let chips;
+            /** @type {string|undefined} */
+            let status;
+            if (typeof opts?.cardMeta === 'function') {
+                const meta = opts.cardMeta(item) || {};
+                subtitle = meta.subtitle != null && String(meta.subtitle).trim()
+                    ? String(meta.subtitle).trim()
+                    : undefined;
+                chips = Array.isArray(meta.chips)
+                    ? meta.chips.map((c) => String(c ?? '').trim()).filter(Boolean)
+                    : undefined;
+                status = meta.status != null && String(meta.status).trim()
+                    ? String(meta.status).trim()
+                    : undefined;
+            } else {
+                const subtitleParts = [];
+                const columns = Array.isArray(opts?.columns) ? opts.columns : [];
+                for (const col of columns) {
+                    if (col.key === 'name') continue;
+                    let text = '';
+                    if (typeof col.render === 'function') {
+                        const rendered = col.render(item);
+                        text = typeof rendered === 'string' ? rendered : '';
+                    } else if (item && item[col.key] != null) {
+                        text = String(item[col.key]);
+                    }
+                    if (text) subtitleParts.push(text);
                 }
-                if (text) subtitleParts.push(text);
+                subtitle = subtitleParts.join(' · ') || undefined;
             }
 
             const card = createStyleCard({
                 title: String(item?.name ?? item?.key ?? item?.id ?? ''),
-                subtitle: subtitleParts.join(' · ') || undefined,
-                item,
+                titleBadge: typeof opts?.titleBadge === 'function'
+                    ? (opts.titleBadge(item) || undefined)
+                    : undefined,
+                subtitle,
+                chips,
+                status,
+                cover: showCover,
+                coverUrl: item?.coverUrl,
                 active: Boolean(item?.__active),
                 enabled: item?.active !== false && item?.enabled !== false,
                 onEnabledChange: typeof deps.onToggleActive === 'function'
                     ? (v) => deps.onToggleActive(item, v)
                     : undefined,
                 onOpen: () => deps.onEdit(item),
+                onCoverClick: typeof deps.onCoverClick === 'function'
+                    ? () => deps.onCoverClick(item)
+                    : undefined,
                 actions: [
                     {
                         label: '编辑',

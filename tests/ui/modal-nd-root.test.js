@@ -99,15 +99,15 @@ describe('ui/common/modal nd-root (D52)', () => {
 
         const realDlg = document.createElement('dialog');
         realDlg.setAttribute('open', '');
-        const hostWrap = document.createElement('div');
-        hostWrap.className = 'nd-root';
-        // host may still set id (adapter); decoy already has same id
-        hostWrap.id = 'nai-dbgen-root';
-        hostWrap.appendChild(content);
-        realDlg.appendChild(hostWrap);
 
         const host = {
-            openModal: async () => {
+            /**
+             * @param {{ element?: Element }} opts
+             */
+            openModal: async (opts) => {
+                // openModal 自建 .nd-modal-root 铬件后把整棵挂进来
+                realDlg.replaceChildren();
+                if (opts?.element) realDlg.appendChild(opts.element);
                 document.body.appendChild(realDlg);
             },
         };

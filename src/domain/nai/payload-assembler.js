@@ -6,13 +6,14 @@
  * 报文字段对齐桌面项目 app/backend.js 的 payload 形状：
  * `{ input, model, parameters: { …采样, negative_prompt, v4_prompt, v4_negative_prompt } }`
  * 另按 NaiRequest typedef 在顶层保留 negative_prompt。
- * 结构开关取 FIXED_STRUCTURE（需求步骤 5），负向含 use_coords:false / use_order / legacy_uc
- * （桌面负向仅写了 legacy_uc，本插件按需求补全）。
+ * 结构开关对齐桌面 4.5：正向 use_coords / use_order，负向只写 legacy_uc，
+ * parameters 顶层再写一份 use_coords。负向 char_captions 补上与正向同序号的 centers。
  * SMEA(sm/sm_dyn)：4.5 / V5 模型不写入（需求 4.13）。
  */
 
 import { FIXED_STRUCTURE } from '../model/nai-params.js';
 import { prefixArtist } from './artist-prefix.js';
+import { expandNaiParamFields } from './param-options.js';
 import { substituteCharacterKeywords } from './keyword-substitution.js';
 
 /**
@@ -41,9 +42,17 @@ import { substituteCharacterKeywords } from './keyword-substitution.js';
 const META_PARAM_KEYS = new Set([
     'schemaVersion',
     'seedRandom',
-    'qualityStrategy',
     'model',
 ]);
+
+/** NovelAI 只收 0–4294967295。-1 表示这次另抽一颗。 */
+function resolveRequestSeed(seed) {
+    const n = Number(seed);
+    if (Number.isInteger(n) && n >= 0 && n <= 4294967295) {
+        return n;
+    }
+    return Math.floor(Math.random() * 4294967295);
+}
 
 /**
  * @param {AssembleInput} input
@@ -83,96 +92,102 @@ export function assembleNaiPayload(input) {
     const overrides = (input.paramOverrides && typeof input.paramOverrides === 'object')
         ? { ...input.paramOverrides }
         : {};
-    const merged = { ...input.params, ...overrides };
+    // 4.13：成对字段展开 + Variety 按尺寸计算（参数合法性由 UI / mergeNaiParamsForGenerate 先保证）
+    const expanded = expandNaiParamFields({ ...input.params, ...overrides });
+    const model = String(expanded.model ?? '');
 
     // 4. 结构开关 + caption
+    const posChars = cloneCharCaptions(caption.v4_prompt.caption.char_captions);
+    const negChars = pairNegativeCharCaptions(
+        posChars,
+        cloneCharCaptions(caption.v4_negative_prompt.caption.char_captions),
+    );
+    const useCoords = posChars.length > 0;
     const v4Prompt = {
         caption: {
             base_caption: posBase,
-            char_captions: cloneCharCaptions(caption.v4_prompt.caption.char_captions),
+            char_captions: posChars,
         },
-        ...FIXED_STRUCTURE.v4_prompt,
+        use_coords: useCoords,
+        use_order: FIXED_STRUCTURE.v4_prompt.use_order,
     };
     const v4Negative = {
         caption: {
             base_caption: negBase,
-            char_captions: cloneCharCaptions(caption.v4_negative_prompt.caption.char_captions),
+            char_captions: negChars,
         },
         ...FIXED_STRUCTURE.v4_negative_prompt,
     };
 
-    const model = String(merged.model ?? input.params.model ?? '');
-    const qualityStrategy = merged.qualityStrategy === 'caption' ? 'caption' : 'field';
-
     /** @type {Record<string, unknown>} */
     const parameters = {
-        width: Number(merged.width) || 0,
-        height: Number(merged.height) || 0,
-        scale: Number(merged.scale) || 0,
-        sampler: String(merged.sampler ?? ''),
-        steps: Number(merged.steps) || 0,
+        params_version: 4,
+        width: Number(expanded.width) || 0,
+        height: Number(expanded.height) || 0,
+        scale: Number(expanded.scale) || 0,
+        sampler: String(expanded.sampler ?? ''),
+        steps: Number(expanded.steps) || 0,
         n_samples: 1,
-        seed: Number(merged.seed) || 0,
-        noise_schedule: String(merged.noise_schedule ?? ''),
-        cfg_rescale: Number(merged.cfg_rescale) || 0,
-        skip_cfg_above_sigma: merged.skip_cfg_above_sigma == null
+        seed: resolveRequestSeed(expanded.seed),
+        noise_schedule: String(expanded.noise_schedule ?? ''),
+        cfg_rescale: Number(expanded.cfg_rescale) || 0,
+        skip_cfg_above_sigma: expanded.skip_cfg_above_sigma == null
             ? null
-            : Number(merged.skip_cfg_above_sigma),
-        image_format: merged.image_format === 'webp' ? 'webp' : 'png',
+            : Number(expanded.skip_cfg_above_sigma),
+        image_format: expanded.image_format === 'webp' ? 'webp' : 'png',
+        qualityToggle: expanded.qualityToggle === true,
+        tag_hint_qt: expanded.tag_hint_qt === true,
+        ucPreset: Number(expanded.ucPreset) || 0,
+        tag_hint_uc_preset: expanded.tag_hint_uc_preset === true,
+        straight_alpha: expanded.straight_alpha === true,
+        tag_hint_transparent_background: expanded.tag_hint_transparent_background === true,
         negative_prompt: negBase,
+        use_coords: useCoords,
         v4_prompt: v4Prompt,
         v4_negative_prompt: v4Negative,
     };
 
-    if (qualityStrategy === 'field') {
-        parameters.qualityToggle = merged.qualityToggle !== false;
-        parameters.tag_hint_qt = merged.tag_hint_qt !== false;
-        parameters.ucPreset = Number(merged.ucPreset) || 0;
-        parameters.tag_hint_uc_preset = merged.tag_hint_uc_preset !== false;
-    } else {
-        // caption 策略：不发官方质量/UC 字段（文本注入由调用方自行处理）
-        parameters.qualityToggle = false;
-        parameters.tag_hint_qt = false;
-        parameters.ucPreset = 0;
-        parameters.tag_hint_uc_preset = false;
+    if (Object.prototype.hasOwnProperty.call(expanded, 'sm')) {
+        parameters.sm = expanded.sm === true;
+        parameters.sm_dyn = expanded.sm_dyn === true;
     }
 
-    parameters.straight_alpha = merged.straight_alpha === true;
-    parameters.tag_hint_transparent_background =
-        merged.tag_hint_transparent_background === true;
-
-    // SMEA：仅旧模型（需求 4.13；桌面 4.5/V5 分支不带 sm）
-    if (!isModernNaiModel(model)) {
-        parameters.sm = merged.sm === true;
-        parameters.sm_dyn = merged.sm_dyn === true;
-    }
-
-    // 6. 调用方多传的原生字段原样带上（不覆盖已写死的 v4 结构）
+    // 6. 调用方多传的原生字段原样带上（不覆盖已写死的 v4 结构 / 已校验采样字段）
+    const guarded = new Set([
+        'v4_prompt',
+        'v4_negative_prompt',
+        'negative_prompt',
+        'n_samples',
+        'width',
+        'height',
+        'scale',
+        'sampler',
+        'steps',
+        'seed',
+        'noise_schedule',
+        'cfg_rescale',
+        'skip_cfg_above_sigma',
+        'image_format',
+        'qualityToggle',
+        'tag_hint_qt',
+        'ucPreset',
+        'tag_hint_uc_preset',
+        'straight_alpha',
+        'tag_hint_transparent_background',
+        'sm',
+        'sm_dyn',
+        'model',
+        'schemaVersion',
+        'seedRandom',
+    ]);
     /** @type {Record<string, unknown>} */
     const extra = {};
     for (const [key, value] of Object.entries(overrides)) {
-        if (META_PARAM_KEYS.has(key)) {
+        if (META_PARAM_KEYS.has(key) || guarded.has(key)) {
             continue;
         }
-        if (key === 'v4_prompt' || key === 'v4_negative_prompt') {
-            continue;
-        }
-        if (!(key in parameters) || Object.prototype.hasOwnProperty.call(overrides, key)) {
-            if (key in parameters && ['v4_prompt', 'v4_negative_prompt', 'negative_prompt', 'n_samples'].includes(key)) {
-                continue;
-            }
-            if (!(key in parameters)) {
-                parameters[key] = value;
-                extra[key] = value;
-            } else if (![
-                'v4_prompt',
-                'v4_negative_prompt',
-                'negative_prompt',
-                'n_samples',
-            ].includes(key)) {
-                parameters[key] = value;
-            }
-        }
+        parameters[key] = value;
+        extra[key] = value;
     }
 
     /** @type {NaiRequest} */
@@ -186,19 +201,6 @@ export function assembleNaiPayload(input) {
         request.extra = extra;
     }
     return request;
-}
-
-/**
- * 4.5 / V5 不发 SMEA（需求 4.13）。
- * @param {string} model
- * @returns {boolean}
- */
-function isModernNaiModel(model) {
-    const m = String(model).toLowerCase();
-    return m.includes('4-5')
-        || m.includes('nai-diffusion-5')
-        || m.includes('diffusion-5')
-        || /(?:^|[^0-9])5(?:-full|-curated)?(?:$|[^0-9])/.test(m);
 }
 
 /**
@@ -226,6 +228,31 @@ function cloneCaptionShallow(caption) {
  * @param {unknown} raw
  * @returns {import('../model/nai-params.js').CharCaption[]}
  */
+/**
+ * 负向角色与正向同序号。负向没写 centers 时抄正向的。
+ * @param {import('../model/nai-params.js').CharCaption[]} posChars
+ * @param {import('../model/nai-params.js').CharCaption[]} negChars
+ */
+function pairNegativeCharCaptions(posChars, negChars) {
+    const count = Math.max(posChars.length, negChars.length);
+    /** @type {import('../model/nai-params.js').CharCaption[]} */
+    const out = [];
+    for (let i = 0; i < count; i += 1) {
+        const neg = negChars[i] ?? { char_caption: '' };
+        const pos = posChars[i];
+        /** @type {import('../model/nai-params.js').CharCaption} */
+        const item = { char_caption: neg.char_caption };
+        const centers = (Array.isArray(neg.centers) && neg.centers.length > 0)
+            ? neg.centers
+            : pos?.centers;
+        if (Array.isArray(centers) && centers.length > 0) {
+            item.centers = centers.map((p) => ({ x: Number(p?.x) || 0, y: Number(p?.y) || 0 }));
+        }
+        out.push(item);
+    }
+    return out;
+}
+
 function cloneCharCaptions(raw) {
     if (!Array.isArray(raw)) {
         return [];

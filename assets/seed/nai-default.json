@@ -1,0 +1,18 @@
+{
+  "schemaVersion": 1,
+  "kind": "nai-config",
+  "exportedAt": "2026-09-23T00:00:00.000Z",
+  "items": [
+    {
+      "schemaVersion": 1,
+      "id": "seed-nai-default-v1",
+      "name": "默认 NAI",
+      "baseUrl": "https://image.novelai.net",
+      "apiKey": "",
+      "transport": "direct",
+      "decoder": "auto",
+      "createdAt": "2026-09-23T00:00:00.000Z",
+      "updatedAt": "2026-09-23T00:00:00.000Z"
+    }
+  ]
+}

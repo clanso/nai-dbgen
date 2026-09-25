@@ -49,8 +49,8 @@ export function extractJson(text) {
 
     return Err(contractError({
         code: 'LLM_JSON_EXTRACT_FAILED',
-        message: '无法从 LLM 回文中提取 JSON',
-        hint: '第三方中转可能不支持 json_schema；请查看原始回文并调整预设',
+        message: '无法从模型回复中解析结果',
+        hint: '请查看模型原始回复并调整预设；部分中转可能不支持结构化输出',
         cause: lastCause,
         context: { rawText: raw },
     }));

@@ -3,7 +3,8 @@
  * 用正在编辑的那一条串 + 手填提示词；预览尺寸用 ARTIST_PREVIEW_SIZE；不写楼。
  * 调用 ImageGenService.generate 时必须传 artist=正在编辑的 ArtistString（裁决 D9），
  * 不得临时改动 PluginSettings.activeArtistId。
- * 归属：W2-F 用例代理实现。W0 仅冻结签名。
+ *
+ * 示例图只存本机；原图用出图，卡片图由注入的 makeCardImage 生成。
  */
 
 import { Ok, Err } from '../infra/result.js';
@@ -16,7 +17,8 @@ import { abortErrIfNeeded } from './_helpers.js';
  * @typedef {object} ArtistPreviewDeps
  * @property {import('./image-gen.service.js').ImageGenService} imageGen
  * @property {import('../ports/repository.port.js').Repository<import('../domain/model/artist.js').ArtistString>} artistRepo
- * @property {import('../ports/repository.port.js').ImageRepository} imageRepo
+ * @property {(artistId: string, referenceBlob: Blob, cardBlob: Blob, oldRefs?: { referenceImageRef?: string|null, cardImageRef?: string|null }) => Promise<import('../infra/result.js').Ok<{ referenceImageRef: string, cardImageRef: string }>|import('../infra/result.js').Err<import('../infra/errors.js').AppError>>} savePreviewPair
+ * @property {(blob: Blob) => Promise<Blob>} makeCardImage
  */
 
 /**
@@ -24,15 +26,21 @@ import { abortErrIfNeeded } from './_helpers.js';
  * @property {string} artistId 正在编辑的画师串（非必须当前激活）
  * @property {string} promptText 用户手填正向提示词
  * @property {string} [negativeText]
- * @property {boolean} [saveAsPreview=true] 是否写回 previewImageRef
+ * @property {boolean} [saveAsPreview=true] 是否写回示例图引用
  * @property {AbortSignal} [signal]
  */
 
 /**
  * @param {ArtistPreviewDeps} deps
- * @returns {{ preview: (input: ArtistPreviewInput) => Promise<import('../infra/result.js').Ok<{ image: import('../ports/image-gen.port.js').GeneratedImage, imageRef?: string }>|import('../infra/result.js').Err<import('../infra/errors.js').AppError>> }}
+ * @returns {{ preview: (input: ArtistPreviewInput) => Promise<import('../infra/result.js').Ok<{ image: import('../ports/image-gen.port.js').GeneratedImage, referenceImageRef?: string, cardImageRef?: string }>|import('../infra/result.js').Err<import('../infra/errors.js').AppError>> }}
  */
 export function createArtistPreviewService(deps) {
+    if (!deps || typeof deps.savePreviewPair !== 'function') {
+        throw new Error('createArtistPreviewService requires deps.savePreviewPair');
+    }
+    if (typeof deps.makeCardImage !== 'function') {
+        throw new Error('createArtistPreviewService requires deps.makeCardImage');
+    }
     return {
         /**
          * @param {ArtistPreviewInput} input
@@ -65,7 +73,6 @@ export function createArtistPreviewService(deps) {
             caption.v4_prompt.caption.base_caption = String(input.promptText ?? '');
             caption.v4_negative_prompt.caption.base_caption = String(input.negativeText ?? '');
 
-            // 必须传正在编辑的那一条；尺寸只用 ARTIST_PREVIEW_SIZE（禁止魔法数 / 不读 4.13）
             const genR = await deps.imageGen.generate({
                 caption,
                 replaceCharacterKeywords: false,
@@ -94,15 +101,34 @@ export function createArtistPreviewService(deps) {
                 return Ok({ image });
             }
 
-            const putR = await deps.imageRepo.put(image.blob);
+            let cardBlob;
+            try {
+                cardBlob = await deps.makeCardImage(image.blob);
+            } catch (err) {
+                return Err(domainError({
+                    code: 'ARTIST_CARD_SCALE',
+                    message: '卡片图生成失败',
+                    cause: err,
+                }));
+            }
+
+            const putR = await deps.savePreviewPair(
+                artist.id,
+                image.blob,
+                cardBlob,
+                {
+                    referenceImageRef: artist.referenceImageRef,
+                    cardImageRef: artist.cardImageRef,
+                },
+            );
             if (!putR.ok) {
                 return putR;
             }
-            const imageRef = putR.value;
 
             const updated = {
                 ...artist,
-                previewImageRef: imageRef,
+                referenceImageRef: putR.value.referenceImageRef,
+                cardImageRef: putR.value.cardImageRef,
                 updatedAt: nowIso(),
             };
             const saveR = await deps.artistRepo.put(updated);
@@ -110,7 +136,11 @@ export function createArtistPreviewService(deps) {
                 return saveR;
             }
 
-            return Ok({ image, imageRef });
+            return Ok({
+                image,
+                referenceImageRef: putR.value.referenceImageRef,
+                cardImageRef: putR.value.cardImageRef,
+            });
         },
     };
 }

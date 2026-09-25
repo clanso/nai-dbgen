@@ -11,9 +11,9 @@ import {
 } from '../../domain/slot/slot-token.js';
 
 /** @type {string} */
-export const REGEX_SCRIPT_NAME_WIDGET = 'nai-dbgen:slot-to-widget';
+export const REGEX_SCRIPT_NAME_WIDGET = '酒馆数据库生图：出图按钮';
 /** @type {string} */
-export const REGEX_SCRIPT_NAME_STRIP = 'nai-dbgen:slot-strip';
+export const REGEX_SCRIPT_NAME_STRIP = '酒馆数据库生图：发历史时隐藏';
 /** @type {string} */
 export const REGEX_SCRIPT_ID_WIDGET = 'nai-dbgen-0001-slot-to-widget';
 /** @type {string} */
@@ -239,7 +239,7 @@ export function createRegexScriptInstaller(deps) {
             if (isRegexExtensionDisabled(ctx)) {
                 return Err(configError({
                     code: 'REGEX_EXTENSION_DISABLED',
-                    message: '酒馆正则扩展已被禁用，无法安装 slot 脚本',
+                    message: '酒馆正则扩展已被禁用，无法安装出图按钮脚本',
                     hint: '请在扩展列表中启用 Regex，或改用面板内出图',
                 }));
             }
@@ -257,7 +257,7 @@ export function createRegexScriptInstaller(deps) {
                 return Err(hostError({
                     code: 'REGEX_MISSING',
                     message: '正则脚本校验失败，部分脚本缺失或被改坏',
-                    hint: '请勿禁用/删改名为 nai-dbgen: 开头的正则脚本',
+                    hint: '请勿禁用或删改本插件安装的正则脚本',
                     context: { missing: after.missing },
                 }));
             }

@@ -1,6 +1,6 @@
 /**
  * L3 领域模型 · SlotPlan / SlotRecord（架构文档 §5.3）。
- * 主键 (messageId, slotId)；权威记录挂 message.extra。
+ * 会话内主键 slotId；权威记录在服务器会话文件（需求 4.17）。
  * 归属：W0 契约冻结。
  */
 
@@ -9,6 +9,7 @@ import {
     isNonEmptyString,
     isPlainObject,
     requireArg,
+    schemaVersionMismatch,
     validationErr,
     validationOk,
 } from '../../infra/validate.js';
@@ -27,6 +28,8 @@ export const SLOT_SCHEMA_VERSION = 1;
  * @property {number} slotId 模型给的 1..n
  * @property {string} anchorSentence 「生成点」：段落最后一句
  * @property {NaiCaption} caption
+ * @property {string} [size] 「尺寸」：`"宽x高"`；空则不存
+ * @property {string} [analysis] 「解析」文本；空则不存
  */
 
 /**
@@ -49,8 +52,10 @@ export const SLOT_SCHEMA_VERSION = 1;
  * @property {string} createdAt
  * @property {string|null} presetId
  * @property {string|null} llmConfigId
- * @property {string} [worldInfoSnapshot] 解析出的世界书文本，供复现（架构 §6.3）
+ * @property {string} [worldInfoSnapshot] 世界书文本快照，供复现（架构 §6.3）
  * @property {string|null} [traceId]
+ * @property {string} [size] 「尺寸」：`"宽x高"`；没有则不存
+ * @property {string} [analysis] 「解析」；没有则不存
  */
 
 /**
@@ -65,13 +70,13 @@ export function createSlotPlan(input) {
     requireArg(isPlainObject(input), 'input');
     return validateSlotPlan({
         slotId: input.slotId ?? input.slotid,
-        anchorSentence: input.anchorSentence ?? input['生成点'] ?? '',
+        anchorSentence: input.anchorSentence ?? input.anchor ?? input['生成点'] ?? '',
         caption: input.caption ?? input['生图内容'] ?? emptyNaiCaption(),
     });
 }
 
 /**
- * 从 LLM JSON 数组项构造（兼容中文键名 slotid / 生成点 / 生图内容）。
+ * 从 LLM JSON 数组项构造（可读中文键名 slotid / 生成点 / 生图内容）。
  * @param {unknown} item
  * @returns {{ ok: true, value: SlotPlan } | { ok: false, error: import('../../infra/errors.js').AppError }}
  */
@@ -80,6 +85,49 @@ export function slotPlanFromLlmItem(item) {
         return validationErr('SLOT_PLAN_SHAPE', '生图计划项格式无效');
     }
     return createSlotPlan(item);
+}
+
+/**
+ * 步骤 5 新格式：模型回 slotid + 生图内容，可选尺寸 / 解析（不回生成点）。
+ * @param {unknown} item
+ * @returns {{ ok: true, value: { slotId: number, caption: NaiCaption, size?: string, analysis?: string } } | { ok: false, error: import('../../infra/errors.js').AppError }}
+ */
+export function slotCaptionFromLlmItem(item) {
+    if (!isPlainObject(item)) {
+        return validationErr('SLOT_PLAN_SHAPE', '生图计划项格式无效');
+    }
+    const slotId = Number(item.slotId ?? item.slotid);
+    if (!isIntInRange(slotId, 1, 9999)) {
+        return validationErr('SLOT_PLAN_ID', 'slotId 必须是正整数');
+    }
+    const cap = validateNaiCaption(item.caption ?? item['生图内容'] ?? emptyNaiCaption());
+    if (!cap.ok) {
+        return cap;
+    }
+    /** @type {{ slotId: number, caption: NaiCaption, size?: string, analysis?: string }} */
+    const value = { slotId, caption: cap.value };
+    const size = optionalLlmText(item.size ?? item['尺寸']);
+    if (size != null) {
+        value.size = size;
+    }
+    const analysis = optionalLlmText(item.analysis ?? item['解析']);
+    if (analysis != null) {
+        value.analysis = analysis;
+    }
+    return validationOk(value);
+}
+
+/**
+ * LLM 可选文本字段：空串 / 非字符串 → 视为未写。
+ * @param {unknown} raw
+ * @returns {string|null}
+ */
+function optionalLlmText(raw) {
+    if (typeof raw !== 'string') {
+        return null;
+    }
+    const t = raw.trim();
+    return t.length > 0 ? t : null;
 }
 
 /**
@@ -92,7 +140,8 @@ export function createSlotRecord(input, deps) {
     requireArg(deps && isNonEmptyString(deps.now), 'deps');
     const captionResult = validateNaiCaption(input.caption ?? emptyNaiCaption());
     const caption = captionResult.ok ? captionResult.value : emptyNaiCaption();
-    return {
+    /** @type {SlotRecord} */
+    const rec = {
         schemaVersion: SLOT_SCHEMA_VERSION,
         messageId: Number(input.messageId),
         slotId: Number(input.slotId),
@@ -107,6 +156,15 @@ export function createSlotRecord(input, deps) {
             : String(input.worldInfoSnapshot),
         traceId: input.traceId == null ? null : String(input.traceId),
     };
+    const size = optionalLlmText(input.size);
+    if (size != null) {
+        rec.size = size;
+    }
+    const analysis = optionalLlmText(input.analysis);
+    if (analysis != null) {
+        rec.analysis = analysis;
+    }
+    return rec;
 }
 
 /**
@@ -174,8 +232,13 @@ export function validateSlotRecord(obj) {
     if (!cap.ok) {
         return cap;
     }
-    return validationOk(/** @type {SlotRecord} */ ({
-        schemaVersion: Number(obj.schemaVersion) || SLOT_SCHEMA_VERSION,
+    const ver = schemaVersionMismatch(obj, SLOT_SCHEMA_VERSION, 'SLOT_REC_SCHEMA', 'Slot 记录');
+    if (ver) {
+        return ver;
+    }
+    /** @type {SlotRecord} */
+    const value = {
+        schemaVersion: SLOT_SCHEMA_VERSION,
         messageId: Number(obj.messageId),
         slotId: Number(obj.slotId),
         caption: cap.value,
@@ -188,7 +251,16 @@ export function validateSlotRecord(obj) {
             ? undefined
             : String(obj.worldInfoSnapshot),
         traceId: obj.traceId == null ? null : String(obj.traceId),
-    }));
+    };
+    const size = optionalLlmText(obj.size);
+    if (size != null) {
+        value.size = size;
+    }
+    const analysis = optionalLlmText(obj.analysis);
+    if (analysis != null) {
+        value.analysis = analysis;
+    }
+    return validationOk(value);
 }
 
 /**
@@ -217,15 +289,3 @@ export function latestSlotImage(record) {
     return record.images[record.images.length - 1];
 }
 
-/**
- * @param {object} obj
- * @param {number} fromVersion
- * @returns {{ ok: true, value: SlotRecord } | { ok: false, error: import('../../infra/errors.js').AppError }}
- */
-export function migrateSlotRecord(obj, fromVersion) {
-    requireArg(isPlainObject(obj), 'obj');
-    return validateSlotRecord({
-        ...obj,
-        schemaVersion: SLOT_SCHEMA_VERSION,
-    });
-}

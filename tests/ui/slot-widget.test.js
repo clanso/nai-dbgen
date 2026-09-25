@@ -13,7 +13,7 @@ import {
     peekSlotInflight,
 } from '../../src/ui/slot-widget/slot-mount.js';
 import { safeImageUrl } from '../../src/ui/common/safe-url.js';
-import { buildImageViewerElement } from '../../src/ui/slot-widget/image-viewer.js';
+import { buildImageViewerElement } from '../../src/ui/common/image-viewer.js';
 
 describe('ui/slot mountSlotWidget', () => {
     /** @type {ReturnType<typeof installFakeDom>|null} */
@@ -331,5 +331,114 @@ describe('ui/slot mountSlotWidget', () => {
         );
         assert.equal(imgBox.childNodes.length, 0);
         handle2.destroy();
+    });
+
+    it('外部出图：挂载时 isRendering → SLOT_RENDERED 后变为已出图', async () => {
+        const bus = createEventBus();
+        let rendering = true;
+        /** @type {{ images?: Array<{ imageRef: string }> }|null} */
+        let record = null;
+        const root = makeRoot(1);
+        const handle = mountSlotWidget(root, 3, {
+            bus,
+            getChatId: () => chatId,
+            isRendering: () => rendering,
+            hasPendingWrite: () => false,
+            onGenerateClick: async () => ({ ok: true, value: {} }),
+            getRecord: () => /** @type {any} */ (record),
+            getImageUrl: async () => 'https://cdn.example/ext.png',
+        });
+        await new Promise((r) => setTimeout(r, 0));
+        assert.ok(root.className.includes('nd-slot--generating'), root.className);
+        const btnBusy = btnOf(root);
+        assert.equal(btnBusy.disabled, true);
+        assert.equal(btnBusy.getAttribute('aria-busy'), 'true');
+        assert.match(String(btnBusy.textContent), /生图中/);
+
+        // 模拟 usecase：先清 inflight，再更新权威记录并发 SLOT_RENDERED
+        rendering = false;
+        record = { images: [{ imageRef: 'ref-ext' }] };
+        bus.emit(APP_EVENTS.SLOT_RENDERED, {
+            messageId: 3,
+            slotId: 1,
+            chatId,
+            imageRef: 'ref-ext',
+            record,
+        });
+        await new Promise((r) => setTimeout(r, 0));
+
+        assert.ok(root.className.includes('nd-slot--done'), root.className);
+        const btnDone = btnOf(root);
+        assert.equal(btnDone.disabled, false);
+        assert.equal(btnDone.getAttribute('aria-busy'), 'false');
+        assert.equal(String(btnDone.textContent).includes('生图中'), false);
+        handle.destroy();
+    });
+
+    it('外部出图失败：SLOT_RENDER_FAILED → 可重试 error 态', async () => {
+        const bus = createEventBus();
+        let rendering = true;
+        const root = makeRoot(2);
+        const handle = mountSlotWidget(root, 3, {
+            bus,
+            getChatId: () => chatId,
+            isRendering: () => rendering,
+            hasPendingWrite: () => false,
+            onGenerateClick: async () => ({ ok: true, value: {} }),
+            getRecord: () => null,
+            getImageUrl: async () => null,
+        });
+        await new Promise((r) => setTimeout(r, 0));
+        assert.ok(root.className.includes('nd-slot--generating'), root.className);
+
+        rendering = false;
+        bus.emit(APP_EVENTS.SLOT_RENDER_FAILED, {
+            messageId: 3,
+            slotId: 2,
+            chatId,
+            error: { message: '上游超时', traceId: 'tr-fail' },
+        });
+        await new Promise((r) => setTimeout(r, 0));
+
+        assert.ok(root.className.includes('nd-slot--error'), root.className);
+        const btn = btnOf(root);
+        assert.equal(btn.disabled, false);
+        assert.equal(btn.textContent, '重试');
+        const errEl = [...root.childNodes].find(
+            (n) => String(n.className || '').includes('nd-slot__error'),
+        );
+        assert.ok(errEl);
+        assert.equal(errEl.hidden, false);
+        const texts = [...errEl.childNodes].map((n) => n.textContent).join('\n');
+        assert.match(texts, /上游超时/);
+        assert.match(texts, /tr-fail/);
+        handle.destroy();
+    });
+
+    it('IMAGE_CACHE_TRIMMED：被删图立刻变未生图', async () => {
+        const bus = createEventBus();
+        const root = makeRoot(9);
+        /** @type {Set<string>} */
+        const missing = new Set();
+        const handle = mountSlotWidget(root, 5, {
+            bus,
+            getChatId: () => chatId,
+            onGenerateClick: async () => ({ ok: true, value: {} }),
+            getRecord: () => ({ images: [{ imageRef: 'img-keep-me' }] }),
+            getImageUrl: async (ref) => (missing.has(String(ref)) ? null : 'https://cdn.example/ok.png'),
+        });
+        await new Promise((r) => setTimeout(r, 0));
+        assert.ok(root.className.includes('nd-slot--done'), root.className);
+
+        missing.add('img-keep-me');
+        bus.emit(APP_EVENTS.IMAGE_CACHE_TRIMMED, {
+            removed: 1,
+            removedRefs: ['img-keep-me'],
+            limit: 3,
+        });
+        await new Promise((r) => setTimeout(r, 0));
+        assert.ok(root.className.includes('nd-slot--idle'), root.className);
+        assert.equal(btnOf(root).textContent, '生图');
+        handle.destroy();
     });
 });

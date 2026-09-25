@@ -18,7 +18,14 @@ import { createSillyTavernHost } from '../adapters/host/sillytavern.host.js';
 import { createStMacroBridge } from '../adapters/host/st-macro.bridge.js';
 
 import { openIdb } from '../adapters/storage/idb.js';
-import { createMessageExtraStore } from '../adapters/storage/message-extra.store.js';
+import { createServerFiles } from '../adapters/storage/server-files.js';
+import { createMemoryServerFiles } from '../adapters/storage/memory-server-files.js';
+import { createArtistFileUrlResolver } from '../adapters/storage/artist-preview-files.js';
+import {
+    openServerDocStore,
+} from '../adapters/storage/server-doc-store.js';
+import { putArtistPreviewPair } from '../adapters/storage/artist-preview-files.js';
+import { createChatIndexStore } from '../adapters/storage/chat-index.store.js';
 import { createSettingsStore } from '../adapters/storage/settings.store.js';
 import { createCharacterRepo } from '../adapters/storage/repos/character.repo.js';
 import { createTagRepo } from '../adapters/storage/repos/tag.repo.js';
@@ -29,8 +36,9 @@ import { createSlotRepo } from '../adapters/storage/repos/slot.repo.js';
 import { createImageRepo } from '../adapters/storage/image.repo.js';
 
 import { createLlmGateway } from '../adapters/llm/llm.gateway.js';
-import { createDirectLlmTransport } from '../adapters/llm/transport/direct.js';
 import { createStBackendLlmTransport } from '../adapters/llm/transport/st-backend.js';
+import { createLlmSecretsStore } from '../adapters/llm/secrets-store.js';
+import { resolveYamlApi } from '../adapters/host/st-yaml.js';
 
 import { createNaiGateway } from '../adapters/nai/nai.gateway.js';
 import { createDirectTransport } from '../adapters/nai/transport/direct.js';
@@ -40,13 +48,19 @@ import { decodeJsonBase64 } from '../adapters/nai/decoder/json-base64.js';
 
 import { createContextCollector } from '../application/context-collector.js';
 import { createWorldInfoResolver } from '../application/worldinfo-resolver.js';
+import { createViewpointBlocksBuilder } from '../application/viewpoint-blocks.js';
 import { createTagRecallService } from '../application/tag-recall.service.js';
 import { createGenerateSlotsUseCase } from '../application/generate-slots.usecase.js';
+import { createGenerateFloorUseCase } from '../application/generate-floor.usecase.js';
 import { createImageGenService } from '../application/image-gen.service.js';
 import { createRenderSlotUseCase } from '../application/render-slot.usecase.js';
 import { createArtistPreviewService } from '../application/artist-preview.service.js';
 import { createWorkbenchService } from '../application/workbench.service.js';
 import { createAutoTriggerService } from '../application/auto-trigger.service.js';
+import { createSinglePromptUseCase } from '../application/single-prompt.usecase.js';
+import { createStorageCleanupService } from '../application/storage-cleanup.service.js';
+import { createImageCacheTrimService } from '../application/image-cache-trim.service.js';
+import { scaleImageToCard } from '../adapters/storage/image-scale.js';
 
 /**
  * @typedef {object} AppRepos
@@ -85,8 +99,8 @@ export const REQUIRED_APP_DEPS = Object.freeze({
         'llm', 'tagRepo', 'presetRepo', 'llmConfigRepo', 'loadSettings', 'runHostMacros',
     ]),
     createGenerateSlotsUseCase: Object.freeze([
-        'host', 'llm', 'characterRepo', 'tagRepo', 'presetRepo', 'slotRepo', 'llmConfigRepo',
-        'contextCollector', 'worldInfoResolver', 'tagRecall', 'bus',
+        'host', 'llm', 'presetRepo', 'slotRepo', 'llmConfigRepo',
+        'viewpointBlocks', 'tagRecall', 'bus',
         'loadSettings', 'runHostMacros', 'newId', 'nowIso', 'newTraceId',
     ]),
     createImageGenService: Object.freeze([
@@ -95,13 +109,23 @@ export const REQUIRED_APP_DEPS = Object.freeze({
     createRenderSlotUseCase: Object.freeze([
         'imageGen', 'slotRepo', 'imageRepo', 'host', 'bus', 'nowIso', 'newTraceId',
     ]),
-    createArtistPreviewService: Object.freeze(['imageGen', 'artistRepo', 'imageRepo']),
+    createArtistPreviewService: Object.freeze(['imageGen', 'artistRepo', 'savePreviewPair', 'makeCardImage']),
     createWorkbenchService: Object.freeze([
         'llm', 'imageGen', 'characterRepo', 'tagRepo', 'llmConfigRepo',
         'tagRecall', 'loadSettings', 'runHostMacros',
     ]),
     createAutoTriggerService: Object.freeze([
         'host', 'generateSlots', 'renderSlot', 'slotRepo', 'loadSettings', 'bus',
+    ]),
+    createGenerateFloorUseCase: Object.freeze([
+        'host', 'slotRepo', 'generateSlots', 'renderSlot',
+    ]),
+    createViewpointBlocksBuilder: Object.freeze([
+        'host', 'characterRepo', 'tagRepo', 'contextCollector', 'worldInfoResolver', 'loadSettings',
+    ]),
+    createSinglePromptUseCase: Object.freeze([
+        'host', 'llm', 'tagRepo', 'presetRepo', 'llmConfigRepo', 'slotRepo',
+        'viewpointBlocks', 'loadSettings', 'runHostMacros', 'newTraceId',
     ]),
 });
 
@@ -148,7 +172,9 @@ function defaultGetContext() {
  * @param {object} [opts]
  * @param {() => any} [opts.getContext]
  * @param {import('../ports/host.port.js').HostPort} [opts.host] 测试注入
- * @param {object} [opts.db] 测试注入内存 IDB
+ * @param {object} [opts.db] 测试注入内存 IDB（楼层图缓存 / slot 索引；若未另传 docDb 且无 serverFiles，库配置也走它）
+ * @param {object} [opts.docDb] 测试注入库/配置文档库（IdbClient 形状）
+ * @param {ReturnType<import('../adapters/storage/server-files.js').createServerFiles>} [opts.serverFiles] 测试注入
  * @param {object} [opts.idbOpts] 传给 openIdb
  * @param {ReturnType<import('../infra/event-bus.js').createEventBus>} [opts.bus]
  * @param {import('../ports/llm.port.js').LlmPort} [opts.llm]
@@ -169,28 +195,87 @@ export async function createContainer(opts = {}) {
     const db = opts.db ?? await openIdb(opts.idbOpts);
     const ownsDb = !opts.db;
 
+    /** @type {ReturnType<typeof createServerFiles>} */
+    const serverFiles = opts.serverFiles
+        ?? (opts.db
+            // 测试：注入了内存 IDB 时默认配内存假 serverFiles，避免真实 fetch / CSRF
+            ? createMemoryServerFiles()
+            : createServerFiles({
+                fetch: globalThis.fetch.bind(globalThis),
+                getRequestHeaders: () => {
+                    const ctx = getContext();
+                    if (!ctx || typeof ctx.getRequestHeaders !== 'function') {
+                        throw new Error('getContext().getRequestHeaders 不可用');
+                    }
+                    return ctx.getRequestHeaders();
+                },
+            }));
+
+    /**
+     * 库 / 预设 / API 配置：服务器文档库。
+     * 测试：传 docDb；或只传 db（内存 IDB）且未显式要求服务器文档库 → 复用 db。
+     * @type {object}
+     */
+    let docDb;
+    let ownsDocDb = false;
+    if (opts.docDb) {
+        docDb = opts.docDb;
+    } else if (opts.db && opts.useServerDocStore !== true) {
+        docDb = opts.db;
+    } else {
+        docDb = await openServerDocStore({ serverFiles });
+        ownsDocDb = true;
+    }
+
     const settingsStore = createSettingsStore({ host });
     const loadSettings = () => settingsStore.load();
 
     const macroBridge = createStMacroBridge({ getContext });
     const runHostMacros = (template) => macroBridge.runHostMacros(template);
 
-    const messageExtra = createMessageExtraStore({ host });
+    const chatIndex = createChatIndexStore({ serverFiles, nowIso });
 
-    const characterRepo = createCharacterRepo({ db, bus });
-    const tagRepo = createTagRepo({ db, bus });
-    const artistRepo = createArtistRepo({ db, bus });
-    const presetRepo = createPresetRepo({ db, bus });
-    const llmConfigRepo = createLlmConfigRepo({ db, bus });
-    const naiConfigRepo = createNaiConfigRepo({ db, bus });
-    const slotRepo = createSlotRepo({ db, bus, messageExtra });
-    const imageRepo = createImageRepo({ db });
+    const characterRepo = createCharacterRepo({ db: docDb, bus });
+    const tagRepo = createTagRepo({ db: docDb, bus });
+    const makeCardImage = (blob) => scaleImageToCard(blob);
+    const imageRepo = opts.imageRepo ?? createImageRepo({ db });
+    const artistRepoInner = createArtistRepo({
+        db: docDb,
+        bus,
+        imageRepo,
+        nowIso,
+        newId,
+        makeCardImage,
+    });
+    const artistRepo = wrapArtistRepoPreviewCleanup(artistRepoInner, imageRepo);
+    const presetRepo = createPresetRepo({ db: docDb, bus });
+    const yaml = opts.yaml ?? await resolveYamlApi({ load: opts.loadYaml });
+    const llmConfigRepo = createLlmConfigRepo({ db: docDb, bus, yaml });
+    const naiConfigRepo = createNaiConfigRepo({ db: docDb, bus });
+    const slotRepo = createSlotRepo({
+        serverFiles,
+        chatIndex,
+        host,
+        loadSettings,
+        imageRepo,
+        bus,
+        nowIso,
+    });
 
     /** @type {import('../ports/llm.port.js').LlmPort} */
     const llm = opts.llm ?? createLlmGateway({
         transports: {
-            'st-backend': createStBackendLlmTransport({ getContext }),
-            direct: createDirectLlmTransport(),
+            'st-backend': createStBackendLlmTransport({ getContext, yaml }),
+        },
+    });
+
+    const llmSecrets = opts.llmSecrets ?? createLlmSecretsStore({
+        getRequestHeaders: () => {
+            const ctx = getContext();
+            if (!ctx || typeof ctx.getRequestHeaders !== 'function') {
+                throw new Error('getContext().getRequestHeaders 不可用');
+            }
+            return ctx.getRequestHeaders();
         },
     });
 
@@ -218,6 +303,9 @@ export async function createContainer(opts = {}) {
         createArtistPreviewService,
         createWorkbenchService,
         createAutoTriggerService,
+        createGenerateFloorUseCase,
+        createViewpointBlocksBuilder,
+        createSinglePromptUseCase,
         ...(opts.factories && typeof opts.factories === 'object' ? opts.factories : {}),
     };
 
@@ -229,6 +317,17 @@ export async function createContainer(opts = {}) {
     assertRequiredDeps('createWorldInfoResolver', worldInfoResolverDeps, REQUIRED_APP_DEPS.createWorldInfoResolver);
     const worldInfoResolver = factories.createWorldInfoResolver(worldInfoResolverDeps);
 
+    const viewpointBlocksDeps = {
+        host,
+        characterRepo,
+        tagRepo,
+        contextCollector,
+        worldInfoResolver,
+        loadSettings,
+    };
+    assertRequiredDeps('createViewpointBlocksBuilder', viewpointBlocksDeps, REQUIRED_APP_DEPS.createViewpointBlocksBuilder);
+    const viewpointBlocks = factories.createViewpointBlocksBuilder(viewpointBlocksDeps);
+
     // ── 同实例 #1：llm ──────────────────────────────────────────
     const tagRecallDeps = {
         llm,
@@ -237,6 +336,7 @@ export async function createContainer(opts = {}) {
         llmConfigRepo,
         loadSettings,
         runHostMacros,
+        host,
     };
     assertRequiredDeps('createTagRecallService', tagRecallDeps, REQUIRED_APP_DEPS.createTagRecallService);
     const tagRecall = factories.createTagRecallService(tagRecallDeps);
@@ -263,6 +363,7 @@ export async function createContainer(opts = {}) {
         llmConfigRepo,
         contextCollector,
         worldInfoResolver,
+        viewpointBlocks,
         tagRecall,
         bus,
         loadSettings,
@@ -287,7 +388,18 @@ export async function createContainer(opts = {}) {
     assertRequiredDeps('createRenderSlotUseCase', renderSlotDeps, REQUIRED_APP_DEPS.createRenderSlotUseCase);
     const renderSlot = factories.createRenderSlotUseCase(renderSlotDeps);
 
-    const artistPreviewDeps = { imageGen, artistRepo, imageRepo };
+    const artistPreviewDeps = {
+        imageGen,
+        artistRepo,
+        savePreviewPair: (artistId, referenceBlob, cardBlob, oldRefs) => putArtistPreviewPair(
+            { imageRepo },
+            artistId,
+            referenceBlob,
+            cardBlob,
+            oldRefs,
+        ),
+        makeCardImage,
+    };
     assertRequiredDeps('createArtistPreviewService', artistPreviewDeps, REQUIRED_APP_DEPS.createArtistPreviewService);
     const artistPreview = factories.createArtistPreviewService(artistPreviewDeps);
 
@@ -318,6 +430,45 @@ export async function createContainer(opts = {}) {
     assertRequiredDeps('createAutoTriggerService', autoTriggerDeps, REQUIRED_APP_DEPS.createAutoTriggerService);
     const autoTrigger = factories.createAutoTriggerService(autoTriggerDeps);
 
+    // ── 同实例：generateSlots / renderSlot 闸门必须共享（D35/D54）──
+    const generateFloorDeps = {
+        host,
+        slotRepo,
+        generateSlots,
+        renderSlot,
+        bus,
+    };
+    assertRequiredDeps('createGenerateFloorUseCase', generateFloorDeps, REQUIRED_APP_DEPS.createGenerateFloorUseCase);
+    const generateFloor = factories.createGenerateFloorUseCase(generateFloorDeps);
+
+    // ── 4.16 单图提示词（共用上方 viewpointBlocks）───────────────
+    const singlePromptDeps = {
+        host,
+        llm,
+        tagRepo,
+        presetRepo,
+        llmConfigRepo,
+        slotRepo,
+        viewpointBlocks,
+        loadSettings,
+        runHostMacros,
+        newTraceId,
+    };
+    assertRequiredDeps('createSinglePromptUseCase', singlePromptDeps, REQUIRED_APP_DEPS.createSinglePromptUseCase);
+    const singlePrompt = factories.createSinglePromptUseCase(singlePromptDeps);
+
+    const storageCleanup = createStorageCleanupService({
+        host,
+        chatIndex,
+        serverFiles,
+    });
+
+    const imageCacheTrim = createImageCacheTrimService({
+        loadSettings,
+        imageRepo,
+        bus,
+    });
+
     let disposed = false;
 
     /** @type {AppContainer} */
@@ -329,6 +480,16 @@ export async function createContainer(opts = {}) {
         settingsStore,
         loadSettings,
         runHostMacros,
+        serverFiles,
+        /** 画师串示例图展示 URL（卡片/原图；UI 只经此注入，不直连存储适配器） */
+        artistFileUrl: createArtistFileUrlResolver(imageRepo),
+        /** 库/配置文档库健康状况（服务器加载失败时 ready=false，禁止种子写入） */
+        libraryStorage: {
+            ready: typeof docDb.ready === 'boolean' ? docDb.ready : true,
+            getLoadReport: typeof docDb.getLoadReport === 'function'
+                ? () => docDb.getLoadReport()
+                : () => ({ ready: true, errors: [] }),
+        },
         repos: {
             character: characterRepo,
             tag: tagRepo,
@@ -347,10 +508,17 @@ export async function createContainer(opts = {}) {
             artistPreview,
             workbench,
             autoTrigger,
+            viewpointBlocks,
+            storageCleanup,
+            imageCacheTrim,
+            chatIndex,
+            llmSecrets,
         },
         useCases: {
             generateSlots,
             renderSlot,
+            generateFloor,
+            singlePrompt,
         },
         shared: Object.freeze({ llm, tagRecall, bus }),
         dispose() {
@@ -387,8 +555,51 @@ export async function createContainer(opts = {}) {
                     // ignore
                 }
             }
+            if (ownsDocDb && docDb && typeof docDb.close === 'function') {
+                try {
+                    docDb.close();
+                } catch {
+                    // ignore
+                }
+            }
         },
     };
 
     return container;
+}
+
+/**
+ * 删画师串时顺带删本机示例图（失败不阻断 remove）。
+ * @param {import('../ports/repository.port.js').Repository<any>} repo
+ * @param {{ remove?: Function }} imageRepo
+ */
+function wrapArtistRepoPreviewCleanup(repo, imageRepo) {
+    return {
+        ...repo,
+        async remove(id) {
+            /** @type {{ referenceImageRef?: string|null, cardImageRef?: string|null }|null} */
+            let refs = null;
+            try {
+                const g = await repo.get(id);
+                if (g?.ok && g.value) {
+                    refs = {
+                        referenceImageRef: g.value.referenceImageRef ?? null,
+                        cardImageRef: g.value.cardImageRef ?? null,
+                    };
+                }
+            } catch {
+                // ignore
+            }
+            const r = await repo.remove(id);
+            if (r?.ok && refs && typeof imageRepo?.remove === 'function') {
+                try {
+                    await imageRepo.remove(refs.referenceImageRef);
+                    await imageRepo.remove(refs.cardImageRef);
+                } catch {
+                    // ignore
+                }
+            }
+            return r;
+        },
+    };
 }

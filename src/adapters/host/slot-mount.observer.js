@@ -23,16 +23,22 @@ export const DEFAULT_RECONCILE_DEBOUNCE_MS = 80;
  * @returns {number} 找不到时 -1
  */
 export function resolveMessageIdFromElement(el) {
-    if (!el || typeof el.closest !== 'function') {
-        return -1;
+    let node = el;
+    for (let depth = 0; depth < 8 && node; depth += 1) {
+        if (typeof node.closest === 'function') {
+            const mes = node.closest('.mes[mesid]');
+            if (mes) {
+                const id = Number(mes.getAttribute('mesid'));
+                return Number.isInteger(id) ? id : -1;
+            }
+        }
+        const frame = node.ownerDocument?.defaultView?.frameElement;
+        if (!frame || frame === node) {
+            break;
+        }
+        node = frame;
     }
-    const mes = el.closest('.mes[mesid]');
-    if (!mes) {
-        return -1;
-    }
-    const raw = mes.getAttribute('mesid');
-    const id = Number(raw);
-    return Number.isInteger(id) ? id : -1;
+    return -1;
 }
 
 /**
@@ -107,26 +113,140 @@ function isSlotLikeNode(node) {
 }
 
 /**
+ * 和控制台验证过的查找相同：先看楼层本身，再看 iframe.w-full，再进里面一层 iframe。
+ * @param {ParentNode|null|undefined} mes
+ * @param {number} slotId
+ * @returns {Element|null}
+ */
+export function findSlotInMessage(mes, slotId) {
+    if (!mes || typeof mes.querySelectorAll !== 'function') {
+        return null;
+    }
+    const sel = `[data-slot="${slotId}"]`;
+    const topDoc = mes.ownerDocument || null;
+    const direct = mes.querySelectorAll(sel)[0];
+    if (direct) {
+        return /** @type {Element} */ (direct);
+    }
+    let frames = [];
+    try {
+        frames = mes.querySelectorAll('iframe.w-full');
+    } catch {
+        frames = [];
+    }
+    for (const frame of frames) {
+        let doc = null;
+        try {
+            doc = frame.contentDocument;
+        } catch {
+            continue;
+        }
+        if (!doc || doc === topDoc || typeof doc.querySelectorAll !== 'function') {
+            continue;
+        }
+        const hit = doc.querySelectorAll(sel)[0];
+        if (hit) {
+            return /** @type {Element} */ (hit);
+        }
+        let inners = [];
+        try {
+            inners = doc.querySelectorAll('iframe');
+        } catch {
+            inners = [];
+        }
+        for (const inner of inners) {
+            let idoc = null;
+            try {
+                idoc = inner.contentDocument;
+            } catch {
+                continue;
+            }
+            if (!idoc || idoc === topDoc || typeof idoc.querySelectorAll !== 'function') {
+                continue;
+            }
+            const innerHit = idoc.querySelectorAll(sel)[0];
+            if (innerHit) {
+                return /** @type {Element} */ (innerHit);
+            }
+        }
+    }
+    return null;
+}
+
+/**
  * 收集根下尚未挂载的 slot 元素。
  * @param {Element} root
  * @returns {Element[]}
  */
 export function collectUnmountedSlots(root) {
-    if (!root || typeof root.querySelectorAll !== 'function') {
-        return [];
-    }
-    const nodes = root.querySelectorAll(SLOT_SELECTOR);
     /** @type {Element[]} */
     const out = [];
-    for (const node of nodes) {
-        if (!isSlotLikeNode(node)) {
+    const seen = new Set();
+    /**
+     * @param {ParentNode|null|undefined} node
+     */
+    function take(node) {
+        if (!node || typeof node.querySelectorAll !== 'function') {
+            return;
+        }
+        let slots = [];
+        try {
+            slots = node.querySelectorAll(SLOT_SELECTOR);
+        } catch {
+            slots = [];
+        }
+        for (const slot of slots) {
+            if (!isSlotLikeNode(slot) || seen.has(slot)) {
+                continue;
+            }
+            const el = /** @type {Element} */ (slot);
+            if (el.getAttribute(SLOT_MOUNTED_ATTR) === '1') {
+                continue;
+            }
+            seen.add(el);
+            out.push(el);
+        }
+    }
+    take(root);
+    if (!root || typeof root.querySelectorAll !== 'function') {
+        return out;
+    }
+    const topDoc = root.ownerDocument || null;
+    let frames = [];
+    try {
+        frames = root.querySelectorAll('iframe.w-full');
+    } catch {
+        frames = [];
+    }
+    for (const frame of frames) {
+        let doc = null;
+        try {
+            doc = frame.contentDocument;
+        } catch {
             continue;
         }
-        const el = /** @type {Element} */ (node);
-        if (el.getAttribute(SLOT_MOUNTED_ATTR) === '1') {
+        if (!doc || doc === topDoc) {
             continue;
         }
-        out.push(el);
+        take(doc);
+        let inners = [];
+        try {
+            inners = doc.querySelectorAll('iframe');
+        } catch {
+            inners = [];
+        }
+        for (const inner of inners) {
+            let idoc = null;
+            try {
+                idoc = inner.contentDocument;
+            } catch {
+                continue;
+            }
+            if (!idoc || idoc === topDoc) {
+                continue;
+            }
+            take(idoc);
+        }
     }
     return out;
 }
@@ -153,6 +273,65 @@ export function createSlotMountObserver(deps) {
     let observer = null;
     /** @type {ReturnType<typeof setTimeout>|null} */
     let debounceTimer = null;
+    /** @type {Set<Document>} */
+    const watchedDocs = new Set();
+
+    /**
+     * 父页面的观察器看不到 iframe 里面的变化。正文正则把按钮写进 iframe 之后，还要盯着那一层。
+     * @param {ParentNode|null|undefined} node
+     */
+    function watchFrames(node) {
+        if (!observer || !node || typeof node.querySelectorAll !== 'function') {
+            return;
+        }
+        let frames = [];
+        try {
+            frames = node.querySelectorAll('iframe.w-full');
+        } catch {
+            return;
+        }
+        const topDoc = node.ownerDocument || null;
+        for (const frame of frames) {
+            let doc = null;
+            try {
+                doc = frame.contentDocument;
+            } catch {
+                continue;
+            }
+            if (!doc || doc === topDoc || watchedDocs.has(doc)) {
+                continue;
+            }
+            watchedDocs.add(doc);
+            try {
+                observer.observe(doc.documentElement || doc, { childList: true, subtree: true });
+            } catch {
+                // 这个文档观察不了
+            }
+            let inners = [];
+            try {
+                inners = doc.querySelectorAll('iframe');
+            } catch {
+                inners = [];
+            }
+            for (const inner of inners) {
+                let idoc = null;
+                try {
+                    idoc = inner.contentDocument;
+                } catch {
+                    continue;
+                }
+                if (!idoc || idoc === topDoc || watchedDocs.has(idoc)) {
+                    continue;
+                }
+                watchedDocs.add(idoc);
+                try {
+                    observer.observe(idoc.documentElement || idoc, { childList: true, subtree: true });
+                } catch {
+                    // 这个文档观察不了
+                }
+            }
+        }
+    }
     let started = false;
     const debounceMs = DEFAULT_RECONCILE_DEBOUNCE_MS;
 
@@ -169,6 +348,7 @@ export function createSlotMountObserver(deps) {
             return;
         }
         const slots = collectUnmountedSlots(chatRoot);
+        watchFrames(chatRoot);
         for (const slotEl of slots) {
             const slotId = resolveSlotIdFromElement(slotEl);
             if (slotId < 1) {
@@ -185,8 +365,7 @@ export function createSlotMountObserver(deps) {
             ensureSlotUnprefixedClasses(slotEl);
             slotEl.setAttribute(SLOT_MOUNTED_ATTR, '1');
             try {
-                const messageEl = slotEl.closest('.mes') || slotEl;
-                deps.mountSlot(messageEl, messageId, slotId);
+                deps.mountSlot(slotEl, messageId, slotId);
             } catch {
                 // 挂载失败则清除标记，允许下次对账重试
                 slotEl.removeAttribute(SLOT_MOUNTED_ATTR);
@@ -238,6 +417,7 @@ export function createSlotMountObserver(deps) {
             observer.disconnect();
             observer = null;
         }
+        watchedDocs.clear();
     }
 
     return { start, stop, reconcile };

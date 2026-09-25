@@ -65,7 +65,7 @@ export function createDirectTransport(deps = {}) {
                 return Err(transportError({
                     code: 'NAI_DIRECT_FAILED',
                     message: '浏览器直连 NAI 失败（可能是 CORS 或网络不通）',
-                    hint: '若对端无 CORS 头，请改用 st-cors-proxy：在 SillyTavern 的 config.yaml 将 enableCorsProxy 设为 true（或启动参数 --corsProxy），然后把本配置的传输改为「酒馆 CORS 代理」',
+                    hint: '若对端无 CORS 头：在酒馆安装目录的 config.yaml 把 enableCorsProxy 设为 true（或启动时加 --corsProxy），重启后把本条传输方式改为「酒馆 CORS 代理」',
                     retryable: true,
                     cause,
                     context: {

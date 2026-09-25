@@ -84,19 +84,19 @@ export function mountCaptionEditor(root, opts) {
     const initial = captionToEditorState(opts?.initial ?? emptyNaiCaption());
 
     const posBase = createTextarea({
-        label: '正向 base_caption',
+        label: '场景 · 正面',
         value: initial.posBase,
         rows: 5,
     });
     const negBase = createTextarea({
-        label: '负向 base_caption',
+        label: '场景 · 负面',
         value: initial.negBase,
         rows: 4,
     });
 
     const charsHead = el('div', 'nd-wb-caption__chars-head');
     const charsTitle = el('h4', 'nd-field-group__title');
-    setText(charsTitle, '角色分镜（char_captions）');
+    setText(charsTitle, '角色');
     const charsList = el('div', 'nd-wb-caption__chars');
     charsHead.appendChild(charsTitle);
 
@@ -119,24 +119,24 @@ export function mountCaptionEditor(root, opts) {
         const label = el('strong');
         setText(label, `角色 ${rows.length + 1}`);
         const positive = createTextarea({
-            label: '正向 char_caption',
+            label: '正面',
             value: data.positive,
             rows: 3,
         });
         const negative = createTextarea({
-            label: '负向 char_caption',
+            label: '负面',
             value: data.negative,
             rows: 2,
         });
         const x = createNumberField({
-            label: 'center.x',
+            label: '位置 X',
             value: data.x,
             min: 0,
             max: 1,
             step: 0.01,
         });
         const y = createNumberField({
-            label: 'center.y',
+            label: '位置 Y',
             value: data.y,
             min: 0,
             max: 1,

@@ -9,6 +9,7 @@
     gap: 1.1em;
     padding: 0.4em 0 1.2em;
     color: var(--nd-text);
+    min-height: 0;
 }
 
 :is(#nai-dbgen-root, .nd-root) .nd-wb-header {
@@ -20,8 +21,8 @@
 
 :is(#nai-dbgen-root, .nd-root) .nd-wb-title {
     margin: 0;
-    font-family: var(--nd-serif);
-    font-size: 1.15em;
+    font-family: inherit;
+    font-size: var(--nd-fs-title);
     font-weight: 600;
     color: var(--nd-text);
 }
@@ -29,7 +30,7 @@
 :is(#nai-dbgen-root, .nd-root) .nd-wb-header .nd-muted {
     flex: 1 1 100%;
     margin: 0;
-    font-size: 0.8em;
+    font-size: var(--nd-fs-md);
     color: var(--nd-muted);
 }
 
@@ -50,14 +51,33 @@
 :is(#nai-dbgen-root, .nd-root) .nd-wb-unmatched {
     margin-top: 0.5em;
     padding: 0.55em 0.75em;
-    border-radius: var(--nd-control-radius);
+    border-radius: var(--nd-radius-sm);
     border: 1px solid var(--nd-danger-ring);
     background: var(--nd-danger-wash);
     color: var(--nd-danger);
-    font-size: 0.8em;
+    font-size: var(--nd-fs-md);
 }
 
 :is(#nai-dbgen-root, .nd-root) .nd-wb-caption-mount {
+    width: 100%;
+}
+
+:is(#nai-dbgen-root, .nd-root) .nd-wb-caption-toolbar {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.5em;
+    margin-bottom: 0.35em;
+}
+
+:is(#nai-dbgen-root, .nd-root) .nd-wb-paste-fallback {
+    display: flex;
+    flex-direction: column;
+    gap: 0.75em;
+}
+
+:is(#nai-dbgen-root, .nd-root) .nd-wb-paste-fallback .nd-textarea {
+    min-height: 12em;
     width: 100%;
 }
 
@@ -83,7 +103,7 @@
 
 :is(#nai-dbgen-root, .nd-root) .nd-wb-caption__char {
     padding: 0.7em 0.8em;
-    border-radius: var(--nd-control-radius);
+    border-radius: var(--nd-radius-sm);
     border: 1px solid var(--nd-line);
     background: var(--nd-surface-2);
 }
@@ -116,7 +136,7 @@
     gap: 0.45em;
     max-width: 280px;
     padding: 0.5em;
-    border-radius: var(--nd-control-radius);
+    border-radius: var(--nd-radius-sm);
     border: 1px solid var(--nd-line);
     background: var(--nd-surface);
 }
@@ -126,7 +146,7 @@
     width: 100%;
     max-height: 360px;
     object-fit: contain;
-    border-radius: calc(var(--nd-control-radius) - 2px);
+    border-radius: var(--nd-radius-xs);
     background: var(--nd-surface-2);
 }
 

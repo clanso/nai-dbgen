@@ -27,7 +27,7 @@ describe('artist-prefix', () => {
     it('prefixArtist leaves char_captions untouched; null artist no-op', () => {
         const chars = [{ char_caption: 'girl', centers: [{ x: 0.2, y: 0.3 }] }];
         const src = caption('scene', 'uc', chars, [{ char_caption: 'bad' }]);
-        const out = prefixArtist(src, { positive: 'A', negative: 'B' });
+        const out = prefixArtist(src, { positivePrompt: 'A', negativePrompt: 'B' });
         assert.equal(out.v4_prompt.caption.base_caption, 'A, scene');
         assert.equal(out.v4_negative_prompt.caption.base_caption, 'B, uc');
         assert.deepEqual(out.v4_prompt.caption.char_captions, chars);
@@ -88,7 +88,7 @@ describe('assembleNaiPayload', () => {
 
     it('order: replace → artist → FIXED_STRUCTURE → input/negative', () => {
         const params = defaultNaiParams();
-        const artist = { positive: 'art+', negative: 'art-', id: 'a', name: 'a' };
+        const artist = { positivePrompt: 'art+', negativePrompt: 'art-', id: 'a', name: 'a' };
         const result = assembleNaiPayload({
             caption: caption('张三 scene', 'uc'),
             params,
@@ -114,20 +114,44 @@ describe('assembleNaiPayload', () => {
                 use_coords: result.parameters.v4_prompt.use_coords,
                 use_order: result.parameters.v4_prompt.use_order,
             },
-            FIXED_STRUCTURE.v4_prompt,
+            { use_coords: false, use_order: true },
         );
         assert.deepEqual(
-            {
-                use_coords: result.parameters.v4_negative_prompt.use_coords,
-                use_order: result.parameters.v4_negative_prompt.use_order,
-                legacy_uc: result.parameters.v4_negative_prompt.legacy_uc,
-            },
+            { legacy_uc: result.parameters.v4_negative_prompt.legacy_uc },
             FIXED_STRUCTURE.v4_negative_prompt,
         );
+        assert.equal('use_coords' in result.parameters.v4_negative_prompt, false);
+        assert.equal(result.parameters.use_coords, false);
         // 4.5 默认模型不带 sm
         assert.equal('sm' in result.parameters, false);
         assert.equal(result.parameters.skip_cfg_above_sigma, null);
         assert.equal(result.parameters.qualityToggle, true);
+    });
+
+    it('seed -1 becomes a new uint32; a fixed seed is kept', () => {
+        const random = assembleNaiPayload({
+            caption: emptyNaiCaption(),
+            params: { ...defaultNaiParams(), seed: -1 },
+            artist: null,
+            replaceCharacterKeywords: false,
+        });
+        const again = assembleNaiPayload({
+            caption: emptyNaiCaption(),
+            params: { ...defaultNaiParams(), seed: -1 },
+            artist: null,
+            replaceCharacterKeywords: false,
+        });
+        assert.equal(Number.isInteger(random.parameters.seed), true);
+        assert.ok(random.parameters.seed >= 0 && random.parameters.seed <= 4294967295);
+        assert.equal('seedRandom' in random.parameters, false);
+        assert.notEqual(random.parameters.seed, again.parameters.seed);
+        const fixed = assembleNaiPayload({
+            caption: emptyNaiCaption(),
+            params: { ...defaultNaiParams(), seed: 42 },
+            artist: null,
+            replaceCharacterKeywords: false,
+        });
+        assert.equal(fixed.parameters.seed, 42);
     });
 
     it('replaceCharacterKeywords=false leaves keywords; overrides merge', () => {

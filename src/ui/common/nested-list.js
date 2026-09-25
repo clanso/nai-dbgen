@@ -7,6 +7,40 @@ import { t } from '../i18n/zh-CN.js';
 import { createToggle } from './controls.js';
 import { mountVirtualList } from './virtual-list.js';
 
+/** 与 tokens.css `--nd-nested-child-h` 一致；虚拟列表 rowHeight 必须同值。 */
+export const NESTED_CHILD_ROW_HEIGHT = 44;
+
+/**
+ * 子行左侧两行文字：上 primary（加粗）、下 secondary（淡色），各自单行省略；完整文案放 title。
+ * secondary 内换行显示为空格。
+ *
+ * @param {HTMLElement} row
+ * @param {{ primary?: string, secondary?: string }} texts
+ * @returns {{ main: HTMLElement, primaryEl: HTMLElement, secondaryEl: HTMLElement }}
+ */
+export function paintNestedChildTexts(row, texts) {
+    const primaryText = String(texts?.primary ?? '');
+    const rawSecondary = String(texts?.secondary ?? '');
+    const secondaryText = rawSecondary.replace(/\r?\n/g, ' ');
+
+    const main = document.createElement('div');
+    main.className = 'nd-nested-list__child-main';
+
+    const primaryEl = document.createElement('div');
+    primaryEl.className = 'nd-nested-list__child-key';
+    primaryEl.textContent = primaryText;
+    primaryEl.title = primaryText;
+
+    const secondaryEl = document.createElement('div');
+    secondaryEl.className = 'nd-nested-list__child-value';
+    secondaryEl.textContent = secondaryText;
+    secondaryEl.title = rawSecondary;
+
+    main.append(primaryEl, secondaryEl);
+    row.appendChild(main);
+    return { main, primaryEl, secondaryEl };
+}
+
 /**
  * @param {object} parent
  * @param {(p: object) => string} [getId]
@@ -50,7 +84,7 @@ function parentLabelOf(parent, getLabel) {
  * @param {(parentId: string, expanded: boolean) => void} [deps.onExpandedChange]
  * @param {boolean} [deps.virtualizeChildren=true]
  * @param {number} [deps.virtualThreshold=48]
- * @param {number} [deps.childRowHeight=36]
+ * @param {number} [deps.childRowHeight=NESTED_CHILD_ROW_HEIGHT]
  * @param {number} [deps.virtualListHeight=240]
  * @returns {{ destroy: () => void, refresh: () => void }}
  */
@@ -73,7 +107,7 @@ export function mountNestedList(root, deps) {
     const renderParentMeta = deps?.renderParentMeta;
     const virtualizeChildren = deps?.virtualizeChildren !== false;
     const virtualThreshold = Math.max(0, Number(deps?.virtualThreshold) || 48);
-    const childRowHeight = Math.max(1, Number(deps?.childRowHeight) || 36);
+    const childRowHeight = Math.max(1, Number(deps?.childRowHeight) || NESTED_CHILD_ROW_HEIGHT);
     const virtualListHeight = Math.max(childRowHeight * 3, Number(deps?.virtualListHeight) || 240);
 
     /** @type {Map<string, boolean>} */
@@ -154,7 +188,10 @@ export function mountNestedList(root, deps) {
         for (const child of children) {
             const row = document.createElement('div');
             row.className = 'nd-nested-list__child';
+            row.style.height = `${childRowHeight}px`;
             row.style.minHeight = `${childRowHeight}px`;
+            row.style.maxHeight = `${childRowHeight}px`;
+            row.style.overflow = 'hidden';
             renderChild(child, row, parent);
             body.appendChild(row);
         }

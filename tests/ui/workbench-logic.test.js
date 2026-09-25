@@ -215,7 +215,7 @@ describe('ui/workbench logic · unmatchedKeys / 参数默认 / 取消 / XSS', ()
     it('unmatchedKeys 会被格式化为可见文案', () => {
         assert.equal(formatUnmatchedKeys([]), '');
         assert.equal(formatUnmatchedKeys(null), '');
-        assert.match(formatUnmatchedKeys(['garden', 'fabricated']), /未命中标签 key/);
+        assert.match(formatUnmatchedKeys(['garden', 'fabricated']), /未匹配的构图标签/);
         assert.match(formatUnmatchedKeys(['garden', 'fabricated']), /garden/);
         assert.match(formatUnmatchedKeys(['garden', 'fabricated']), /fabricated/);
     });
@@ -231,7 +231,6 @@ describe('ui/workbench logic · unmatchedKeys / 参数默认 / 取消 / XSS', ()
         assert.equal(resolved.n_samples, domain.n_samples);
         assert.equal(resolved.skip_cfg_above_sigma, domain.skip_cfg_above_sigma);
         assert.equal(resolved.tag_hint_transparent_background, domain.tag_hint_transparent_background);
-        assert.equal(resolved.qualityStrategy, domain.qualityStrategy);
 
         const overridden = resolveSessionParams({
             naiParams: { width: 1024, steps: 20 },
@@ -296,32 +295,29 @@ describe('ui/workbench logic · D47 4.13 全字段覆盖', () => {
         }
     });
 
-    it('assembleWorkbenchNaiParams 读到 Variety / 透明底 / qualityStrategy 等新增字段', () => {
+    it('assembleWorkbenchNaiParams 读到 Variety / 透明底等新增字段', () => {
         const base = defaultNaiParams();
         const off = assembleWorkbenchNaiParams(base, {
             varietyEnabled: false,
             skip_cfg_above_sigma: 19,
             tag_hint_transparent_background: false,
-            qualityStrategy: 'field',
             sm: false,
             tag_hint_qt: true,
         });
         assert.equal(off.skip_cfg_above_sigma, null, '未启用 Variety → null');
         assert.equal(off.tag_hint_transparent_background, false);
-        assert.equal(off.qualityStrategy, 'field');
         assert.equal(off.n_samples, base.n_samples);
         assert.equal(off.schemaVersion, base.schemaVersion);
 
         const on = assembleWorkbenchNaiParams(base, {
-            model: 'nai-diffusion-5-full',
+            model: 'nai-diffusion-4-5-full',
             width: 1024,
-            height: 1536,
+            height: 1024,
             steps: 30,
             scale: 6.5,
             sampler: 'k_euler',
             noise_schedule: 'native',
             seed: 42,
-            seedRandom: false,
             image_format: 'webp',
             qualityToggle: false,
             tag_hint_qt: false,
@@ -334,31 +330,31 @@ describe('ui/workbench logic · D47 4.13 全字段覆盖', () => {
             sm_dyn: true,
             straight_alpha: true,
             tag_hint_transparent_background: true,
-            qualityStrategy: 'caption',
         });
-        assert.equal(on.model, 'nai-diffusion-5-full');
+        assert.equal(on.model, 'nai-diffusion-4-5-full');
         assert.equal(on.width, 1024);
-        assert.equal(on.height, 1536);
+        assert.equal(on.height, 1024);
         assert.equal(on.steps, 30);
         assert.equal(on.scale, 6.5);
         assert.equal(on.sampler, 'k_euler');
         assert.equal(on.noise_schedule, 'native');
         assert.equal(on.seed, 42);
-        assert.equal(on.seedRandom, false);
         assert.equal(on.image_format, 'webp');
         assert.equal(on.qualityToggle, false);
         assert.equal(on.tag_hint_qt, false);
         assert.equal(on.ucPreset, 2);
-        assert.equal(on.tag_hint_uc_preset, false);
+        assert.equal(on.tag_hint_uc_preset, true, 'uc≠不使用 → hint 开');
         assert.equal(on.cfg_rescale, 0.3);
-        assert.equal(on.skip_cfg_above_sigma, 19);
-        assert.equal(on.sm, true);
-        assert.equal(on.sm_dyn, true);
-        assert.equal(on.straight_alpha, true);
-        assert.equal(on.tag_hint_transparent_background, true);
-        assert.equal(on.qualityStrategy, 'caption');
+        assert.equal(
+            on.skip_cfg_above_sigma,
+            Math.sqrt((1024 * 1024) / 1011712) * 58,
+        );
+        // 4.5 不支持 SMEA / 透明底 → coerce 关掉
+        assert.equal(on.sm, false);
+        assert.equal(on.sm_dyn, false);
+        assert.equal(on.straight_alpha, false);
+        assert.equal(on.tag_hint_transparent_background, false);
 
-        // 每个可改键都真的出现在组装结果里（与 domain 同名）
         for (const key of WORKBENCH_EDITABLE_NAI_KEYS) {
             assert.ok(
                 Object.prototype.hasOwnProperty.call(on, key),

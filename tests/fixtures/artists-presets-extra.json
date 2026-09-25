@@ -1,0 +1,23 @@
+{
+  "presets": {
+    "alpha-end": {
+      "fixedPrompt": "base prompt",
+      "fixedPrompt_end": "trail weight",
+      "negativePrompt": "neg-a"
+    },
+    "beta-img": {
+      "fixedPrompt": "with image",
+      "fixedPrompt_end": "",
+      "negativePrompt": "neg-b"
+    },
+    "gamma-bad-img": {
+      "fixedPrompt": "no real image",
+      "fixedPrompt_end": "",
+      "negativePrompt": "neg-c"
+    }
+  },
+  "images": {
+    "beta-img": "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==",
+    "gamma-bad-img": { "not": "a string" }
+  }
+}

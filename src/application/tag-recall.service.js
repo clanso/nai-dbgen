@@ -1,7 +1,9 @@
 /**
- * L4 应用层 · 标签召回：一次 LLM，只传 key，回文对 key 后取 value。
- * 归属：W2-F 用例代理实现。
- * 裁决 D31：返回 `{ matched, unmatched }`；注入只用 matched；unmatched 必须上浮可观测。
+ * L4 应用层 · 构图库召回：一次 LLM，只传构图 key，回位置数组（生成点 + key）。
+ * 张数与生成点由召回决定；无构图候选时仍必须调 LLM（模型只定位置）。
+ * 召回失败 / 全部位置丢弃 → Err（不降级）。楼中一次点击恰好 2 次 LLM 的第 1 次。
+ *
+ * 裁决 D31：unmatchedKeys + discardedAnchors 上浮到结果与 bus 事件。
  */
 
 import { Ok, Err } from '../infra/result.js';
@@ -10,13 +12,20 @@ import { createLogger } from '../infra/logger.js';
 import { createBlockSet, setBlock } from '../domain/blocks/block-set.js';
 import { VARIABLE_NAMES } from '../domain/template/variable-map.js';
 import { renderPreset } from '../domain/template/preset-renderer.js';
-import { reconcileRecalledKeys } from '../domain/matching/tag-recall.js';
+import { recordParseFailure } from './parse-debug-log.js';
+import { formatRecallCandidateLines, reconcileRecalledIds } from '../domain/matching/tag-recall.js';
+import { findAnchorInsertIndex } from '../domain/slot/slot-placer.js';
+import {
+    allocateSlotIdsAfterMax,
+    findLatestFloorMaxSlotId,
+} from '../domain/slot/slot-id.js';
+import { normalizeTagLibraryKind } from '../domain/model/tag.js';
 import {
     abortErrIfNeeded,
     attachTraceId,
-    extractRecalledKeyList,
+    extractRecalledPositions,
     RECALL_CANDIDATE_KEYS_VAR,
-    RECALL_KEYS_JSON_SCHEMA,
+    RECALL_POSITIONS_JSON_SCHEMA,
 } from './_helpers.js';
 
 const log = createLogger('application/tag-recall');
@@ -24,6 +33,7 @@ const log = createLogger('application/tag-recall');
 /**
  * @typedef {import('../domain/model/plugin-settings.js').PluginSettings} PluginSettings
  * @typedef {import('../domain/model/tag.js').TagEntry} TagEntry
+ * @typedef {import('../domain/blocks/composition.block.js').CompositionPosition} CompositionPosition
  */
 
 /**
@@ -34,24 +44,56 @@ const log = createLogger('application/tag-recall');
  * @property {import('../ports/repository.port.js').Repository<import('../domain/model/api-config.js').LlmApiConfig>} llmConfigRepo
  * @property {() => PluginSettings} loadSettings
  * @property {(template: string) => string} runHostMacros
+ * @property {import('../ports/host.port.js').HostPort} [host]
+ *   有则按需求 4.7 从最新带 slot 的楼（含全部 swipe）取 max+1 分配；无则从 1 起（单测兜底）
  */
 
 /**
  * @typedef {object} TagRecallInput
  * @property {string} contextText 当前上下文
- * @property {string[]} [libraryIds] 工作台可覆盖本次勾选的库；缺省用全局已激活库
+ * @property {string} targetFloorText 目标楼正文（校验生成点；与 placeSlots 同源）
+ * @property {string[]} [libraryIds] 工作台可覆盖本次勾选的库；缺省用全局已激活构图库
  * @property {string} [traceId]
  * @property {AbortSignal} [signal]
  */
 
 /**
- * 裁决 D31：召回结果。注入只用 matched；unmatched 必须交给上层。
+ * 裁决 D31：召回结果。注入只用 positions；unmatchedKeys / discardedAnchors 必须交给上层。
  * @typedef {object} TagRecallResult
- * @property {TagEntry[]} matched
- * @property {string[]} unmatched
+ * @property {CompositionPosition[]} positions 已分配会话内唯一 slotid
+ * @property {string[]} unmatchedKeys
+ * @property {string[]} discardedAnchors 生成点在目标楼匹配不到而被丢弃的原文
  * @property {boolean} llmCalled
  *   裁决 D41：是否实际调用了 llm.complete（供 generateSlots 计数，禁止改写 port）
  */
+
+/**
+ * 从宿主取新→旧楼层的全部 swipe 正文，供编号分配。
+ * @param {import('../ports/host.port.js').HostPort|undefined} host
+ * @returns {Array<{ texts: string[] }>}
+ */
+function floorsNewestFirstFromHost(host) {
+    if (!host || typeof host.getMessages !== 'function') {
+        return [];
+    }
+    const messages = host.getMessages();
+    /** @type {Array<{ texts: string[] }>} */
+    const floors = [];
+    for (let i = messages.length - 1; i >= 0; i -= 1) {
+        const m = messages[i];
+        if (!m) {
+            continue;
+        }
+        let texts;
+        if (typeof host.getMessageSwipeTexts === 'function') {
+            texts = host.getMessageSwipeTexts(m.messageId);
+        } else {
+            texts = [String(m.text ?? '')];
+        }
+        floors.push({ texts });
+    }
+    return floors;
+}
 
 /**
  * @param {TagRecallDeps} deps
@@ -81,8 +123,12 @@ export function createTagRecallService(deps) {
                 overrideIds = new Set(input.libraryIds.map(String));
             }
 
+            // 候选只取 active && kind==='composition'；特征库不进请求
             const activeLibs = libsR.value.filter((lib) => {
                 if (!lib) {
+                    return false;
+                }
+                if (normalizeTagLibraryKind(lib.kind) !== 'composition') {
                     return false;
                 }
                 if (overrideIds) {
@@ -98,20 +144,12 @@ export function createTagRecallService(deps) {
                 if (!er.ok) {
                     return attachTraceId(er, traceId);
                 }
-                activeEntries.push(...er.value);
+                activeEntries.push(...er.value.filter((entry) => entry && entry.active !== false));
             }
 
-            const candidateKeys = activeEntries
-                .map((e) => e?.key)
-                .filter((k) => typeof k === 'string' && k.length > 0);
+            const { lines: candidateLines, ordered: orderedEntries } = formatRecallCandidateLines(activeEntries);
 
-            // 无候选：跳过召回 LLM（省钱）。
-            // 需求 L72「下限」+ §10#6「恰好两次」指有候选时的正常路径；
-            // 空列表仍打召回是零信息浪费。generateSlots.llmCallCount 此时为 1。
-            if (candidateKeys.length === 0) {
-                return Ok({ matched: [], unmatched: [], llmCalled: false });
-            }
-
+            // 无候选也必须调召回：张数与生成点由模型决定（需求 §3 / 4.11）
             if (!settings.recallLlmConfigId) {
                 return Err(configError({
                     code: 'RECALL_LLM_UNSET',
@@ -151,7 +189,7 @@ export function createTagRecallService(deps) {
                 return Err(configError({
                     code: 'RECALL_PRESET_MISSING',
                     message: '召回预设不存在或类型不对',
-                    hint: '请选择 kind=recall 的预设',
+                    hint: '请选择一份召回预设',
                     traceId: traceId ?? null,
                     context: { id: settings.activeRecallPresetId },
                 }));
@@ -159,9 +197,8 @@ export function createTagRecallService(deps) {
 
             let blocks = createBlockSet();
             blocks = setBlock(blocks, VARIABLE_NAMES.CONTEXT, String(input.contextText ?? ''));
-            blocks = setBlock(blocks, RECALL_CANDIDATE_KEYS_VAR, candidateKeys.join('\n'));
-            blocks = setBlock(blocks, 'candidate_keys', candidateKeys.join('\n'));
-            blocks = setBlock(blocks, 'keys', candidateKeys.join('\n'));
+            blocks = setBlock(blocks, '最后一楼', String(input.targetFloorText ?? ''));
+            blocks = setBlock(blocks, RECALL_CANDIDATE_KEYS_VAR, candidateLines.join('\n'));
 
             const messages = renderPreset(presetR.value, blocks, {
                 runHostMacros: deps.runHostMacros,
@@ -175,12 +212,20 @@ export function createTagRecallService(deps) {
             const llmR = await deps.llm.complete({
                 messages,
                 config: configR.value,
-                jsonSchema: RECALL_KEYS_JSON_SCHEMA,
+                jsonSchema: RECALL_POSITIONS_JSON_SCHEMA,
                 signal: input?.signal,
                 traceId,
             });
             if (!llmR.ok) {
                 const err = attachTraceId(llmR, traceId);
+                if (err.error?.context?.rawText != null) {
+                    recordParseFailure({
+                        stage: '召回',
+                        code: err.error.code,
+                        message: err.error.message,
+                        rawText: err.error.context.rawText,
+                    });
+                }
                 if (err.error) {
                     err.error.context = {
                         ...(err.error.context ?? {}),
@@ -190,31 +235,113 @@ export function createTagRecallService(deps) {
                 return err;
             }
 
-            const recalledKeys = extractRecalledKeyList(llmR.value.json, llmR.value.text);
-            const { matched, unmatched } = reconcileRecalledKeys(recalledKeys, activeEntries);
+            const recallRawText = llmR.value.text;
+            const extracted = extractRecalledPositions(llmR.value.json, recallRawText);
+            if (extracted.status === 'legacy-key-list') {
+                recordParseFailure({
+                    stage: '召回',
+                    code: 'RECALL_LEGACY_FORMAT',
+                    message: '召回预设输出格式已过时',
+                    rawText: recallRawText,
+                });
+                return Err(contractError({
+                    code: 'RECALL_LEGACY_FORMAT',
+                    message: '召回预设输出格式已过时',
+                    hint: '请改用内置召回预设，或按同样格式输出生成位置',
+                    traceId: traceId ?? null,
+                    context: { rawText: llmR.value.text, json: llmR.value.json, llmCalled: true },
+                }));
+            }
+            if (extracted.status === 'empty' || extracted.positions.length === 0) {
+                recordParseFailure({
+                    stage: '召回',
+                    code: 'RECALL_NO_POSITIONS',
+                    message: '标签召回未产出任何生成位置',
+                    rawText: recallRawText,
+                });
+                return Err(contractError({
+                    code: 'RECALL_NO_POSITIONS',
+                    message: '标签召回未产出任何生成位置',
+                    hint: '请检查召回预设是否要求模型输出生成位置',
+                    traceId: traceId ?? null,
+                    context: { rawText: llmR.value.text, json: llmR.value.json, llmCalled: true },
+                }));
+            }
+            if (extracted.status === 'invalid') {
+                recordParseFailure({
+                    stage: '召回',
+                    code: 'RECALL_FORMAT_INVALID',
+                    message: '标签召回结果格式无效',
+                    rawText: recallRawText,
+                });
+                return Err(contractError({
+                    code: 'RECALL_FORMAT_INVALID',
+                    message: '标签召回结果格式无效',
+                    hint: '请检查召回预设与模型输出是否包含生成点与构图关键字',
+                    traceId: traceId ?? null,
+                    context: { rawText: llmR.value.text, json: llmR.value.json, llmCalled: true },
+                }));
+            }
 
-            if (unmatched.length > 0) {
-                log.warn('tag recall unmatched keys', {
-                    traceId,
-                    unmatched,
-                    unmatchedCount: unmatched.length,
-                    matchedCount: matched.length,
+            const targetFloorText = String(input.targetFloorText ?? '');
+            /** @type {CompositionPosition[]} */
+            const positions = [];
+            /** @type {string[]} */
+            const unmatchedKeys = [];
+            /** @type {string[]} */
+            const discardedAnchors = [];
+
+            for (const raw of extracted.positions) {
+                const anchor = String(raw.anchorSentence ?? '');
+                const found = findAnchorInsertIndex(targetFloorText, anchor);
+                if (found.index < 0) {
+                    discardedAnchors.push(anchor);
+                    continue;
+                }
+                const { matched, unmatched } = reconcileRecalledIds(raw.keys, orderedEntries);
+                unmatchedKeys.push(...unmatched);
+                positions.push({
+                    slotId: 0, // 稍后按会话唯一规则分配
+                    anchorSentence: anchor,
+                    entries: matched,
                 });
             }
 
-            if (llmR.value.json == null && matched.length === 0 && recalledKeys.length === 0) {
-                if (!llmR.value.text || !String(llmR.value.text).trim()) {
-                    return Err(contractError({
-                        code: 'RECALL_EMPTY_RESPONSE',
-                        message: '标签召回 LLM 回文为空',
-                        hint: '请检查召回预设与模型是否按约定返回 key 列表',
-                        traceId: traceId ?? null,
-                        context: { rawText: llmR.value.text, llmCalled: true },
-                    }));
-                }
+            if (discardedAnchors.length > 0 || unmatchedKeys.length > 0) {
+                log.warn('tag recall discarded / unmatched', {
+                    traceId,
+                    discardedAnchors,
+                    unmatchedKeys,
+                    keptPositions: positions.length,
+                });
             }
 
-            return Ok({ matched, unmatched, llmCalled: true });
+            if (positions.length === 0) {
+                return Err(contractError({
+                    code: 'RECALL_ALL_POSITIONS_DISCARDED',
+                    message: '召回的全部生成点都无法在目标楼正文中匹配',
+                    hint: '生成点必须是目标楼某一段的最后一句原文；请检查召回预设与楼层正文',
+                    traceId: traceId ?? null,
+                    context: {
+                        discardedAnchors,
+                        unmatchedKeys,
+                        llmCalled: true,
+                    },
+                }));
+            }
+
+            const maxExisting = findLatestFloorMaxSlotId(floorsNewestFirstFromHost(deps.host));
+            const ids = allocateSlotIdsAfterMax(maxExisting, positions.length);
+            for (let i = 0; i < positions.length; i += 1) {
+                positions[i].slotId = ids[i];
+            }
+
+            return Ok({
+                positions,
+                unmatchedKeys,
+                discardedAnchors,
+                llmCalled: true,
+            });
         },
     };
 }

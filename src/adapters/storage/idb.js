@@ -1,15 +1,8 @@
 /**
- * L2 适配器 · IndexedDB 封装 + schema 迁移。
- * 归属：W1-D 存储代理实现。W0 仅冻结签名。
+ * L2 适配器 · IndexedDB 封装 + schema。
+ * 浏览器仅存图片缓存（及可选本地派生）；库/配置/生图记录在服务器文件。
  *
- * **错误约定（裁决 D16）**：本层**不**返回 `Result`。`openIdb` 与 `IdbClient`
- * 方法以 Promise reject / 同步 throw 抛出 `AppError`（见 `mapIdbError`）；
- * 仓库层统一 `catchToResult` 包成 `Result`。理由：IDB 事务边界与 Result
- * 值传递不匹配，强行包装会让事务语义更难看清。
- *
- * **事务陷阱**：IndexedDB 事务在 await 任意非本事务 IDBRequest 的 Promise 后会
- * 自动提交。所有读写必须在同一同步调度内发出全部 IDBRequest，再统一 await
- * 事务完成；禁止在事务回调里 `await` 网络 / 其它 store 的独立 Promise。
+ * **错误约定（裁决 D16）**：本层不返回 Result；抛 AppError，仓库层 catch 成 Result。
  */
 
 import { hostError } from '../../infra/errors.js';
@@ -17,11 +10,13 @@ import { hostError } from '../../infra/errors.js';
 /** @type {string} */
 export const IDB_NAME = 'nai-dbgen';
 
-/** @type {number} */
-export const IDB_VERSION = 1;
+/**
+ * 版本 2：图片按 (sessionId, slotId) 建缓存索引（slot_image_cache）。
+ * @type {number}
+ */
+export const IDB_VERSION = 2;
 
 /**
- * 对象存储名集中定义（升版时只改此处 + upgrade 阶段）。
  * @readonly
  */
 export const IDB_STORES = Object.freeze({
@@ -33,12 +28,12 @@ export const IDB_STORES = Object.freeze({
     PRESETS: 'presets',
     LLM_CONFIGS: 'llm_configs',
     NAI_CONFIGS: 'nai_configs',
-    SLOT_INDEX: 'slot_index',
     IMAGES: 'images',
+    /** 会话内 slot → 最新 imageRef（记录被修剪后仍可展示缓存图） */
+    SLOT_IMAGE_CACHE: 'slot_image_cache',
 });
 
 /**
- * 索引定义：store → [{ name, keyPath, options }]
  * @readonly
  */
 export const IDB_INDEXES = Object.freeze({
@@ -54,8 +49,9 @@ export const IDB_INDEXES = Object.freeze({
     [IDB_STORES.PRESETS]: Object.freeze([
         Object.freeze({ name: 'by_kind', keyPath: 'kind', options: { unique: false } }),
     ]),
-    [IDB_STORES.SLOT_INDEX]: Object.freeze([
-        Object.freeze({ name: 'by_messageId', keyPath: 'messageId', options: { unique: false } }),
+    [IDB_STORES.SLOT_IMAGE_CACHE]: Object.freeze([
+        Object.freeze({ name: 'by_sessionId', keyPath: 'sessionId', options: { unique: false } }),
+        Object.freeze({ name: 'by_imageRef', keyPath: 'imageRef', options: { unique: false } }),
     ]),
 });
 
@@ -67,13 +63,13 @@ export function mapIdbError(err) {
     const name = err && typeof err === 'object' && 'name' in err
         ? String(/** @type {{ name?: string }} */ (err).name)
         : '';
-    const message = err instanceof Error ? err.message : String(err ?? '未知 IndexedDB 错误');
+    const message = err instanceof Error ? err.message : String(err ?? '未知浏览器图片缓存错误');
 
     if (name === 'QuotaExceededError' || /quota/i.test(message)) {
         return hostError({
             code: 'IDB_QUOTA_EXCEEDED',
-            message: '浏览器存储空间不足，无法写入 IndexedDB',
-            hint: '请在插件面板清理未引用图片（GC），或导出库后清理站点数据；也可换用更大配额的浏览器配置',
+            message: '浏览器图片缓存空间不足',
+            hint: '请到存储管理清理，或清理本站站点数据后重试',
             cause: err,
             retryable: false,
         });
@@ -81,8 +77,8 @@ export function mapIdbError(err) {
     if (name === 'InvalidStateError' || name === 'UnknownError') {
         return hostError({
             code: 'IDB_UNAVAILABLE',
-            message: 'IndexedDB 当前不可用（可能处于隐私模式或已被禁用）',
-            hint: '请关闭隐私/无痕模式，或在浏览器设置中允许本站使用 IndexedDB 后重试',
+            message: '浏览器图片缓存不可用（可能处于隐私模式或已被禁用）',
+            hint: '请关闭隐私/无痕模式，或在浏览器设置中允许本站使用后重试',
             cause: err,
             retryable: true,
         });
@@ -90,16 +86,16 @@ export function mapIdbError(err) {
     if (name === 'VersionError' || name === 'AbortError') {
         return hostError({
             code: 'IDB_OPEN_FAILED',
-            message: '打开 IndexedDB 失败',
-            hint: '请刷新页面后重试；若持续失败可导出数据后清除本扩展站点存储',
+            message: '打开浏览器图片缓存失败',
+            hint: '请刷新页面后重试；若持续失败可清理本站站点数据',
             cause: err,
             retryable: true,
         });
     }
     return hostError({
         code: 'IDB_OPERATION_FAILED',
-        message: `IndexedDB 操作失败：${message}`,
-        hint: '请刷新后重试；若反复出现请导出库备份',
+        message: `浏览器图片缓存操作失败：${message}`,
+        hint: '请刷新后重试',
         cause: err,
         retryable: true,
     });
@@ -120,35 +116,42 @@ function ensureIndexesOnStore(store, storeName) {
 
 /**
  * @param {IDBDatabase} db
+ * @param {string} name
+ * @param {IDBObjectStoreParameters} params
+ * @param {IDBTransaction} tx
+ */
+function ensureStore(db, name, params, tx) {
+    let store;
+    if (db.objectStoreNames.contains(name)) {
+        store = tx.objectStore(name);
+    } else {
+        store = db.createObjectStore(name, params);
+    }
+    ensureIndexesOnStore(store, name);
+    return store;
+}
+
+/**
+ * @param {IDBDatabase} db
  * @param {IDBTransaction} tx
  * @param {number} oldVersion
  */
 function runUpgrade(db, tx, oldVersion) {
-    if (oldVersion < 1) {
-        const specs = [
-            [IDB_STORES.CHARACTER_GROUPS, { keyPath: 'id' }],
-            [IDB_STORES.CHARACTERS, { keyPath: 'id' }],
-            [IDB_STORES.TAG_LIBRARIES, { keyPath: 'id' }],
-            [IDB_STORES.TAG_ENTRIES, { keyPath: 'id' }],
-            [IDB_STORES.ARTISTS, { keyPath: 'id' }],
-            [IDB_STORES.PRESETS, { keyPath: 'id' }],
-            [IDB_STORES.LLM_CONFIGS, { keyPath: 'id' }],
-            [IDB_STORES.NAI_CONFIGS, { keyPath: 'id' }],
-            [IDB_STORES.SLOT_INDEX, { keyPath: ['messageId', 'slotId'] }],
-            [IDB_STORES.IMAGES, { keyPath: 'id' }],
-        ];
-        for (const [name, params] of specs) {
-            let store;
-            if (db.objectStoreNames.contains(/** @type {string} */ (name))) {
-                store = tx.objectStore(/** @type {string} */ (name));
-            } else {
-                store = db.createObjectStore(
-                    /** @type {string} */ (name),
-                    /** @type {IDBObjectStoreParameters} */ (params),
-                );
-            }
-            ensureIndexesOnStore(store, /** @type {string} */ (name));
-        }
+    void oldVersion;
+    const specs = [
+        [IDB_STORES.CHARACTER_GROUPS, { keyPath: 'id' }],
+        [IDB_STORES.CHARACTERS, { keyPath: 'id' }],
+        [IDB_STORES.TAG_LIBRARIES, { keyPath: 'id' }],
+        [IDB_STORES.TAG_ENTRIES, { keyPath: 'id' }],
+        [IDB_STORES.ARTISTS, { keyPath: 'id' }],
+        [IDB_STORES.PRESETS, { keyPath: 'id' }],
+        [IDB_STORES.LLM_CONFIGS, { keyPath: 'id' }],
+        [IDB_STORES.NAI_CONFIGS, { keyPath: 'id' }],
+        [IDB_STORES.IMAGES, { keyPath: 'id' }],
+        [IDB_STORES.SLOT_IMAGE_CACHE, { keyPath: ['sessionId', 'slotId'] }],
+    ];
+    for (const [name, params] of specs) {
+        ensureStore(db, /** @type {string} */ (name), /** @type {IDBObjectStoreParameters} */ (params), tx);
     }
 }
 
@@ -170,18 +173,16 @@ function reqToPromise(request) {
 function txDone(tx) {
     return new Promise((resolve, reject) => {
         tx.oncomplete = () => resolve();
-        tx.onabort = () => reject(tx.error || new Error('IndexedDB transaction aborted'));
-        tx.onerror = () => reject(tx.error || new Error('IndexedDB transaction error'));
+        tx.onabort = () => reject(tx.error || new Error('浏览器图片缓存事务已中止'));
+        tx.onerror = () => reject(tx.error || new Error('浏览器图片缓存事务出错'));
     });
 }
 
 /**
- * 打开插件 IndexedDB（裁决 D16 / D17）。
- *
  * @param {object} [opts]
  * @param {string} [opts.dbName='nai-dbgen']
  * @param {number} [opts.version]
- * @param {IDBFactory} [opts.indexedDB] 可注入，便于测试
+ * @param {IDBFactory} [opts.indexedDB]
  * @returns {Promise<import('../../ports/repository.port.js').IdbClient>}
  */
 export function openIdb(opts) {
@@ -191,7 +192,7 @@ export function openIdb(opts) {
         || (typeof globalThis !== 'undefined' ? globalThis.indexedDB : undefined);
 
     if (!factory || typeof factory.open !== 'function') {
-        return Promise.reject(mapIdbError(Object.assign(new Error('IndexedDB is not available'), {
+        return Promise.reject(mapIdbError(Object.assign(new Error('浏览器图片缓存不可用'), {
             name: 'InvalidStateError',
         })));
     }
@@ -212,7 +213,7 @@ export function openIdb(opts) {
         request.onblocked = () => {
             reject(hostError({
                 code: 'IDB_BLOCKED',
-                message: 'IndexedDB 打开被阻塞（其他标签页可能占用旧版本）',
+                message: '浏览器图片缓存打开被阻塞（其他标签页可能占用旧版本）',
                 hint: '请关闭其他使用本插件的标签页后刷新',
                 retryable: true,
             }));
@@ -247,7 +248,6 @@ export function openIdb(opts) {
  */
 function createClient(db) {
     /**
-     * 单 store 事务：所有 IDBRequest 在同步阶段发出，再 await tx complete。
      * @template T
      * @param {string} storeName
      * @param {IDBTransactionMode} mode
@@ -285,50 +285,26 @@ function createClient(db) {
     }
 
     return {
-        /**
-         * @param {string} store
-         * @param {string|number|Array<string|number>} key
-         */
         get(store, key) {
             return withStore(store, 'readonly', (s) => s.get(key));
         },
 
-        /**
-         * @param {string} store
-         * @param {any} value
-         * @param {string} [key]
-         */
         put(store, value, key) {
             return withStore(store, 'readwrite', (s) => (
                 key === undefined ? s.put(value) : s.put(value, key)
             )).then(() => undefined);
         },
 
-        /**
-         * @param {string} store
-         * @param {string|number|Array<string|number>} key
-         */
         delete(store, key) {
             return withStore(store, 'readwrite', (s) => s.delete(key)).then(() => undefined);
         },
 
-        /**
-         * @param {string} store
-         * @returns {Promise<any[]>}
-         */
         getAll(store) {
             return withStore(store, 'readonly', (s) => s.getAll()).then((rows) => (
                 Array.isArray(rows) ? rows : []
             ));
         },
 
-        /**
-         * 按索引取全部（裁决 D17）。
-         * @param {string} store
-         * @param {string} indexName
-         * @param {IDBValidKey|IDBKeyRange} [query]
-         * @returns {Promise<any[]>}
-         */
         getAllByIndex(store, indexName, query) {
             return withStore(store, 'readonly', (s) => {
                 const index = s.index(indexName);
@@ -336,13 +312,6 @@ function createClient(db) {
             }).then((rows) => (Array.isArray(rows) ? rows : []));
         },
 
-        /**
-         * 多 store 事务（裁决 D17）。runner 必须同步发出全部 request。
-         * @param {string|string[]} storeNames
-         * @param {IDBTransactionMode} mode
-         * @param {(stores: Record<string, IDBObjectStore>, tx: IDBTransaction) => void} runner
-         * @returns {Promise<void>}
-         */
         async runTransaction(storeNames, mode, runner) {
             const names = Array.isArray(storeNames) ? storeNames : [storeNames];
             let tx;

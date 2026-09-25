@@ -31,13 +31,16 @@ describe('D35 render gate — single NAI for concurrent UI+auto', () => {
         const p = buildPipeline({
             llmComplete: async (req) => {
                 if (req.config.id === 'llm-recall') {
-                    return Ok({ text: '[]', json: ['garden'] });
+                    const positions = [{
+                        生成点: 'Alice walked into the garden.',
+                        key: ['1'],
+                    }];
+                    return Ok({ text: JSON.stringify(positions), json: positions });
                 }
                 return Ok({
                     text: '[]',
                     json: [{
                         slotid: 1,
-                        生成点: 'Alice walked into the garden.',
                         生图内容: makeCaption('scene'),
                     }],
                 });
@@ -79,7 +82,7 @@ describe('D35 render gate — single NAI for concurrent UI+auto', () => {
     });
 });
 
-describe('D36 chatId key and chat check', () => {
+describe('D36 chatId key and session-file write on chat switch', () => {
     it('inflight / isRendering keys are chat-scoped', async () => {
         let release;
         const gate = new Promise((r) => { release = r; });
@@ -100,12 +103,15 @@ describe('D36 chatId key and chat check', () => {
 
         release();
         const r = await pending;
-        // 发起于 chat-1，结束后 chat 已变 → 丢弃写盘
-        assert.equal(isErr(r), true);
-        assert.equal(r.error.code, 'CHAT_CHANGED');
+        // 发起于 chat-1：切走后仍写入原会话文件
+        assert.equal(isOk(r), true, r.ok ? '' : r.error?.message);
+        assert.equal(r.value.chatChanged, true);
+        const rec = await p.slotRepo.get(2, 1);
+        assert.equal(isOk(rec), true);
+        assert.ok(rec.value?.images?.length >= 1);
     });
 
-    it('chat switch mid-render discards write; keeps pending imageRef', async () => {
+    it('chat switch mid-render still records image to original session; no re-bill on retry', async () => {
         let release;
         const gate = new Promise((r) => { release = r; });
         const p = buildPipeline();
@@ -120,20 +126,21 @@ describe('D36 chatId key and chat check', () => {
         p.host.setChatId('chat-other');
         release();
         const r = await pending;
-        assert.equal(isErr(r), true);
-        assert.equal(r.error.code, 'CHAT_CHANGED');
-        assert.ok(r.error.context?.imageRef);
+        assert.equal(isOk(r), true, r.ok ? '' : r.error?.message);
+        assert.equal(r.value.chatChanged, true);
+        assert.ok(r.value.imageRef);
 
         p.host.setChatId('chat-1');
-        assert.equal(p.renderSlot.hasPendingWrite(2, 1), true);
+        // 已写入原会话 → 非 force 应拒重出，且不得再调 NAI
         let naiHits = 0;
         p.imageGen.generate = async () => {
             naiHits += 1;
             return Ok([{ blob: new Blob(['y']), mimeType: 'image/png' }]);
         };
         const retry = await p.renderSlot.execute(2, 1);
-        assert.equal(isOk(retry), true, retry.ok ? '' : retry.error?.message);
-        assert.equal(naiHits, 0, 'retry after CHAT_CHANGED must not re-bill NAI');
+        assert.equal(isErr(retry), true);
+        assert.equal(retry.error.code, 'SLOT_ALREADY_RENDERED');
+        assert.equal(naiHits, 0, 'already recorded must not re-bill NAI');
     });
 });
 
@@ -244,13 +251,16 @@ describe('D54 write gate — single LLM for concurrent generateSlots', () => {
                 llmStarts += 1;
                 await gate;
                 if (req.config.id === 'llm-recall') {
-                    return Ok({ text: '[]', json: ['garden'] });
+                    const positions = [{
+                        生成点: 'Alice walked into the garden.',
+                        key: ['1'],
+                    }];
+                    return Ok({ text: JSON.stringify(positions), json: positions });
                 }
                 return Ok({
                     text: '[]',
                     json: [{
                         slotid: 1,
-                        生成点: 'Alice walked into the garden.',
                         生图内容: makeCaption('scene'),
                     }],
                 });
@@ -279,13 +289,16 @@ describe('D54 write gate — single LLM for concurrent generateSlots', () => {
                 llmStarts += 1;
                 await gate;
                 if (req.config.id === 'llm-recall') {
-                    return Ok({ text: '[]', json: ['garden'] });
+                    const positions = [{
+                        生成点: 'Alice walked into the garden.',
+                        key: ['1'],
+                    }];
+                    return Ok({ text: JSON.stringify(positions), json: positions });
                 }
                 return Ok({
                     text: '[]',
                     json: [{
                         slotid: 1,
-                        生成点: 'Alice walked into the garden.',
                         生图内容: makeCaption('scene'),
                     }],
                 });
@@ -345,5 +358,50 @@ describe('D32 autoRender via bus without setTimeout race', () => {
         await rendered;
         const rec = await p.slotRepo.get(2, 1);
         assert.ok(rec.ok && rec.value.images.length >= 1);
+    });
+});
+
+describe('renderSlot bus emit after inflight clear', () => {
+    it('SLOT_RENDERED fires only after isRendering becomes false', async () => {
+        const p = buildPipeline();
+        await p.generateSlots.execute(2);
+
+        /** @type {boolean|null} */
+        let renderingAtEmit = null;
+        p.bus.on(APP_EVENTS.SLOT_RENDERED, () => {
+            renderingAtEmit = p.renderSlot.isRendering(2, 1);
+        });
+
+        const r = await p.renderSlot.execute(2, 1);
+        assert.equal(isOk(r), true);
+        assert.equal(renderingAtEmit, false, 'subscribers must see isRendering===false');
+        assert.equal(p.renderSlot.isRendering(2, 1), false);
+    });
+
+    it('failure emits SLOT_RENDER_FAILED after inflight clear', async () => {
+        const p = buildPipeline();
+        await p.generateSlots.execute(2);
+        p.imageGen.generate = async () => ({
+            ok: false,
+            error: { code: 'UPSTREAM_HTTP', message: 'NAI 500', category: 'upstream' },
+        });
+
+        /** @type {boolean|null} */
+        let renderingAtEmit = null;
+        /** @type {unknown} */
+        let failedPayload = null;
+        const failed = waitForEvent(p.bus, APP_EVENTS.SLOT_RENDER_FAILED);
+        p.bus.on(APP_EVENTS.SLOT_RENDER_FAILED, (payload) => {
+            renderingAtEmit = p.renderSlot.isRendering(2, 1);
+            failedPayload = payload;
+        });
+
+        const r = await p.renderSlot.execute(2, 1);
+        assert.equal(isErr(r), true);
+        await failed;
+        assert.equal(renderingAtEmit, false);
+        assert.equal(/** @type {{ messageId?: number }} */ (failedPayload).messageId, 2);
+        assert.equal(/** @type {{ slotId?: number }} */ (failedPayload).slotId, 1);
+        assert.equal(p.renderSlot.isRendering(2, 1), false);
     });
 });

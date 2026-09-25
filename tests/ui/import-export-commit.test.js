@@ -99,6 +99,7 @@ describe('ui/common/import-export commitImport (D44)', () => {
                 return {};
             },
             exportJson: async () => ({}),
+            confirmOverwrite: async () => true,
         });
 
         const { paste, parseBtn, commitBtn } = findControls(root);
@@ -115,7 +116,7 @@ describe('ui/common/import-export commitImport (D44)', () => {
 
         assert.equal(calls.length, 1);
         assert.deepEqual(calls[0].data.items.map((x) => x.id), ['a1']);
-        assert.equal(calls[0].strategy, 'skip');
+        assert.equal(calls[0].strategy, 'overwrite');
         handle.destroy();
     });
 
@@ -141,14 +142,14 @@ describe('ui/common/import-export commitImport (D44)', () => {
         handle.destroy();
     });
 
-    it('overwrite requires confirm; cancel skips importJson', async () => {
+    it('overwrite without confirmOverwrite callback refuses (no window.confirm)', async () => {
         const root = document.createElement('div');
         document.body.appendChild(root);
         let called = 0;
-        let confirmArgs = '';
-        globalThis.confirm = (msg) => {
-            confirmArgs = String(msg);
-            return false;
+        let winConfirm = 0;
+        globalThis.confirm = () => {
+            winConfirm += 1;
+            return true;
         };
 
         const handle = mountImportExport(root, {
@@ -165,12 +166,8 @@ describe('ui/common/import-export commitImport (D44)', () => {
         strategySelect.value = 'overwrite';
         await click(commitBtn);
 
-        assert.match(confirmArgs, /覆盖/);
         assert.equal(called, 0);
-
-        globalThis.confirm = () => true;
-        await click(commitBtn);
-        assert.equal(called, 1);
+        assert.equal(winConfirm, 0);
         handle.destroy();
     });
 

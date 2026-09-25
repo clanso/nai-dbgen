@@ -163,8 +163,8 @@ export function upstreamFromHttpStatus(status, init = {}) {
         retryable = false;
         disableConfig = true;
         code = codeNum === 401 ? 'NAI_401' : 'NAI_403';
-        message = codeNum === 401 ? '接口鉴权失败（Key 无效或过期）' : '接口拒绝访问（权限不足）';
-        hint = '请检查 API Key，该配置将被停用';
+        message = codeNum === 401 ? '接口鉴权失败（API 密钥无效或过期）' : '接口拒绝访问（权限不足）';
+        hint = '请检查 API 密钥，该配置将被停用';
     } else if (codeNum === 429) {
         retryable = true;
         code = 'NAI_429';

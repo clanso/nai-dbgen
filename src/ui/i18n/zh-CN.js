@@ -9,8 +9,8 @@ export const zhCN = Object.freeze({
     'slot.generate': '生图',
     'slot.regenerate': '重新生成',
 
-    'empty.title': '这里还是空的',
-    'empty.library': '没有匹配的条目，换一个筛选条件试试。',
+    'empty.title': '暂无内容',
+    'empty.library': '没有匹配的条目，换个筛选条件试试。',
 
     'common.clear': '清除',
     'common.cancel': '取消',
@@ -26,9 +26,9 @@ export const zhCN = Object.freeze({
     'picker.clear': '清除当前选择',
 
     'import.dropTitle': '拖入资料文件',
-    'import.dropHint': '支持 .json；也可以粘贴原始文本。导入前一定先预览。',
+    'import.dropHint': '支持 JSON 文件，也可粘贴文本。导入前请先预览。',
     'import.pickFile': '选择文件',
-    'import.pastePlaceholder': '或在这里粘贴 JSON',
+    'import.pastePlaceholder': '或在这里粘贴内容',
     'import.parsePaste': '解析粘贴内容',
     'import.previewTitle': '导入预览',
     'import.summary': '识别 {count} 条',
@@ -37,12 +37,12 @@ export const zhCN = Object.freeze({
     'import.overwrite': '覆盖已有',
     'import.rename': '另存为新副本',
     'import.commit': '导入已勾选',
-    'import.overwriteConfirm': '将覆盖已有 {count} 条相关记录，此操作不可撤销。确定继续？',
+    'import.overwriteConfirm': '将覆盖 {count} 条已有记录。',
     'import.overwriteCancelled': '已取消覆盖导入',
     'import.exportTitle': '导出当前库',
-    'import.exportHint': '导出为 JSON 信封，可再导入到本插件。',
-    'import.exportButton': '导出 JSON',
-    'import.parseError': '无法解析 JSON：{message}',
+    'import.exportHint': '导出为 JSON，可再导入到本插件。',
+    'import.exportButton': '导出',
+    'import.parseError': '无法解析文件：{message}',
     'import.empty': '没有可预览的条目',
     'import.done': '导入完成',
     'import.colSelect': '选择',
@@ -52,10 +52,10 @@ export const zhCN = Object.freeze({
 
     'modal.fallbackTitle': '对话框',
 
-    'library.searchPlaceholder': '搜索资料库',
+    'library.searchPlaceholder': '搜索',
     'library.filter': '筛选',
     'library.sort': '排序',
-    'library.create': '＋新建',
+    'library.create': '新建',
     'library.enabled': '启用',
 
     'nested.emptyParents': '还没有分组或库。',

@@ -67,7 +67,7 @@ export async function probeCapabilities(host, opts = {}) {
     push(
         'eventSource',
         !!(ctx?.eventSource && typeof ctx.eventSource.on === 'function'),
-        '缺少 eventSource：自动写 slot / 聊天切换监听将不可用',
+        '缺少 eventSource：自动生成提示词与聊天切换监听将不可用',
     );
 
     push(
@@ -104,7 +104,7 @@ export async function probeCapabilities(host, opts = {}) {
         'chatCompletionService',
         typeof ctx?.ChatCompletionService === 'function'
             || typeof ctx?.ConnectionManagerRequestService === 'function',
-        '缺少 ChatCompletionService：LLM st-backend 通道可能不可用（可改用 direct）',
+        '缺少 ChatCompletionService：LLM 经酒馆转发不可用，请升级 SillyTavern',
     );
 
     const idbOk = assume.indexedDB === true
@@ -113,7 +113,7 @@ export async function probeCapabilities(host, opts = {}) {
     push(
         'indexedDB',
         idbOk,
-        '缺少 IndexedDB：库与图片无法本地存储',
+        '缺少浏览器图片缓存：楼层出图将无法缓存在本机',
     );
 
     // 基线 §12 / R-03：encode_tags 与 regex 扩展禁用
@@ -127,7 +127,7 @@ export async function probeCapabilities(host, opts = {}) {
         'encode_tags_off',
         !encodeTags,
         encodeTags
-            ? '已开启 encode_tags：正则吐出的 HTML 会变成可见文本，slot 控件将失效'
+            ? '已开启 encode_tags：正则生成的出图按钮会变成可见文本，无法正常使用'
             : undefined,
     );
 
@@ -145,7 +145,7 @@ export async function probeCapabilities(host, opts = {}) {
         regexExtEnabled,
         regexExtEnabled
             ? undefined
-            : '正则扩展已禁用：slot → 按钮与出站剥 slot 均不可用',
+            : '正则扩展已禁用：楼层出图按钮与发历史时隐藏标记均不可用',
     );
 
     // HostPort 形状
@@ -162,7 +162,7 @@ export async function probeCapabilities(host, opts = {}) {
     push(
         'hostPort',
         hostPortOk,
-        hostPortOk ? undefined : 'HostPort 不完整：请更新插件',
+        hostPortOk ? undefined : '插件宿主接口不完整，请更新插件',
     );
 
     const critical = ['getContext', 'indexedDB', 'hostPort'];

@@ -35,8 +35,8 @@ export function createMemoryIdb(seed = {}) {
      * @returns {string}
      */
     function keyOf(store, row) {
-        if (store === 'slot_index') {
-            return `${row.messageId}::${row.slotId}`;
+        if (store === 'slot_image_cache') {
+            return `${row.sessionId}::${row.slotId}`;
         }
         return String(row.id);
     }
@@ -64,7 +64,7 @@ export function createMemoryIdb(seed = {}) {
             const key = explicitKey !== undefined
                 ? normalizeKey(explicitKey)
                 : keyOf(store, row);
-            if (store !== 'slot_index' && row.id == null && explicitKey !== undefined) {
+            if (store !== 'slot_image_cache' && row.id == null && explicitKey !== undefined) {
                 row.id = explicitKey;
             }
             m.set(key, row);
@@ -83,8 +83,11 @@ export function createMemoryIdb(seed = {}) {
             if (indexName === 'by_libraryId') {
                 return rows.filter((r) => r.libraryId === query);
             }
-            if (indexName === 'by_messageId') {
-                return rows.filter((r) => r.messageId === query);
+            if (indexName === 'by_sessionId') {
+                return rows.filter((r) => r.sessionId === query);
+            }
+            if (indexName === 'by_imageRef') {
+                return rows.filter((r) => r.imageRef === query);
             }
             if (indexName === 'by_kind') {
                 return rows.filter((r) => r.kind === query);

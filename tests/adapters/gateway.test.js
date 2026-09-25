@@ -10,7 +10,6 @@ import { createStCorsProxyTransport } from '../../src/adapters/nai/transport/st-
 import { decodeJsonBase64 } from '../../src/adapters/nai/decoder/json-base64.js';
 import { decodeZip } from '../../src/adapters/nai/decoder/zip.js';
 import { createLlmGateway } from '../../src/adapters/llm/llm.gateway.js';
-import { createDirectLlmTransport } from '../../src/adapters/llm/transport/direct.js';
 import { createStBackendLlmTransport } from '../../src/adapters/llm/transport/st-backend.js';
 import { extractJson } from '../../src/adapters/llm/json-extract.js';
 import { isOk, isErr } from '../../src/infra/result.js';
@@ -39,13 +38,38 @@ function llmConfig(overrides = {}) {
         id: 'l1',
         name: 'test',
         baseUrl: 'https://api.example.com/v1',
-        apiKey: 'sk-secret-do-not-log',
+        secretId: 'sec-test',
         model: 'gpt-test',
-        transport: 'direct',
         createdAt: 't',
         updatedAt: 't',
         ...overrides,
     };
+}
+
+/**
+ * @param {(data: object) => Promise<object>} sendRequest
+ * @param {object} [extra]
+ * @param {typeof fetch} [extra.fetch]
+ */
+function stBackendGw(sendRequest, extra = {}) {
+    return createLlmGateway({
+        transports: {
+            'st-backend': createStBackendLlmTransport({
+                getContext: () => ({
+                    getRequestHeaders: () => ({ 'Content-Type': 'application/json' }),
+                    ChatCompletionService: {
+                        createRequestData: (d) => d,
+                        sendRequest,
+                    },
+                }),
+                fetch: extra.fetch ?? (async () => new Response(JSON.stringify({
+                    data: [{ id: 'm1' }],
+                }), { status: 200 })),
+            }),
+        },
+        extractJson,
+        ...extra,
+    });
 }
 
 const samplePngB64 = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==';
@@ -203,53 +227,68 @@ describe('createNaiGateway', () => {
         assert.equal(result.error.retryable, false);
         assert.equal(result.error.code, 'UPSTREAM_ABORTED');
     });
+
+    it('空 Key 时报错且不发网络请求（generate + probe）', async () => {
+        let calls = 0;
+        const fetchMock = async () => {
+            calls += 1;
+            return new Response('{}', { status: 200 });
+        };
+        const gw = createNaiGateway({
+            transports: { direct: createDirectTransport({ fetch: fetchMock }) },
+            decoders: {
+                'json-base64': { decode: decodeJsonBase64 },
+                zip: { decode: decodeZip },
+            },
+        });
+        const cfg = naiConfig({ name: '默认 NAI', apiKey: '' });
+        const gen = await gw.generate(
+            { input: 'a', model: 'm', parameters: {} },
+            { config: cfg },
+        );
+        assert.equal(isErr(gen), true);
+        assert.equal(gen.error.code, 'NAI_CONFIG_KEY');
+        assert.match(gen.error.message, /默认 NAI/);
+        assert.match(gen.error.hint || '', /管理台/);
+        const probe = await gw.probe(cfg);
+        assert.equal(probe.ok, false);
+        assert.equal(probe.error?.code, 'NAI_CONFIG_KEY');
+        assert.equal(calls, 0);
+    });
 });
 
 describe('createLlmGateway', () => {
     it('assertLlmPort passes', () => {
-        const gw = createLlmGateway({
-            transports: {
-                direct: createDirectLlmTransport({
-                    fetch: async () => new Response(JSON.stringify({
-                        choices: [{ message: { content: '{}' } }],
-                    })),
-                }),
-            },
-            extractJson,
-        });
+        const gw = stBackendGw(async () => ({ content: '{}' }));
         assert.equal(isOk(assertLlmPort(gw)), true);
     });
 
-    it('direct transport posts to normalized chat/completions URL', async () => {
-        /** @type {string[]} */
-        const urls = [];
-        const fetchMock = async (url) => {
-            urls.push(String(url));
-            return new Response(JSON.stringify({
-                choices: [{ message: { content: '{"ok":true}' } }],
-            }), { status: 200 });
-        };
-        const gw = createLlmGateway({
-            transports: {
-                direct: createDirectLlmTransport({ fetch: fetchMock }),
-            },
-            extractJson,
+    it('空 Key 时报错且不发网络请求（complete + probe）', async () => {
+        let calls = 0;
+        const gw = stBackendGw(async () => {
+            calls += 1;
+            return { content: '{}' };
         });
+        const cfg = llmConfig({ name: '默认 LLM', secretId: null });
         const result = await gw.complete({
             messages: [{ role: 'user', content: 'hi' }],
-            config: llmConfig({ baseUrl: 'https://api.example.com/v1' }),
-            jsonSchema: { type: 'object', properties: {} },
+            config: cfg,
         });
-        assert.equal(isOk(result), true);
-        assert.equal(urls[0], 'https://api.example.com/v1/chat/completions');
-        assert.deepEqual(result.value.json, { ok: true });
-        assert.equal(JSON.stringify(result).includes('sk-secret'), false);
+        assert.equal(isErr(result), true);
+        assert.equal(result.error.code, 'LLM_CONFIG_KEY');
+        assert.match(result.error.message, /默认 LLM/);
+        assert.match(result.error.hint || '', /管理台/);
+        const probe = await gw.probe(cfg);
+        assert.equal(probe.ok, false);
+        assert.equal(probe.error?.code, 'LLM_CONFIG_KEY');
+        assert.equal(calls, 0);
     });
 
-    it('st-backend uses ChatCompletionService with reverse_proxy + proxy_password', async () => {
+    it('st-backend uses ChatCompletionService with custom source + secret_id', async () => {
         /** @type {object|null} */
         let seenData = null;
         const getContext = () => ({
+            getRequestHeaders: () => ({}),
             ChatCompletionService: {
                 createRequestData(data) {
                     return { ...data, use_sysprompt: true };
@@ -269,32 +308,25 @@ describe('createLlmGateway', () => {
         const result = await gw.complete({
             messages: [{ role: 'user', content: 'recall' }],
             config: llmConfig({
-                transport: 'st-backend',
-                baseUrl: 'https://llm.example.com',
+                baseUrl: 'https://llm.example.com/v1',
+                secretId: 'sec-abc',
             }),
             jsonSchema: { name: 'keys', value: { type: 'object' } },
         });
         assert.equal(isOk(result), true);
-        assert.equal(seenData.chat_completion_source, 'openai');
-        assert.equal(seenData.reverse_proxy, 'https://llm.example.com');
-        assert.equal(seenData.proxy_password, 'sk-secret-do-not-log');
+        assert.equal(seenData.chat_completion_source, 'custom');
+        assert.equal(seenData.custom_url, 'https://llm.example.com/v1');
+        assert.equal(seenData.secret_id, 'sec-abc');
         assert.equal(seenData.stream, false);
+        assert.equal('json_schema' in seenData, false);
+        assert.equal('proxy_password' in seenData, false);
+        assert.equal('reverse_proxy' in seenData, false);
         assert.deepEqual(result.value.json, { keys: ['a'] });
-        // 错误/结果对象不回传 key
         assert.equal(JSON.stringify(result).includes('sk-secret'), false);
     });
 
     it('ContractError preserves raw LLM text when extract fails', async () => {
-        const gw = createLlmGateway({
-            transports: {
-                direct: createDirectLlmTransport({
-                    fetch: async () => new Response(JSON.stringify({
-                        choices: [{ message: { content: '抱歉我不能输出 JSON' } }],
-                    })),
-                }),
-            },
-            extractJson,
-        });
+        const gw = stBackendGw(async () => ({ content: '抱歉我不能输出 JSON' }));
         const result = await gw.complete({
             messages: [{ role: 'user', content: 'x' }],
             config: llmConfig(),
@@ -307,21 +339,13 @@ describe('createLlmGateway', () => {
 
     it('retries retryable upstream then succeeds', async () => {
         let calls = 0;
-        const gw = createLlmGateway({
-            transports: {
-                direct: createDirectLlmTransport({
-                    fetch: async () => {
-                        calls += 1;
-                        if (calls === 1) {
-                            return new Response('busy', { status: 503 });
-                        }
-                        return new Response(JSON.stringify({
-                            choices: [{ message: { content: 'done' } }],
-                        }));
-                    },
-                }),
-            },
-            extractJson,
+        const gw = stBackendGw(async () => {
+            calls += 1;
+            if (calls === 1) {
+                throw new Error('Got response status 503');
+            }
+            return { content: 'done' };
+        }, {
             maxAttempts: 3,
             sleep: async () => {},
         });
@@ -355,7 +379,7 @@ describe('createLlmGateway', () => {
         });
         const result = await gw.complete({
             messages: [{ role: 'user', content: 'x' }],
-            config: llmConfig({ transport: 'st-backend' }),
+            config: llmConfig(),
             traceId: 't-d26',
         });
         assert.equal(isErr(result), true);
@@ -388,13 +412,13 @@ describe('createLlmGateway', () => {
         });
         const result = await gw.complete({
             messages: [{ role: 'user', content: 'x' }],
-            config: llmConfig({ transport: 'st-backend' }),
+            config: llmConfig(),
             traceId: 't-d27',
         });
         assert.equal(isErr(result), true);
         assert.equal(result.error.retryable, false);
         assert.equal(result.error.code, 'LLM_ST_BACKEND_FAILED');
-        assert.equal(result.error.message, '经酒馆 ChatCompletionService 调用失败');
+        assert.equal(result.error.message, '经酒馆调用大模型失败');
         assert.equal(/Response not OK/.test(result.error.message), false);
         assert.equal(result.error.context.preview, 'Response not OK');
         assert.equal(result.error.traceId, 't-d27');

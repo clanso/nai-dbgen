@@ -160,7 +160,7 @@ export function createWorldInfoSource(deps) {
             return Err(hostError({
                 code: 'WORLDINFO_RESOLVE_FAILED',
                 message: '解析世界书失败',
-                hint: '将以降级为空世界书块继续',
+                hint: '将按空世界书继续',
                 cause,
                 retryable: true,
             }));

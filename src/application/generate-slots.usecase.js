@@ -1,19 +1,16 @@
 /**
- * L4 应用层 · 步骤 4–5：准备四块、LLM 生提示词、写 slot。
- * 归属：W2-F。
+ * L4 应用层 · 步骤 4–5：视点块 + 构图召回 + 提示词 LLM + 写 slot。
+ * 归属：W2-F / 代理 A。
  *
  * 裁决：
- * - D31：返回 unmatchedKeys
+ * - D31：返回 unmatchedKeys / discardedAnchors
  * - D37：先 slotRepo.put，再 replaceMessageText（避免孤儿 token）
  * - D38：put 时保留已有 images，绝不抹掉已出图记录
  * - D41：用 tagRecall.llmCalled 计数，禁止改写共享 llm.complete
  * - D54：写锁在本 usecase（键 chatId:messageId）；同键并发共享 Promise；导出 isWriting
  *
- * 无候选 key 时的 LLM 次数（需求 L72「下限」+ §10#6「恰好两次」）：
- * - 有候选：召回 1 + 提示词 1 = 恰好 2（验收 #6 的正常路径）
- * - 无候选：跳过召回 LLM（llmCalled=false），仅提示词 1 次 → llmCallCount=1
- * 理由：L72 写的是「下限」而非「无论有无候选都必须打满两次」；
- * 空候选列表仍调召回是零信息浪费 token。跳过是省钱裁决，非静默吞掉。
+ * LLM 次数（需求 §3）：楼中一次点击恰好 2 次——召回 1 + 提示词 1。
+ * 无构图候选仍调召回；召回失败不降级。
  */
 
 import { Ok, Err } from '../infra/result.js';
@@ -21,19 +18,18 @@ import { configError, contractError, domainError } from '../infra/errors.js';
 import { createLogger } from '../infra/logger.js';
 import { createBlockSet, setBlock } from '../domain/blocks/block-set.js';
 import { VARIABLE_NAMES } from '../domain/template/variable-map.js';
-import { formatCharacterBlock } from '../domain/blocks/character.block.js';
-import { formatTagBlock } from '../domain/blocks/tag.block.js';
-import { activateCharacters } from '../domain/matching/activation.js';
+import { formatCompositionBlock } from '../domain/blocks/composition.block.js';
+import { formatRecentSlotsBlock } from '../domain/blocks/recent-slots.block.js';
 import { renderPreset } from '../domain/template/preset-renderer.js';
 import { placeSlots } from '../domain/slot/slot-placer.js';
-import { createSlotRecord, slotPlanFromLlmItem } from '../domain/model/slot.js';
+import { createSlotRecord, slotCaptionFromLlmItem } from '../domain/model/slot.js';
+import { parseFlatSlotPlans } from '../domain/model/flat-imagegen.js';
+import { recordParseFailure } from './parse-debug-log.js';
 import {
     abortErrIfNeeded,
     attachTraceId,
     extractSlotPlanItems,
-    loadAllCharacters,
     APP_EVENTS,
-    SLOT_PLAN_JSON_SCHEMA,
 } from './_helpers.js';
 import { writeGateKey } from './_gate-key.js';
 
@@ -47,13 +43,14 @@ const log = createLogger('application/generate-slots');
  * @typedef {object} GenerateSlotsDeps
  * @property {import('../ports/host.port.js').HostPort} host
  * @property {import('../ports/llm.port.js').LlmPort} llm
- * @property {import('../ports/repository.port.js').CharacterRepository} characterRepo
- * @property {import('../ports/repository.port.js').TagRepository} tagRepo
+ * @property {import('../ports/repository.port.js').CharacterRepository} [characterRepo]
+ * @property {import('../ports/repository.port.js').TagRepository} [tagRepo]
  * @property {import('../ports/repository.port.js').Repository<import('../domain/model/preset.js').Preset>} presetRepo
  * @property {import('../ports/repository.port.js').SlotRepository} slotRepo
  * @property {import('../ports/repository.port.js').Repository<import('../domain/model/api-config.js').LlmApiConfig>} llmConfigRepo
- * @property {ReturnType<import('./context-collector.js').createContextCollector>} contextCollector
- * @property {ReturnType<import('./worldinfo-resolver.js').createWorldInfoResolver>} worldInfoResolver
+ * @property {ReturnType<import('./context-collector.js').createContextCollector>} [contextCollector]
+ * @property {ReturnType<import('./worldinfo-resolver.js').createWorldInfoResolver>} [worldInfoResolver]
+ * @property {ReturnType<import('./viewpoint-blocks.js').createViewpointBlocksBuilder>} viewpointBlocks
  * @property {ReturnType<import('./tag-recall.service.js').createTagRecallService>} tagRecall
  * @property {ReturnType<import('../infra/event-bus.js').createEventBus>} bus
  * @property {() => PluginSettings} loadSettings
@@ -75,6 +72,9 @@ const log = createLogger('application/generate-slots');
  * @property {string} traceId
  * @property {number} llmCallCount
  * @property {string[]} unmatchedKeys
+ * @property {string[]} discardedAnchors
+ * @property {number[]} extraSlotIds 提示词多出的 slotid（已丢弃）
+ * @property {number[]} missingSlotIds 召回有、提示词缺少的 slotid（未写）
  */
 
 /**
@@ -105,6 +105,16 @@ export function createGenerateSlotsUseCase(deps) {
             const signal = opts?.signal;
             /** @type {number} */
             let llmCallCount = 0;
+            const chatIdAtStart = deps.host.getCurrentChatId();
+            const sessionIdAtStart = typeof deps.host.getSessionId === 'function'
+                ? deps.host.getSessionId()
+                : null;
+            const messagesAtStart = typeof deps.host.getMessages === 'function'
+                ? deps.host.getMessages()
+                : [];
+            const locationAtStart = typeof deps.host.getChatLocation === 'function'
+                ? deps.host.getChatLocation()
+                : null;
 
             const aborted0 = abortErrIfNeeded(signal, traceId);
             if (aborted0) {
@@ -113,89 +123,96 @@ export function createGenerateSlotsUseCase(deps) {
 
             const settings = deps.loadSettings();
 
-            // ── 1. 同一窗口（剥 slot）────────────────────────────────
-            const window = deps.contextCollector.collect();
-            const contextWindow = window.messages;
-            const contextText = window.text;
-
-            // ── 2. 世界书（resolver 失败已降为 Ok(degraded)）─────────
-            const wiR = await deps.worldInfoResolver.resolve({
-                contextWindow,
+            // ── 1–3. 视点块（世界书 / 上下文 / 角色库 / 特征参考 / 常驻标签）──
+            const vpR = await deps.viewpointBlocks.build({
                 messageId,
+                signal,
+                traceId,
             });
-            const worldInfoText = wiR.value.text;
+            if (!vpR.ok) {
+                return attachTraceId(vpR, traceId);
+            }
+            const {
+                worldInfoText,
+                contextText,
+                characterText,
+                featureText,
+                constantText,
+            } = vpR.value;
             const worldInfoSnapshot = worldInfoText;
 
-            // ── 3. 角色库 ────────────────────────────────────────────
-            const charsBundle = await loadAllCharacters(deps.characterRepo);
-            let characterText = '';
-            if (charsBundle.ok) {
-                const hit = activateCharacters(
-                    charsBundle.value.groups,
-                    charsBundle.value.characters,
-                    contextText,
-                    settings.matchDefaults ?? {
-                        caseSensitive: false,
-                        matchWholeWords: false,
-                    },
-                );
-                characterText = formatCharacterBlock(hit);
-            } else {
-                log.warn('character repo failed; degrading character block', {
+            const mes = deps.host.getMessage(messageId);
+            if (!mes) {
+                return Err(domainError({
+                    code: 'MESSAGE_NOT_FOUND',
+                    message: `找不到楼层 #${messageId}`,
+                    hint: '请确认当前聊天仍打开且该楼存在',
                     traceId,
-                    code: charsBundle.error?.code,
-                });
+                    context: { messageId },
+                }));
             }
+            const targetFloorText = String(mes.text ?? '');
 
             const aborted1 = abortErrIfNeeded(signal, traceId);
             if (aborted1) {
                 return aborted1;
             }
 
-            // ── 4. 标签召回 ★LLM #1（无候选 key 时跳过，见文件头 D54/验收#6 注释）──
-            /** @type {import('../domain/model/tag.js').TagEntry[]} */
-            let tagEntries = [];
-            /** @type {string[]} */
-            let unmatchedKeys = [];
+            // ── 4. 构图召回 ★LLM #1（无候选也必须调；失败不降级）──
             const tagR = await deps.tagRecall.recall({
                 contextText,
+                targetFloorText,
                 traceId,
                 signal,
             });
-            if (tagR.ok) {
-                tagEntries = tagR.value.matched;
-                unmatchedKeys = tagR.value.unmatched ?? [];
-                if (tagR.value.llmCalled) {
-                    llmCallCount += 1;
-                }
-                if (unmatchedKeys.length > 0) {
-                    deps.bus.emit(APP_EVENTS.TAG_RECALL_UNMATCHED, {
-                        messageId,
-                        traceId,
-                        unmatchedKeys,
-                        matchedCount: tagEntries.length,
-                    });
-                }
-            } else if (tagR.error?.code === 'UPSTREAM_ABORTED') {
-                return attachTraceId(tagR, traceId);
-            } else {
+            if (!tagR.ok) {
                 if (tagR.error?.context?.llmCalled === true) {
                     llmCallCount += 1;
                 }
-                log.warn('tag recall failed; degrading tag block', {
+                return attachTraceId(tagR, traceId);
+            }
+            if (tagR.value.llmCalled) {
+                llmCallCount += 1;
+            }
+
+            const positions = tagR.value.positions ?? [];
+            /** @type {string[]} */
+            const unmatchedKeys = tagR.value.unmatchedKeys ?? [];
+            /** @type {string[]} */
+            const discardedAnchors = tagR.value.discardedAnchors ?? [];
+
+            if (unmatchedKeys.length > 0 || discardedAnchors.length > 0) {
+                deps.bus.emit(APP_EVENTS.TAG_RECALL_UNMATCHED, {
+                    messageId,
                     traceId,
-                    code: tagR.error?.code,
-                    category: tagR.error?.category,
+                    unmatchedKeys,
+                    discardedAnchors,
+                    matchedCount: positions.reduce((n, p) => n + (p.entries?.length ?? 0), 0),
+                    positionCount: positions.length,
                 });
             }
 
-            const tagText = formatTagBlock(tagEntries);
+            const compositionText = formatCompositionBlock(positions);
+
+            // 近期生图记录：保留范围内已有 slot，排除本轮召回将写的 slotid
+            const excludeIds = new Set(positions.map((p) => Number(p.slotId)));
+            let recentSlotsText = '';
+            const retainedR = await deps.slotRepo.listRetained();
+            if (!retainedR.ok) {
+                return attachTraceId(retainedR, traceId);
+            }
+            recentSlotsText = formatRecentSlotsBlock(
+                retainedR.value.filter((r) => r && !excludeIds.has(Number(r.slotId))),
+            );
 
             let blocks = createBlockSet();
             blocks = setBlock(blocks, VARIABLE_NAMES.WORLDINFO, worldInfoText);
             blocks = setBlock(blocks, VARIABLE_NAMES.CONTEXT, contextText);
             blocks = setBlock(blocks, VARIABLE_NAMES.CHARACTER, characterText);
-            blocks = setBlock(blocks, VARIABLE_NAMES.TAG, tagText);
+            blocks = setBlock(blocks, VARIABLE_NAMES.COMPOSITION, compositionText);
+            blocks = setBlock(blocks, VARIABLE_NAMES.FEATURE, featureText);
+            blocks = setBlock(blocks, VARIABLE_NAMES.CONSTANT, constantText);
+            blocks = setBlock(blocks, VARIABLE_NAMES.RECENT_SLOTS, recentSlotsText);
 
             // ── 5. 生图预设 + 提示词 LLM ★LLM #2 ─────────────────────
             if (!settings.promptGenLlmConfigId) {
@@ -237,7 +254,7 @@ export function createGenerateSlotsUseCase(deps) {
                 return Err(configError({
                     code: 'IMAGEGEN_PRESET_MISSING',
                     message: '生图预设不存在或类型不对',
-                    hint: '请选择 kind=imagegen 的预设',
+                    hint: '请选择一份生图预设',
                     traceId,
                     context: { id: settings.activeImagegenPresetId },
                 }));
@@ -255,45 +272,123 @@ export function createGenerateSlotsUseCase(deps) {
             const promptR = await deps.llm.complete({
                 messages,
                 config: llmCfgR.value,
-                jsonSchema: SLOT_PLAN_JSON_SCHEMA,
                 signal,
                 traceId,
             });
             llmCallCount += 1;
             if (!promptR.ok) {
+                if (promptR.error?.context?.rawText != null) {
+                    recordParseFailure({
+                        stage: '生图',
+                        code: promptR.error.code,
+                        message: promptR.error.message,
+                        rawText: promptR.error.context.rawText,
+                    });
+                }
                 return attachTraceId(promptR, traceId);
             }
 
-            const items = extractSlotPlanItems(promptR.value.json);
+            const imagegenRawText = promptR.value.text;
+            const flatItems = parseFlatSlotPlans(imagegenRawText);
+            const items = flatItems.length > 0
+                ? flatItems
+                : extractSlotPlanItems(promptR.value.json);
             if (items.length === 0) {
+                recordParseFailure({
+                    stage: '生图',
+                    code: 'SLOT_PLAN_EMPTY',
+                    message: '提示词生成未产出有效的生图计划',
+                    rawText: imagegenRawText,
+                });
                 return Err(contractError({
                     code: 'SLOT_PLAN_EMPTY',
                     message: '提示词生成未产出有效的生图计划',
                     hint: '请检查生图预设与模型是否按约定输出 JSON 数组',
                     traceId,
-                    context: { rawText: promptR.value.text, json: promptR.value.json },
+                    context: { rawText: imagegenRawText, json: promptR.value.json },
                 }));
             }
+
+            /** @type {Map<number, string>} */
+            const anchorBySlot = new Map();
+            for (const pos of positions) {
+                anchorBySlot.set(Number(pos.slotId), String(pos.anchorSentence ?? ''));
+            }
+            const expectedIds = new Set(anchorBySlot.keys());
 
             /** @type {import('../domain/model/slot.js').SlotPlan[]} */
             const plans = [];
+            /** @type {number[]} */
+            const extraSlotIds = [];
+            /** @type {Set<number>} */
+            const seenSlotIds = new Set();
+
             for (const item of items) {
-                const pr = slotPlanFromLlmItem(item);
-                if (!pr.ok) {
-                    return attachTraceId(pr, traceId);
+                const cr = slotCaptionFromLlmItem(item);
+                if (!cr.ok) {
+                    recordParseFailure({
+                        stage: '生图',
+                        code: cr.error?.code,
+                        message: cr.error?.message,
+                        rawText: imagegenRawText,
+                    });
+                    return attachTraceId(cr, traceId);
                 }
-                plans.push(pr.value);
+                const { slotId, caption, size, analysis } = cr.value;
+                if (!expectedIds.has(slotId)) {
+                    extraSlotIds.push(slotId);
+                    continue;
+                }
+                if (seenSlotIds.has(slotId)) {
+                    continue;
+                }
+                seenSlotIds.add(slotId);
+                // 模型即使回了生成点也忽略；anchor 一律取召回结果
+                /** @type {import('../domain/model/slot.js').SlotPlan} */
+                const plan = {
+                    slotId,
+                    anchorSentence: anchorBySlot.get(slotId) ?? '',
+                    caption,
+                };
+                if (size != null) {
+                    plan.size = size;
+                }
+                if (analysis != null) {
+                    plan.analysis = analysis;
+                }
+                plans.push(plan);
             }
 
-            const mes = deps.host.getMessage(messageId);
-            if (!mes) {
-                return Err(domainError({
-                    code: 'MESSAGE_NOT_FOUND',
-                    message: `找不到楼层 #${messageId}`,
-                    hint: '请确认当前聊天仍打开且该楼存在',
+            /** @type {number[]} */
+            const missingSlotIds = [...expectedIds].filter((id) => !seenSlotIds.has(id));
+
+            if (plans.length === 0) {
+                recordParseFailure({
+                    stage: '生图',
+                    code: 'SLOT_PLAN_NO_VALID',
+                    message: '提示词未能对应到任何召回结果',
+                    rawText: imagegenRawText,
+                });
+                return Err(contractError({
+                    code: 'SLOT_PLAN_NO_VALID',
+                    message: '提示词未能对应到任何召回结果',
+                    hint: '模型应按召回结果写提示词，不得增减张数',
                     traceId,
-                    context: { messageId },
+                    context: {
+                        rawText: imagegenRawText,
+                        extraSlotIds,
+                        missingSlotIds,
+                        expectedSlotIds: [...expectedIds],
+                    },
                 }));
+            }
+
+            if (extraSlotIds.length > 0 || missingSlotIds.length > 0) {
+                log.warn('slot plan slotid mismatch', {
+                    traceId,
+                    extraSlotIds,
+                    missingSlotIds,
+                });
             }
 
             // D38：读取已有记录，保留 images（绝不用空数组抹掉）
@@ -316,7 +411,8 @@ export function createGenerateSlotsUseCase(deps) {
             /** @type {import('../domain/model/slot.js').SlotRecord[]} */
             const records = plans.map((plan) => {
                 const prev = existingById.get(plan.slotId);
-                return createSlotRecord({
+                /** @type {Parameters<typeof createSlotRecord>[0]} */
+                const input = {
                     messageId,
                     slotId: plan.slotId,
                     caption: plan.caption,
@@ -326,19 +422,53 @@ export function createGenerateSlotsUseCase(deps) {
                     llmConfigId: settings.promptGenLlmConfigId,
                     worldInfoSnapshot,
                     traceId,
-                }, { now });
+                };
+                if (plan.size != null) {
+                    input.size = plan.size;
+                }
+                if (plan.analysis != null) {
+                    input.analysis = plan.analysis;
+                }
+                return createSlotRecord(input, { now });
             });
 
-            // D37：先写权威记录，再改正文
-            const putR = await deps.slotRepo.put(messageId, records);
+            // D37：先写权威记录，再改正文；切会话时仍落到发起时的会话文件
+            const putOpts = sessionIdAtStart
+                ? {
+                    sessionId: String(sessionIdAtStart),
+                    messagesForTrim: messagesAtStart,
+                    chatLocation: locationAtStart,
+                }
+                : { messagesForTrim: messagesAtStart, chatLocation: locationAtStart };
+            const putR = await deps.slotRepo.put(messageId, records, putOpts);
             if (!putR.ok) {
                 return attachTraceId(putR, traceId);
             }
 
-            const placed = placeSlots(mes.text ?? '', plans);
-            const replaceR = await deps.host.replaceMessageText(messageId, placed.text);
-            if (!replaceR.ok) {
-                return attachTraceId(replaceR, traceId);
+            const chatNow = deps.host.getCurrentChatId();
+            const sessionNow = typeof deps.host.getSessionId === 'function'
+                ? deps.host.getSessionId()
+                : null;
+            const stillSameChat = chatNow === chatIdAtStart
+                && (sessionIdAtStart == null || sessionNow === sessionIdAtStart);
+
+            /** @type {ReturnType<typeof placeSlots>|null} */
+            let placed = null;
+            if (stillSameChat) {
+                placed = placeSlots(mes.text ?? '', plans);
+                const replaceR = await deps.host.replaceMessageText(messageId, placed.text);
+                if (!replaceR.ok) {
+                    return attachTraceId(replaceR, traceId);
+                }
+            } else {
+                log.warn('chat/session changed after put; records saved, body not updated', {
+                    traceId,
+                    chatIdAtStart,
+                    chatNow,
+                    sessionIdAtStart,
+                    sessionNow,
+                    messageId,
+                });
             }
 
             deps.bus.emit(APP_EVENTS.SLOTS_WRITTEN, {
@@ -347,15 +477,27 @@ export function createGenerateSlotsUseCase(deps) {
                 traceId,
                 llmCallCount,
                 unmatchedKeys,
-                placements: placed.placements,
+                discardedAnchors,
+                extraSlotIds,
+                missingSlotIds,
+                placements: placed?.placements ?? [],
+                chatChanged: !stillSameChat,
             });
 
-            // 有候选时通常为 2；无候选跳过召回则为 1（见文件头）
             if (llmCallCount !== 2) {
                 log.info('llmCallCount != 2', { traceId, llmCallCount });
             }
 
-            return Ok({ records, traceId, llmCallCount, unmatchedKeys });
+            return Ok({
+                records,
+                traceId,
+                llmCallCount,
+                unmatchedKeys,
+                discardedAnchors,
+                extraSlotIds,
+                missingSlotIds,
+                chatChanged: !stillSameChat,
+            });
     }
 
     return {

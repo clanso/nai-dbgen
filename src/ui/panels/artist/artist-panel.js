@@ -1,18 +1,21 @@
 /**
  * L5 UI · 画师串库 管理面板。
- * 归属：W2-H 面板代理实现。W0 仅冻结签名。
+ * 归属：W2-H 面板代理实现。
  * 预览走 D9：传正在编辑的那一条；尺寸 ARTIST_PREVIEW_SIZE；不改 activeArtistId。
+ * 列表用卡片图；点开看原图；按 sequence 排序；新建 sequence = max+1。
  */
 
 import { createButton, createField, createInlineError } from '../../common/controls.js';
 import { paintSafeCover } from '../../common/safe-url.js';
-import { createArtist } from '../../../domain/model/artist.js';
-import { ARTIST_PREVIEW_SIZE } from '../../../domain/model/nai-params.js';
+import { openSlotImageViewer } from '../../common/image-viewer.js';
+import {
+    createArtist,
+    nextArtistSequence,
+} from '../../../domain/model/artist.js';
 import { mountLibraryView } from '../library-view.js';
-import { buildArtistPreviewRequest, gateCoverUrl, applyFormFields, paidActionLabels, formatErrorDisplay } from '../_lib/library-logic.js';
+import { gateCoverUrl, buildArtistPreviewRequest, applyFormFields, paidActionLabels, formatErrorDisplay } from '../_lib/library-logic.js';
 import {
     el,
-    setText,
     labeledTextarea,
     idNow,
     settingsApi,
@@ -26,7 +29,7 @@ import {
 
 /**
  * @param {Element} root
- * @param {object} deps repos / services / host / bus
+ * @param {object} deps repos / services / host / bus / artistFileUrl
  * @returns {{ destroy: () => void }}
  */
 export function mountArtistPanel(root, deps) {
@@ -37,12 +40,15 @@ export function mountArtistPanel(root, deps) {
     if (!repo) throw new Error('mountArtistPanel: deps.repos.artist required');
 
     const host = deps.host;
-    const imageRepo = deps?.repos?.image;
+    const artistFileUrl = deps?.artistFileUrl;
+    if (!artistFileUrl || typeof artistFileUrl.urlOf !== 'function') {
+        throw new Error('mountArtistPanel: deps.artistFileUrl required');
+    }
     const previewSvc = deps?.services?.artistPreview;
     const ids = idNow(deps);
     const settings = settingsApi(deps);
 
-    /** @type {Map<string, string>} imageRef → objectURL（dispose 时 revoke） */
+    /** @type {Map<string, string>} ref+version → gated URL */
     const urlCache = new Map();
     /** @type {(() => void)[]} */
     const cleanups = [];
@@ -53,23 +59,19 @@ export function mountArtistPanel(root, deps) {
 
     /**
      * @param {string|null|undefined} ref
-     * @returns {Promise<string|null>}
+     * @param {string|number|null|undefined} [version]
+     * @returns {string|null}
      */
-    async function resolveCover(ref) {
+    async function resolveFileUrl(ref, version) {
         if (!ref) return null;
-        if (urlCache.has(ref)) return urlCache.get(ref) || null;
-        // 直接 URL（导入示例）走白名单
-        const gated = gateCoverUrl(ref);
-        if (gated) {
-            urlCache.set(ref, gated);
-            return gated;
-        }
-        if (!imageRepo || typeof imageRepo.getUrl !== 'function') return null;
-        const r = await imageRepo.getUrl(ref);
-        if (!r?.ok || !r.value) return null;
-        const safe = gateCoverUrl(r.value);
-        if (safe) urlCache.set(ref, safe);
-        return safe;
+        const cacheKey = version != null && String(version) !== ''
+            ? `${ref}::${version}`
+            : String(ref);
+        if (urlCache.has(cacheKey)) return urlCache.get(cacheKey) || null;
+        const raw = await Promise.resolve(artistFileUrl.urlOf(ref, version));
+        const gated = gateCoverUrl(raw);
+        if (gated) urlCache.set(cacheKey, gated);
+        return gated;
     }
 
     async function listWithActive() {
@@ -78,11 +80,13 @@ export function mountArtistPanel(root, deps) {
         /** @type {object[]} */
         const out = [];
         for (const item of items) {
-            const cover = await resolveCover(item.previewImageRef);
+            const cover = await resolveFileUrl(item.cardImageRef, item.updatedAt);
+            const isActive = activeId != null && String(activeId) === String(item.id);
             out.push({
                 ...item,
                 coverUrl: cover || '',
-                __active: activeId != null && String(activeId) === String(item.id),
+                __active: isActive,
+                __chips: isActive ? ['当前使用'] : [],
             });
         }
         return out;
@@ -98,20 +102,37 @@ export function mountArtistPanel(root, deps) {
         onDelete: (idsToDelete) => void removeItems(idsToDelete),
         onImport: () => void openImport(),
         onExport: () => void openImport(),
+        onCoverClick: (item) => void openFullImage(item),
     }, {
-        searchKeys: ['name', 'positive', 'negative'],
+        cover: true,
+        defaultSort: 'sequence-asc',
+        sortOptions: [
+            { value: 'sequence-asc', label: '排序号' },
+            { value: 'sequence-desc', label: '排序号倒序' },
+            { value: 'name-asc', label: '名称' },
+            { value: 'name-desc', label: '名称倒序' },
+            { value: 'updated-desc', label: '最近更新' },
+        ],
+        searchKeys: ['name', 'positivePrompt', 'negativePrompt'],
         columns: [
             { key: 'name', label: '名称' },
-            {
-                key: 'positive',
-                label: '正向',
-                render: (item) => {
-                    const s = String(item.positive ?? '');
-                    return s.length > 40 ? `${s.slice(0, 40)}…` : s;
-                },
-            },
         ],
+        cardMeta: (item) => ({
+            chips: Array.isArray(item?.__chips) ? item.__chips : [],
+        }),
     });
+
+    /**
+     * @param {object} item
+     */
+    async function openFullImage(item) {
+        const url = await resolveFileUrl(item?.referenceImageRef, item?.updatedAt);
+        if (!url) {
+            toast(host, 'info', '该条目没有示例图');
+            return;
+        }
+        await openSlotImageViewer({ host }, { url, title: item?.name, alt: item?.name });
+    }
 
     /**
      * @param {string[]} idList
@@ -135,31 +156,31 @@ export function mountArtistPanel(root, deps) {
      */
     async function openEditor(item) {
         const nameField = createField({ label: '名称', value: item?.name ?? '' });
-        const positive = labeledTextarea('正向画师串', item?.positive ?? '', 4);
-        const negative = labeledTextarea('负向画师串', item?.negative ?? '', 3);
-        const promptField = labeledTextarea('手填预览提示词（不读 4.13 宽高）', '', 3);
-        const negPreview = labeledTextarea('预览负向（可选）', '', 2);
-        const sizeHint = el('p', 'nd-muted');
-        setText(
-            sizeHint,
-            `预览尺寸固定 ${ARTIST_PREVIEW_SIZE.width}×${ARTIST_PREVIEW_SIZE.height}（ARTIST_PREVIEW_SIZE）`,
-        );
+        const positive = labeledTextarea('正向画师串', item?.positivePrompt ?? '', 4);
+        const negative = labeledTextarea('负向画师串', item?.negativePrompt ?? '', 3);
+        const promptField = labeledTextarea('预览提示词', '', 3);
+        const negPreview = labeledTextarea('预览负向', '', 2);
 
         const coverBox = el('div', 'nd-artist-preview-cover');
+        coverBox.style.cursor = 'pointer';
+        coverBox.title = '点击查看原图';
+        coverBox.addEventListener('click', () => {
+            void openFullImage(item || {});
+        });
         void (async () => {
-            const url = await resolveCover(item?.previewImageRef);
-            paintSafeCover(coverBox, url, item?.name ?? '');
+            const url = await resolveFileUrl(item?.cardImageRef, item?.updatedAt);
+            paintSafeCover(coverBox, url, item?.name ?? '', { emptyVariant: 'label' });
         })();
 
         const form = el('div', 'nd-form');
-        form.append(nameField.el, positive.el, negative.el, coverBox, sizeHint, promptField.el, negPreview.el);
+        form.append(nameField.el, positive.el, negative.el, coverBox, promptField.el, negPreview.el);
         const err = createInlineError();
         form.appendChild(err.el);
 
         const modal = await openFormModal(deps, item ? '编辑画师串' : '新建画师串', form);
 
         const activateBtn = createButton({
-            label: '设为当前激活',
+            label: '设为当前',
             variant: 'ghost',
             onClick: async () => {
                 const draft = await persistDraft();
@@ -177,7 +198,7 @@ export function mountArtistPanel(root, deps) {
             onClick: async () => {
                 err.clear();
                 if (!previewSvc || typeof previewSvc.preview !== 'function') {
-                    err.setMessage('预览服务未装配');
+                    err.setMessage('预览出图不可用，请刷新后重试');
                     return;
                 }
 
@@ -189,7 +210,6 @@ export function mountArtistPanel(root, deps) {
                         const draft = await persistDraft();
                         if (!draft) return;
 
-                        // D9 / D46：只用编辑中的那条；完全不读不写 activeArtistId
                         const req = buildArtistPreviewRequest(draft, {
                             promptText: promptField.getValue(),
                             negativeText: negPreview.getValue(),
@@ -207,11 +227,15 @@ export function mountArtistPanel(root, deps) {
                             err.setMessage(formatErrorDisplay(result?.error, '预览失败'));
                             return;
                         }
-                        toast(host, 'success', '预览已生成');
-                        const url = result.value?.imageRef
-                            ? await resolveCover(result.value.imageRef)
-                            : null;
-                        if (url) paintSafeCover(coverBox, url, draft.name);
+                        toast(host, 'success', '示例图已更新');
+                        item = {
+                            ...draft,
+                            referenceImageRef: result.value?.referenceImageRef ?? draft.referenceImageRef,
+                            cardImageRef: result.value?.cardImageRef ?? draft.cardImageRef,
+                            updatedAt: draft.updatedAt,
+                        };
+                        const url = await resolveFileUrl(item.cardImageRef, item.updatedAt);
+                        if (url) paintSafeCover(coverBox, url, draft.name, { emptyVariant: 'label' });
                         await view?.refresh();
                     },
                 });
@@ -227,21 +251,26 @@ export function mountArtistPanel(root, deps) {
                 err.setMessage('请填写名称');
                 return null;
             }
-            const entity = item
-                ? applyFormFields(item, {
+            let entity;
+            if (item) {
+                entity = applyFormFields(item, {
                     name,
-                    positive: positive.getValue(),
-                    negative: negative.getValue(),
+                    positivePrompt: positive.getValue(),
+                    negativePrompt: negative.getValue(),
                     updatedAt: ids.now(),
-                })
-                : createArtist(
+                });
+            } else {
+                const all = await awaitRepo(host, repo.list(), '读取画师串失败') || [];
+                entity = createArtist(
                     {
                         name,
-                        positive: positive.getValue(),
-                        negative: negative.getValue(),
+                        positivePrompt: positive.getValue(),
+                        negativePrompt: negative.getValue(),
+                        sequence: nextArtistSequence(all),
                     },
                     { id: ids.id('ar'), now: ids.now() },
                 );
+            }
             const saved = await awaitRepo(host, repo.put(entity), '保存失败');
             if (saved && !item) {
                 item = saved;
@@ -271,21 +300,43 @@ export function mountArtistPanel(root, deps) {
     }
 
     async function openImport() {
+        /** @type {AbortController|null} */
+        let ioAbort = null;
         await openImportExportModal(
             deps,
             '导入画师串',
             'artist',
-            async (data, strategy) => {
-                const r = await repo.importJson(data, { strategy });
+            async (data, strategy, progress) => {
+                ioAbort = new AbortController();
+                const r = await repo.importJson(data, {
+                    strategy,
+                    signal: ioAbort.signal,
+                    onProgress: progress?.onProgress,
+                });
+                ioAbort = null;
                 if (!r.ok) throw new Error(r.error?.message || '导入失败');
+                if (Array.isArray(r.value?.errors) && r.value.errors.length) {
+                    toast(host, 'warning', `部分失败：${r.value.errors.slice(0, 3).join('；')}`);
+                }
                 return r.value;
             },
-            async () => {
-                const r = await repo.exportJson();
+            async (progress) => {
+                ioAbort = new AbortController();
+                const r = await repo.exportJson({
+                    signal: ioAbort.signal,
+                    onProgress: progress?.onProgress,
+                });
+                ioAbort = null;
                 if (!r.ok) throw new Error(r.error?.message || '导出失败');
                 return r.value;
             },
             () => void view?.refresh(),
+            {
+                allowBareArray: true,
+                onCancelIo: () => {
+                    ioAbort?.abort();
+                },
+            },
         );
     }
 
@@ -298,15 +349,6 @@ export function mountArtistPanel(root, deps) {
             if (destroyed) return;
             destroyed = true;
             for (const fn of cleanups) fn();
-            for (const url of urlCache.values()) {
-                if (typeof url === 'string' && url.startsWith('blob:')) {
-                    try {
-                        URL.revokeObjectURL(url);
-                    } catch {
-                        // ignore
-                    }
-                }
-            }
             urlCache.clear();
             view?.destroy();
             shell.remove();

@@ -40,7 +40,7 @@ import { requireArg } from '../infra/validate.js';
  * LLM 网关工厂依赖（裁决 D19）。实现见 `adapters/llm/llm.gateway.js`。
  *
  * @typedef {object} LlmGatewayDeps
- * @property {Record<string, { complete: Function }>} transports
+ * @property {Record<string, { complete: Function, listModels?: Function }>} transports
  * @property {(text: string) => import('../infra/result.js').Ok<any>|import('../infra/result.js').Err<import('../infra/errors.js').AppError>} [extractJson]
  * @property {number} [maxAttempts] 上游可重试错误的最大尝试次数；缺省由实现定（通常 3）
  * @property {(ms: number) => Promise<void>} [sleep] 可注入睡眠（单测用假时钟）；缺省用真实延迟
@@ -51,13 +51,17 @@ import { requireArg } from '../infra/validate.js';
  *
  * @property {(req: LlmCompleteRequest) => Promise<import('../infra/result.js').Ok<LlmCompleteResult>|import('../infra/result.js').Err<import('../infra/errors.js').AppError>>} complete
  *   一次补全调用。失败：TransportError、UpstreamError、ContractError（JSON 不符）、ConfigError。
- *   对应宿主能力基线 §8.4（默认 st-backend：ChatCompletionService + reverse_proxy）。
+ *   对应宿主能力基线 §8.4（custom 来源 + 密钥库 secret_id）。
+ *
+ * @property {(config: LlmApiConfig) => Promise<import('../infra/result.js').Ok<{ models: string[], count: number }>|import('../infra/result.js').Err<import('../infra/errors.js').AppError>>} listModels
+ *   经酒馆 POST /status 拉取模型列表（需求 4.9「获取模型」/「测试连接」）。
  *
  * @property {(config: LlmApiConfig) => Promise<TransportProbeResult>} probe
+ *   等价于拉一次模型列表；成功 detail 含模型数。
  */
 
 /** @type {readonly string[]} */
-const REQUIRED_METHODS = Object.freeze(['complete', 'probe']);
+const REQUIRED_METHODS = Object.freeze(['complete', 'listModels', 'probe']);
 
 /**
  * @param {unknown} impl

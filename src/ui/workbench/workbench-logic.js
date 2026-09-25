@@ -9,7 +9,14 @@ import {
     normalizeNaiParams,
     validateNaiCaption,
 } from '../../domain/model/nai-params.js';
+import {
+    UC_PRESET_NONE,
+    coerceNaiParams,
+    computeVarietySigma,
+    supportsVariety,
+} from '../../domain/nai/param-options.js';
 import { safeImageUrl } from '../common/safe-url.js';
+import { findMatchingArtist } from '../common/prompt-text.js';
 
 /** NAI V4 多角色上限（与桌面项目一致）。 */
 export const WORKBENCH_MAX_CHARACTERS = 4;
@@ -115,18 +122,18 @@ export function editorStateToCaption(state) {
     for (const row of characters) {
         const x = Number(row?.x);
         const y = Number(row?.y);
-        const centers = [{
+        const pointList = [{
             x: Number.isFinite(x) ? x : 0.5,
             y: Number.isFinite(y) ? y : 0.5,
         }];
-        posChars.push({
-            char_caption: String(row?.positive ?? ''),
-            centers: centers.map((p) => ({ ...p })),
-        });
-        negChars.push({
-            char_caption: String(row?.negative ?? ''),
-            centers: centers.map((p) => ({ ...p })),
-        });
+        /** @type {CharCaption} */
+        const posItem = { char_caption: String(row?.positive ?? '') };
+        posItem.centers = pointList.map((p) => ({ ...p }));
+        /** @type {CharCaption} */
+        const negItem = { char_caption: String(row?.negative ?? '') };
+        negItem.centers = pointList.map((p) => ({ ...p }));
+        posChars.push(posItem);
+        negChars.push(negItem);
     }
     return {
         v4_prompt: {
@@ -167,7 +174,6 @@ export const WORKBENCH_EDITABLE_NAI_KEYS = Object.freeze([
     'sampler',
     'noise_schedule',
     'seed',
-    'seedRandom',
     'image_format',
     'qualityToggle',
     'tag_hint_qt',
@@ -179,7 +185,6 @@ export const WORKBENCH_EDITABLE_NAI_KEYS = Object.freeze([
     'sm_dyn',
     'straight_alpha',
     'tag_hint_transparent_background',
-    'qualityStrategy',
 ]);
 
 /**
@@ -187,8 +192,8 @@ export const WORKBENCH_EDITABLE_NAI_KEYS = Object.freeze([
  * @type {Readonly<Record<string, string>>}
  */
 export const WORKBENCH_FIXED_NAI_KEYS = Object.freeze({
-    schemaVersion: 'schema 元数据，随 domain 默认写入，不提供改控件',
-    n_samples: '需求 4.13 固定为 1；工作台按次出图不改张数',
+    schemaVersion: '版本元数据，随默认写入，不提供改控件',
+    n_samples: '每次固定出一张，不提供改张数',
 });
 
 /**
@@ -219,7 +224,8 @@ export function resolveSessionParams(settings) {
 
 /**
  * 把页面表单值收成一次出图用的 NaiParams（D47）。
- * Variety：`varietyEnabled === false` → `skip_cfg_above_sigma: null`；开启则读数值。
+ * Variety：关 → null；开 → 按宽高用 app wM 公式计算（不信任手填）。
+ * 成对字段与模型能力由 coerceNaiParams 收口。
  *
  * @param {NaiParams|object} base resolveSessionParams 结果
  * @param {object} form 控件当前值
@@ -229,38 +235,46 @@ export function assembleWorkbenchNaiParams(base, form) {
     const defaults = defaultNaiParams();
     const b = base && typeof base === 'object' ? base : defaults;
     const f = form && typeof form === 'object' ? form : {};
+    const model = f.model != null ? String(f.model) : b.model;
+    const width = f.width != null ? Number(f.width) : b.width;
+    const height = f.height != null ? Number(f.height) : b.height;
     const varietyOn = f.varietyEnabled === true;
-    const sigmaRaw = f.skip_cfg_above_sigma;
-    const skipCfg = varietyOn && sigmaRaw != null && Number.isFinite(Number(sigmaRaw))
-        ? Number(sigmaRaw)
+    const quality = f.qualityToggle != null
+        ? f.qualityToggle !== false
+        : (f.tag_hint_qt != null ? f.tag_hint_qt !== false : true);
+    const uc = f.ucPreset != null ? Number(f.ucPreset) : b.ucPreset;
+    const transparentOn = f.straight_alpha === true
+        || f.tag_hint_transparent_background === true;
+    const skipCfg = varietyOn && supportsVariety(model)
+        ? computeVarietySigma(width, height, model)
         : null;
 
-    return normalizeNaiParams({
+    return coerceNaiParams(normalizeNaiParams({
         ...b,
-        model: f.model != null ? String(f.model) : b.model,
-        width: f.width != null ? Number(f.width) : b.width,
-        height: f.height != null ? Number(f.height) : b.height,
+        model,
+        width,
+        height,
         steps: f.steps != null ? Number(f.steps) : b.steps,
         scale: f.scale != null ? Number(f.scale) : b.scale,
         sampler: f.sampler != null ? String(f.sampler) : b.sampler,
         noise_schedule: f.noise_schedule != null ? String(f.noise_schedule) : b.noise_schedule,
         seed: f.seed != null ? Number(f.seed) : b.seed,
-        seedRandom: f.seedRandom !== false,
         image_format: f.image_format === 'webp' ? 'webp' : 'png',
-        qualityToggle: f.qualityToggle !== false,
-        tag_hint_qt: f.tag_hint_qt !== false,
-        ucPreset: f.ucPreset != null ? Number(f.ucPreset) : b.ucPreset,
-        tag_hint_uc_preset: f.tag_hint_uc_preset !== false,
+        qualityToggle: quality,
+        tag_hint_qt: quality,
+        ucPreset: uc,
+        tag_hint_uc_preset: f.tag_hint_uc_preset != null
+            ? f.tag_hint_uc_preset !== false
+            : uc !== UC_PRESET_NONE,
         cfg_rescale: f.cfg_rescale != null ? Number(f.cfg_rescale) : b.cfg_rescale,
         skip_cfg_above_sigma: skipCfg,
         sm: f.sm === true,
         sm_dyn: f.sm_dyn === true,
-        straight_alpha: f.straight_alpha === true,
-        tag_hint_transparent_background: f.tag_hint_transparent_background === true,
-        qualityStrategy: f.qualityStrategy === 'caption' ? 'caption' : 'field',
+        straight_alpha: transparentOn,
+        tag_hint_transparent_background: transparentOn,
         n_samples: defaults.n_samples,
         schemaVersion: defaults.schemaVersion,
-    });
+    }));
 }
 
 /**
@@ -410,7 +424,7 @@ export function formatUnmatchedKeys(keys) {
     }
     const list = keys.map((k) => String(k)).filter((k) => k.trim() !== '');
     if (list.length === 0) return '';
-    return `未命中标签 key：${list.join('、')}`;
+    return `未匹配的构图标签：${list.join('、')}`;
 }
 
 /**
@@ -476,4 +490,33 @@ export function previewUrlFromImage(image, urlApi) {
  */
 export function emptyCharacterRow() {
     return { positive: '', negative: '', x: 0.5, y: 0.5 };
+}
+
+/**
+ * 粘贴解析结果的副作用决策（切换画师串 / 截断提示），纯函数可单测。
+ *
+ * @param {{ artist: { positive?: string, negative?: string }|null, truncated?: boolean, truncateMessage?: string|null }} parsed
+ * @param {Iterable<{ id?: string, name?: string, positive?: string, negative?: string }>} artists
+ * @returns {{
+ *   artistAction: 'none'|'matched'|'missing',
+ *   matchedArtist: { id: string, name: string }|null,
+ *   truncateMessage: string|null,
+ * }}
+ */
+export function resolvePasteArtistAction(parsed, artists) {
+    const truncateMessage = parsed?.truncated && parsed?.truncateMessage
+        ? String(parsed.truncateMessage)
+        : null;
+    if (!parsed?.artist) {
+        return { artistAction: 'none', matchedArtist: null, truncateMessage };
+    }
+    const matched = findMatchingArtist(artists, parsed.artist);
+    if (matched) {
+        return {
+            artistAction: 'matched',
+            matchedArtist: { id: matched.id, name: matched.name },
+            truncateMessage,
+        };
+    }
+    return { artistAction: 'missing', matchedArtist: null, truncateMessage };
 }
