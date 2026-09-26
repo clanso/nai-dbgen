@@ -196,7 +196,18 @@ export function mountWorkbench(root, deps) {
     setText(libTitle, '本次使用的条目');
     const libHint = el('p', 'nd-muted');
     setText(libHint, '只发送勾中的条目。勾库或分类会选中其下全部条目。');
-    libBox.append(libTitle, libHint);
+    const searchWrap = el('div', 'nd-search-field nd-wb-lib-search');
+    const searchInput = /** @type {HTMLInputElement} */ (el('input'));
+    searchInput.type = 'search';
+    searchInput.placeholder = '搜索名称或正文';
+    searchInput.setAttribute('aria-label', '搜索名称或正文');
+    searchInput.autocomplete = 'off';
+    searchWrap.appendChild(searchInput);
+    const searchEmpty = el('p', 'nd-muted nd-wb-lib-empty');
+    setText(searchEmpty, '没有匹配的条目');
+    searchEmpty.hidden = true;
+    const libList = el('div', 'nd-wb-lib-list');
+    libBox.append(libTitle, libHint, searchWrap, searchEmpty, libList);
     /** @type {{ id: string, entryIds: string[] }[]} */
     const libGroups = [];
     /** @type {Map<string, boolean>} */
@@ -289,6 +300,30 @@ export function mountWorkbench(root, deps) {
     }
 
     /**
+     * @param {object} entry
+     * @param {string} kind
+     * @returns {string}
+     */
+    function entryHaystack(entry, kind) {
+        return [
+            entryLabel(entry, kind),
+            entry?.key,
+            entry?.value,
+            entry?.secondaryKey,
+        ].map((part) => String(part ?? '')).join('\n').toLowerCase();
+    }
+
+    /**
+     * @param {HTMLElement} body
+     * @param {HTMLElement} toggle
+     * @param {boolean} open
+     */
+    function setSectionOpen(body, toggle, open) {
+        body.hidden = !open;
+        toggle.textContent = open ? '收起' : '展开';
+    }
+
+    /**
      * @param {HTMLElement} host
      * @param {object[]} entries
      * @param {string} kind
@@ -308,8 +343,18 @@ export function mountWorkbench(root, deps) {
                 },
             });
             libControls.push(control);
-            bucket.rows.push({ id, control });
-            host.appendChild(control.el);
+            const wrap = el('div', 'nd-wb-entry');
+            wrap.appendChild(control.el);
+            const value = String(entry?.value ?? '').trim();
+            if (value) {
+                const body = el('div', 'nd-wb-entry__value');
+                setText(body, value);
+                wrap.appendChild(body);
+            }
+            const row = { id, control, el: wrap, haystack: entryHaystack(entry, kind) };
+            bucket.rows.push(row);
+            if (Array.isArray(bucket.local)) bucket.local.push(row);
+            host.appendChild(wrap);
         }
     }
 
@@ -353,16 +398,17 @@ export function mountWorkbench(root, deps) {
 
             const body = el('div', 'nd-wb-lib__body');
             body.hidden = true;
-            /** @type {{ title: string, entryIds: string[], control: ReturnType<typeof createCheckbox>, count: HTMLElement }[]} */
+            /** @type {{ title: string, entryIds: string[], entries: object[], kind: string, control: ReturnType<typeof createCheckbox>, count: HTMLElement, head: HTMLElement, body: HTMLElement, toggle: HTMLElement, rows: { id: string, control: ReturnType<typeof createCheckbox>, haystack: string }[], painted: boolean, userOpen: boolean }[]} */
             const categories = [];
-            /** @type {{ id: string, control: ReturnType<typeof createCheckbox> }[]} */
+            /** @type {{ id: string, control: ReturnType<typeof createCheckbox>, haystack: string }[]} */
             const rows = [];
+            /** @type {{ id: string, control: ReturnType<typeof createCheckbox>, haystack: string }[]} */
+            const looseRows = [];
             const grouped = groupEntries(entries, kind);
-            const bucket = { rows };
             for (const cat of grouped) {
                 const catIds = cat.entries.map((entry) => String(entry.id));
                 if (!cat.title) {
-                    paintEntries(body, cat.entries, kind, bucket);
+                    paintEntries(body, cat.entries, kind, { rows, local: looseRows });
                     continue;
                 }
                 const catHead = el('div', 'nd-wb-cat__head');
@@ -376,47 +422,132 @@ export function mountWorkbench(root, deps) {
                 setText(catCount, catIds.length ? `0/${catIds.length}` : '0');
                 const catBody = el('div', 'nd-wb-cat__body');
                 catBody.hidden = true;
-                let painted = false;
+                /** @type {{ title: string, entryIds: string[], entries: object[], kind: string, control: ReturnType<typeof createCheckbox>, count: HTMLElement, head: HTMLElement, body: HTMLElement, toggle: HTMLElement, rows: { id: string, control: ReturnType<typeof createCheckbox>, haystack: string }[], painted: boolean, userOpen: boolean }} */
+                const catState = {
+                    title: cat.title,
+                    entryIds: catIds,
+                    entries: cat.entries,
+                    kind,
+                    control: catControl,
+                    count: catCount,
+                    head: catHead,
+                    body: catBody,
+                    toggle: /** @type {HTMLElement} */ (document.createElement('button')),
+                    rows: [],
+                    painted: false,
+                    userOpen: false,
+                };
                 const toggle = createMiniAction({
                     label: '展开',
                     onClick: () => {
-                        catBody.hidden = !catBody.hidden;
-                        toggle.textContent = catBody.hidden ? '展开' : '收起';
-                        if (!painted) {
-                            painted = true;
-                            paintEntries(catBody, cat.entries, kind, bucket);
+                        catState.userOpen = catState.body.hidden;
+                        if (catState.userOpen) paintCategory(catState);
+                        if (String(searchInput.value || '').trim()) {
+                            setSectionOpen(catState.body, catState.toggle, catState.userOpen);
+                            return;
                         }
+                        applyEntryFilter();
                     },
                 });
+                catState.toggle = toggle;
                 catHead.append(catControl.el, catCount, toggle);
                 body.append(catHead, catBody);
-                categories.push({ title: cat.title, entryIds: catIds, control: catControl, count: catCount });
+                categories.push(catState);
             }
 
             const libToggle = createMiniAction({
                 label: '展开',
                 onClick: () => {
-                    body.hidden = !body.hidden;
-                    libToggle.textContent = body.hidden ? '展开' : '收起';
+                    const group = libGroups.find((item) => item.body === body);
+                    if (!group) return;
+                    group.userOpen = group.body.hidden;
+                    if (String(searchInput.value || '').trim()) {
+                        setSectionOpen(group.body, group.toggle, group.userOpen);
+                        return;
+                    }
+                    applyEntryFilter();
                 },
             });
             head.appendChild(libToggle);
             const block = el('div', 'nd-wb-lib');
             block.append(head, body);
-            libBox.appendChild(block);
+            libList.appendChild(block);
             libGroups.push({
                 id: String(lib.id),
+                haystack: `${String(lib.name || lib.id)} ${kindText}`.toLowerCase(),
                 entryIds,
                 control,
                 count,
                 categories,
                 rows,
+                looseRows,
+                block,
+                body,
+                toggle: libToggle,
+                userOpen: false,
             });
         }
         if (Array.isArray(draft?.entryIds) && draft.entryIds.length) {
             setPicked(draft.entryIds.map((id) => String(id)), true);
         }
+        applyEntryFilter();
     }
+
+    /**
+     * @param {{ body: HTMLElement, entries: object[], kind: string, rows: { id: string, control: ReturnType<typeof createCheckbox>, haystack: string }[], painted: boolean }} cat
+     */
+    function paintCategory(cat) {
+        if (cat.painted) return;
+        cat.painted = true;
+        const group = libGroups.find((item) => item.categories.includes(cat));
+        paintEntries(cat.body, cat.entries, cat.kind, {
+            rows: group ? group.rows : cat.rows,
+            local: cat.rows,
+        });
+    }
+
+    /**
+     * 搜索时展开命中的库和分类，藏起对不上的条目。清空后回到原先的展开状态。
+     */
+    function applyEntryFilter() {
+        const q = String(searchInput.value || '').trim().toLowerCase();
+        let anyVisible = !q;
+        for (const group of libGroups) {
+            const libHit = Boolean(q) && group.haystack.includes(q);
+            let groupVisible = libHit;
+            for (const row of group.looseRows) {
+                const hit = !q || libHit || row.haystack.includes(q);
+                (row.el || row.control.el).hidden = !hit;
+                if (hit) groupVisible = true;
+            }
+            for (const cat of group.categories) {
+                const titleHit = Boolean(q) && cat.title.toLowerCase().includes(q);
+                const wantPaint = Boolean(q) && (libHit || titleHit || cat.entries.some((entry) => (
+                    entryHaystack(entry, cat.kind).includes(q)
+                )));
+                if (wantPaint) paintCategory(cat);
+                let catVisible = !q;
+                if (cat.painted) {
+                    catVisible = false;
+                    for (const row of cat.rows) {
+                        const hit = !q || libHit || titleHit || row.haystack.includes(q);
+                        (row.el || row.control.el).hidden = !hit;
+                        if (hit) catVisible = true;
+                    }
+                }
+                if (cat.head) cat.head.hidden = Boolean(q) && !catVisible;
+                if (q) setSectionOpen(cat.body, cat.toggle, catVisible);
+                else setSectionOpen(cat.body, cat.toggle, cat.userOpen);
+                if (catVisible) groupVisible = true;
+            }
+            group.block.hidden = Boolean(q) && !groupVisible;
+            if (q) setSectionOpen(group.body, group.toggle, groupVisible);
+            else setSectionOpen(group.body, group.toggle, group.userOpen);
+            if (groupVisible) anyVisible = true;
+        }
+        searchEmpty.hidden = !q || anyVisible || libGroups.length === 0;
+    }
+    searchInput.addEventListener('input', applyEntryFilter);
 
     /** @type {AbortController|null} */
     let writeAbort = null;
@@ -959,6 +1090,7 @@ export function mountWorkbench(root, deps) {
             statusPill.destroy();
             nlField.destroy();
             floorToggle.destroy();
+            searchInput.removeEventListener('input', applyEntryFilter);
             for (const c of libControls) c.destroy();
             captionEditor.destroy();
             replaceToggle.destroy();
