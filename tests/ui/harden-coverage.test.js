@@ -22,6 +22,15 @@ describe('D61 components.css harden coverage', () => {
         );
     });
 
+    it('hardens createToggle track and knob via .nd-toggle-row i and i::after', () => {
+        assert.match(css, /\.nd-toggle-row\s+i\s*\{[^}]*box-sizing:\s*border-box\s*!important/s);
+        assert.match(css, /\.nd-toggle-row\s+i\s*\{[^}]*width:\s*35px\s*!important/s);
+        assert.match(css, /\.nd-toggle-row\s+i\s*\{[^}]*height:\s*19px\s*!important/s);
+        assert.match(css, /\.nd-toggle-row\s+i::after\s*\{[^}]*box-sizing:\s*border-box\s*!important/s);
+        assert.match(css, /\.nd-toggle-row\s+i::after\s*\{[^}]*width:\s*13px\s*!important/s);
+        assert.match(css, /\.nd-toggle-row\s+i::after\s*\{[^}]*height:\s*13px\s*!important/s);
+    });
+
     it('hardens createToggle bare input via .nd-toggle-row input', () => {
         assert.match(css, /\.nd-toggle-row\s+input\s*\{[^}]*appearance:\s*none\s*!important/s);
         assert.match(css, /\.nd-toggle-row\s+input\s*\{[^}]*width:\s*35px\s*!important/s);
@@ -113,6 +122,11 @@ describe('D61 components.css harden coverage', () => {
             'min-height',
             // 滚动条滑块最小尺寸（压过酒馆全局 ::-webkit-scrollbar）
             'min-width',
+            'position',
+            'inset',
+            'max-width',
+            'max-height',
+            'margin',
             // D70：压过酒馆 popup.css 的阴影与 overflow:visible，才能单层圆角裁切
             'box-shadow',
             'overflow',

@@ -12,8 +12,8 @@
  */
 
 /* ?v= 打破浏览器对 @import 子表的强缓存（改子 CSS 后须 bump） */
-@import url('./src/ui/common/tokens.css?v=20260924a');
-@import url('./src/ui/common/components.css?v=20260926e');
+@import url('./src/ui/common/tokens.css?v=20260926a');
+@import url('./src/ui/common/components.css?v=20260926f');
 @import url('./src/ui/panels/panels.css?v=20260925h');
 @import url('./src/ui/drawer/drawer.css?v=20260924a');
 @import url('./src/ui/workbench/workbench.css?v=20260926c');

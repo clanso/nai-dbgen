@@ -453,8 +453,9 @@
 :is(#nai-dbgen-root, .nd-root) .nd-toggle-row i {
     position: relative;
     flex: 0 0 35px;
-    width: 35px;
-    height: 19px;
+    box-sizing: border-box !important;
+    width: 35px !important;
+    height: 19px !important;
     border-radius: var(--nd-radius-pill);
     background: var(--nd-toggle-track);
     border: 1px solid var(--nd-line);
@@ -464,10 +465,11 @@
 :is(#nai-dbgen-root, .nd-root) .nd-toggle-row i::after {
     content: "";
     position: absolute;
+    box-sizing: border-box !important;
     top: 2px;
     left: 2px;
-    width: 13px;
-    height: 13px;
+    width: 13px !important;
+    height: 13px !important;
     border-radius: 50%;
     background: var(--nd-toggle-knob);
     transition: 0.2s;
@@ -569,6 +571,13 @@
     border: 1px solid var(--nd-line);
     border-radius: var(--nd-radius-md);
     background: var(--nd-accent-wash);
+    box-sizing: border-box;
+}
+
+:is(#nai-dbgen-root, .nd-root) .nd-details,
+:is(#nai-dbgen-root, .nd-root) .nd-details::details-content,
+:is(#nai-dbgen-root, .nd-root) .nd-details__body {
+    box-sizing: border-box;
 }
 
 :is(#nai-dbgen-root, .nd-root) .nd-details > summary {

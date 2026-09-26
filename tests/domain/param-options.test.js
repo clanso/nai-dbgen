@@ -38,6 +38,7 @@ describe('param-options catalog', () => {
         const ids = NAI_MODEL_OPTIONS.map((o) => o.value);
         assert.ok(ids.includes('nai-diffusion-4-5-full'));
         assert.ok(ids.includes('nai-diffusion-5-full'));
+        assert.ok(ids.includes('nai-diffusion-5-full-inpainting'));
         assert.equal(ids.some((id) => id.includes('diffusion-3')), false);
         assert.equal(ids.some((id) => id.includes('diffusion-2')), false);
         assert.ok(isKnownNaiModel('nai-diffusion-4-5-full'));
@@ -74,6 +75,7 @@ describe('param-options catalog', () => {
 
     it('model capabilities follow app behavior', () => {
         assert.equal(classifyNaiModel('nai-diffusion-5-full'), 'v5');
+        assert.equal(classifyNaiModel('nai-diffusion-5-full-inpainting'), 'v5');
         assert.equal(classifyNaiModel('nai-diffusion-4-5-full'), 'v45');
         assert.equal(supportsSmea('nai-diffusion-4-5-full'), false);
         assert.equal(supportsSmea('nai-diffusion-5-full'), false);
