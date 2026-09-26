@@ -112,5 +112,5 @@
 :is(#nai-dbgen-root, .nd-root) *,
 :is(#nai-dbgen-root, .nd-root) *::before,
 :is(#nai-dbgen-root, .nd-root) *::after {
-    box-sizing: inherit;
+    box-sizing: border-box;
 }
