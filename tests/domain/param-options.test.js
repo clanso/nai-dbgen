@@ -39,6 +39,8 @@ describe('param-options catalog', () => {
         assert.ok(ids.includes('nai-diffusion-4-5-full'));
         assert.ok(ids.includes('nai-diffusion-5-full'));
         assert.ok(ids.includes('nai-diffusion-5-full-inpainting'));
+        assert.equal(NAI_MODEL_OPTIONS[0].value, 'nai-diffusion-5-full-inpainting');
+        assert.equal(NAI_MODEL_OPTIONS[0].label, 'NAI Diffusion V5 Full Inpainting');
         assert.equal(ids.some((id) => id.includes('diffusion-3')), false);
         assert.equal(ids.some((id) => id.includes('diffusion-2')), false);
         assert.ok(isKnownNaiModel('nai-diffusion-4-5-full'));

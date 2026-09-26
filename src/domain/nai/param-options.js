@@ -26,11 +26,11 @@ import { domainError } from '../../infra/errors.js';
  * @type {readonly NamedOption[]}
  */
 export const NAI_MODEL_OPTIONS = Object.freeze([
-    Object.freeze({ value: 'nai-diffusion-5-full', label: 'NAI Diffusion V5 Full' }),
     Object.freeze({
         value: 'nai-diffusion-5-full-inpainting',
-        label: 'NAI 5 Full Inpainting',
+        label: 'NAI Diffusion V5 Full Inpainting',
     }),
+    Object.freeze({ value: 'nai-diffusion-5-full', label: 'NAI Diffusion V5 Full' }),
     Object.freeze({ value: 'nai-diffusion-4-5-full', label: 'NAI Diffusion V4.5 Full' }),
     Object.freeze({ value: 'nai-diffusion-4-5-curated', label: 'NAI Diffusion V4.5 Curated' }),
     Object.freeze({ value: 'nai-diffusion-4-full', label: 'NAI Diffusion V4 Full' }),
