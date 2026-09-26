@@ -705,6 +705,98 @@ describe('ui/workbench mountWorkbench', () => {
         assert.equal(camera.parentNode.hidden, false);
         ctx.handle.destroy();
     });
+
+    it('only shows checked tag entries when the filter is on', async () => {
+        const ctx = mount({
+            deps: {
+                tagRepo: {
+                    async listLibraries() {
+                        return {
+                            ok: true,
+                            value: [{ id: 'comp', name: '构图', kind: 'composition' }],
+                        };
+                    },
+                    async listEntries() {
+                        return {
+                            ok: true,
+                            value: [
+                                { id: 'e1', key: '饮食：吃西瓜', value: 'holding a melon slice', active: true },
+                                { id: 'e2', key: '饮食：吃苹果', value: 'holding an apple', active: true },
+                                { id: 'e3', key: '镜头：仰视', value: 'from below', active: true },
+                            ],
+                        };
+                    },
+                },
+            },
+        });
+        await new Promise((r) => setTimeout(r, 0));
+
+        /**
+         * @param {string} text
+         * @returns {any}
+         */
+        function rowByLabel(text) {
+            /** @type {any[]} */
+            const stack = [ctx.root];
+            while (stack.length) {
+                const node = stack.pop();
+                if (!node) continue;
+                if (node.textContent === text && node.parentNode) return node.parentNode;
+                if (Array.isArray(node.childNodes)) {
+                    for (const child of node.childNodes) stack.push(child);
+                }
+            }
+            return null;
+        }
+
+        /**
+         * @param {any} box
+         * @param {boolean} on
+         */
+        function setChecked(box, on) {
+            const input = (box.childNodes || []).find((node) => node.tagName === 'INPUT');
+            assert.ok(input);
+            input.checked = on;
+            for (const listener of input._listeners || []) {
+                if (listener.type === 'change') listener.fn();
+            }
+        }
+
+        /** @type {any[]} */
+        const expanders = [];
+        /** @type {any[]} */
+        const stack = [ctx.root];
+        while (stack.length) {
+            const node = stack.pop();
+            if (!node) continue;
+            if (node.tagName === 'BUTTON' && node.textContent === '展开') expanders.push(node);
+            if (Array.isArray(node.childNodes)) {
+                for (const child of node.childNodes) stack.push(child);
+            }
+        }
+        for (const button of expanders) {
+            for (const listener of button._listeners || []) {
+                if (listener.type === 'click') {
+                    listener.fn({ preventDefault() {}, stopPropagation() {} });
+                }
+            }
+        }
+
+        const melon = rowByLabel('吃西瓜');
+        const apple = rowByLabel('吃苹果');
+        const camera = rowByLabel('镜头');
+        assert.ok(melon);
+        setChecked(melon, true);
+        setChecked(rowByLabel('只看已勾选'), true);
+        assert.equal(melon.parentNode.hidden, false);
+        assert.equal(apple.parentNode.hidden, true);
+        assert.equal(camera.parentNode.hidden, true);
+
+        setChecked(rowByLabel('只看已勾选'), false);
+        assert.equal(apple.parentNode.hidden, false);
+        assert.equal(camera.parentNode.hidden, false);
+        ctx.handle.destroy();
+    });
 });
 
 /**

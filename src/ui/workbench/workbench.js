@@ -203,17 +203,29 @@ export function mountWorkbench(root, deps) {
     searchInput.setAttribute('aria-label', '搜索名称或正文');
     searchInput.autocomplete = 'off';
     searchWrap.appendChild(searchInput);
+    let onlyPicked = false;
+    const onlyPickedBox = createCheckbox({
+        label: '只看已勾选',
+        checked: false,
+        onChange: (on) => {
+            onlyPicked = on;
+            applyEntryFilter();
+        },
+    });
+    const filterRow = el('div', 'nd-wb-lib-tools');
+    filterRow.append(searchWrap, onlyPickedBox.el);
     const searchEmpty = el('p', 'nd-muted nd-wb-lib-empty');
     setText(searchEmpty, '没有匹配的条目');
     searchEmpty.hidden = true;
     const libList = el('div', 'nd-wb-lib-list');
-    libBox.append(libTitle, libHint, searchWrap, searchEmpty, libList);
+    libBox.append(libTitle, libHint, filterRow, searchEmpty, libList);
     /** @type {{ id: string, entryIds: string[] }[]} */
     const libGroups = [];
     /** @type {Map<string, boolean>} */
     const picked = new Map();
     /** @type {Array<{ destroy: () => void }>} */
     const libControls = [];
+    libControls.push(onlyPickedBox);
 
     /**
      * @param {ReturnType<typeof createCheckbox>} control
@@ -262,6 +274,7 @@ export function mountWorkbench(root, deps) {
     function setPicked(ids, on) {
         for (const id of ids) picked.set(id, on);
         syncGroupChecks();
+        if (onlyPicked) applyEntryFilter();
     }
 
     /**
@@ -340,6 +353,7 @@ export function mountWorkbench(root, deps) {
                 onChange: (on) => {
                     picked.set(id, on);
                     syncGroupChecks();
+                    if (onlyPicked) applyEntryFilter();
                 },
             });
             libControls.push(control);
@@ -507,45 +521,77 @@ export function mountWorkbench(root, deps) {
     }
 
     /**
-     * 搜索时展开命中的库和分类，藏起对不上的条目。清空后回到原先的展开状态。
+     * @param {string} haystack
+     * @param {string} q
+     * @param {boolean} libHit
+     * @param {boolean} titleHit
+     * @returns {boolean}
+     */
+    function textMatches(haystack, q, libHit, titleHit) {
+        if (!q) return true;
+        if (libHit || titleHit) return true;
+        return haystack.includes(q);
+    }
+
+    /**
+     * @param {string} id
+     * @param {string} haystack
+     * @param {string} q
+     * @param {boolean} libHit
+     * @param {boolean} titleHit
+     * @returns {boolean}
+     */
+    function rowShown(id, haystack, q, libHit, titleHit) {
+        if (onlyPicked && picked.get(id) !== true) return false;
+        return textMatches(haystack, q, libHit, titleHit);
+    }
+
+    /**
+     * 搜索或「只看已勾选」时展开命中的库和分类。两个条件都空时回到原先的展开状态。
      */
     function applyEntryFilter() {
         const q = String(searchInput.value || '').trim().toLowerCase();
-        let anyVisible = !q;
+        const filtering = Boolean(q) || onlyPicked;
+        let anyVisible = !filtering;
         for (const group of libGroups) {
             const libHit = Boolean(q) && group.haystack.includes(q);
-            let groupVisible = libHit;
+            let groupVisible = false;
             for (const row of group.looseRows) {
-                const hit = !q || libHit || row.haystack.includes(q);
+                const hit = rowShown(row.id, row.haystack, q, libHit, false);
                 (row.el || row.control.el).hidden = !hit;
                 if (hit) groupVisible = true;
             }
             for (const cat of group.categories) {
                 const titleHit = Boolean(q) && cat.title.toLowerCase().includes(q);
-                const wantPaint = Boolean(q) && (libHit || titleHit || cat.entries.some((entry) => (
-                    entryHaystack(entry, cat.kind).includes(q)
-                )));
+                const wantPaint = filtering && cat.entries.some((entry) => rowShown(
+                    String(entry.id),
+                    entryHaystack(entry, cat.kind),
+                    q,
+                    libHit,
+                    titleHit,
+                ));
                 if (wantPaint) paintCategory(cat);
-                let catVisible = !q;
+                let catVisible = !filtering;
                 if (cat.painted) {
                     catVisible = false;
                     for (const row of cat.rows) {
-                        const hit = !q || libHit || titleHit || row.haystack.includes(q);
+                        const hit = rowShown(row.id, row.haystack, q, libHit, titleHit);
                         (row.el || row.control.el).hidden = !hit;
                         if (hit) catVisible = true;
                     }
                 }
-                if (cat.head) cat.head.hidden = Boolean(q) && !catVisible;
-                if (q) setSectionOpen(cat.body, cat.toggle, catVisible);
+                if (cat.head) cat.head.hidden = filtering && !catVisible;
+                if (filtering) setSectionOpen(cat.body, cat.toggle, catVisible);
                 else setSectionOpen(cat.body, cat.toggle, cat.userOpen);
                 if (catVisible) groupVisible = true;
             }
-            group.block.hidden = Boolean(q) && !groupVisible;
-            if (q) setSectionOpen(group.body, group.toggle, groupVisible);
+            group.block.hidden = filtering && !groupVisible;
+            if (filtering) setSectionOpen(group.body, group.toggle, groupVisible);
             else setSectionOpen(group.body, group.toggle, group.userOpen);
             if (groupVisible) anyVisible = true;
         }
-        searchEmpty.hidden = !q || anyVisible || libGroups.length === 0;
+        setText(searchEmpty, onlyPicked && !q ? '没有已勾选的条目' : '没有匹配的条目');
+        searchEmpty.hidden = !filtering || anyVisible || libGroups.length === 0;
     }
     searchInput.addEventListener('input', applyEntryFilter);
 

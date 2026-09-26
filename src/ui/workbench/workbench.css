@@ -48,6 +48,21 @@
     margin: 0.4em 0;
 }
 
+:is(#nai-dbgen-root, .nd-root) .nd-wb-lib-tools {
+    display: flex;
+    align-items: center;
+    gap: 0.75em;
+}
+
+:is(#nai-dbgen-root, .nd-root) .nd-wb-lib-tools .nd-search-field {
+    flex: 1 1 auto;
+    min-width: 0;
+}
+
+:is(#nai-dbgen-root, .nd-root) .nd-wb-lib-tools .nd-checkbox-row {
+    flex: 0 0 auto;
+}
+
 :is(#nai-dbgen-root, .nd-root) .nd-wb-lib-list {
     display: flex;
     flex-direction: column;
