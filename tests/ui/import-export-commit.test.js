@@ -142,7 +142,7 @@ describe('ui/common/import-export commitImport (D44)', () => {
         handle.destroy();
     });
 
-    it('overwrite without confirmOverwrite callback refuses (no window.confirm)', async () => {
+    it('overwrite without confirmOverwrite callback refuses only real id collisions', async () => {
         const root = document.createElement('div');
         document.body.appendChild(root);
         let called = 0;
@@ -166,9 +166,27 @@ describe('ui/common/import-export commitImport (D44)', () => {
         strategySelect.value = 'overwrite';
         await click(commitBtn);
 
-        assert.equal(called, 0);
+        assert.equal(called, 1);
         assert.equal(winConfirm, 0);
         handle.destroy();
+
+        const rootHit = document.createElement('div');
+        document.body.appendChild(rootHit);
+        let calledHit = 0;
+        const handleHit = mountImportExport(rootHit, {
+            importJson: async () => {
+                calledHit += 1;
+                return {};
+            },
+            exportJson: async () => ({ items: [{ id: 'x', name: '已有' }] }),
+        });
+        const hit = findControls(rootHit);
+        hit.paste.value = JSON.stringify({ items: [{ id: 'x' }, { id: 'y' }] });
+        await click(hit.parseBtn);
+        hit.strategySelect.value = 'overwrite';
+        await click(hit.commitBtn);
+        assert.equal(calledHit, 0);
+        handleHit.destroy();
     });
 
     it('confirmOverwrite callback false skips; no window.confirm', async () => {
@@ -187,7 +205,7 @@ describe('ui/common/import-export commitImport (D44)', () => {
                 called += 1;
                 return {};
             },
-            exportJson: async () => ({}),
+            exportJson: async () => ({ items: [{ id: 'a', name: '已有' }] }),
             confirmOverwrite: async (count) => {
                 cbCount = count;
                 return false;
@@ -200,7 +218,7 @@ describe('ui/common/import-export commitImport (D44)', () => {
         strategySelect.value = 'overwrite';
         await click(commitBtn);
 
-        assert.equal(cbCount, 2);
+        assert.equal(cbCount, 1);
         assert.equal(winConfirm, 0);
         assert.equal(called, 0);
 

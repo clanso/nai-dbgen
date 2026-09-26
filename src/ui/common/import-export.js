@@ -362,6 +362,21 @@ function downloadJson(data, filename) {
  * @param {((count: number) => boolean|Promise<boolean>)|null|undefined} custom
  * @returns {Promise<boolean>}
  */
+/**
+ * 预览叶子上的 id。覆盖确认只数这些 id 里库中已经有的。
+ * @param {unknown} data
+ * @returns {Set<string>}
+ */
+export function collectRecordIds(data) {
+    /** @type {Set<string>} */
+    const ids = new Set();
+    for (const row of extractPreviewRows(data)) {
+        if (!row || row.id == null || row.id === '') continue;
+        ids.add(String(row.id));
+    }
+    return ids;
+}
+
 async function resolveOverwriteConfirm(count, custom) {
     if (typeof custom === 'function') {
         return Boolean(await custom(count));
@@ -708,12 +723,25 @@ export function mountImportExport(root, deps) {
 
         const mode = strategySelect.value || 'overwrite';
         if (mode === 'overwrite') {
-            const count = checked.filter(Boolean).length;
-            const ok = await resolveOverwriteConfirm(count, confirmOverwriteCb);
-            if (!ok) {
-                statusEl.textContent = t('import.overwriteCancelled');
-                setError(t('import.overwriteCancelled'));
-                return;
+            const checkedRows = previewRows.filter((row, i) => checked[i]).map((row) => row.item);
+            const incomingIds = collectRecordIds(checkedRows);
+            let overlap = incomingIds.size;
+            if (exportJson) {
+                try {
+                    const current = await exportJson();
+                    const existing = collectRecordIds(current);
+                    overlap = [...incomingIds].filter((id) => existing.has(id)).length;
+                } catch {
+                    overlap = checked.filter(Boolean).length;
+                }
+            }
+            if (overlap > 0) {
+                const ok = await resolveOverwriteConfirm(overlap, confirmOverwriteCb);
+                if (!ok) {
+                    statusEl.textContent = t('import.overwriteCancelled');
+                    setError(t('import.overwriteCancelled'));
+                    return;
+                }
             }
         }
 

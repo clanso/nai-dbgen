@@ -169,57 +169,96 @@ function ensureChrome(rootEl) {
  * @param {(event: Event) => void} onThumbClick
  * @returns {HTMLImageElement|null}
  */
+/** 同一目标高度最多写两次。再写就会和宿主的高度脚本对顶，页面线程不再回来。 */
+const MAX_FRAME_FIT_WRITES = 2;
+
+/**
+ * @param {HTMLElement} frame
+ * @returns {number}
+ */
+function currentFrameHeight(frame) {
+    const declared = Number.parseFloat(String(frame.style?.height || ''));
+    if (Number.isFinite(declared) && declared > 0) {
+        return Math.round(declared);
+    }
+    const box = typeof frame.getBoundingClientRect === 'function'
+        ? frame.getBoundingClientRect().height
+        : 0;
+    return Math.round(Number(box) || 0);
+}
+
 /**
  * 按按钮这一块的实际高度收 iframe。
  * 不能用 body.scrollHeight：第一次渲染时正文被撑满整框，量出来的就是空行本身。
+ * 高度已经对上就立刻停，避免和宿主互相改高度。
  * @param {Element} rootEl
  */
 function fitHostFrameNow(rootEl) {
     const doc = rootEl?.ownerDocument;
     const frame = doc?.defaultView?.frameElement;
-    if (!frame || !doc) {
+    if (!frame || !doc || rootEl.__ndFitting) {
         return;
     }
-    const html = doc.documentElement;
-    const body = doc.body;
-    if (html) {
-        html.style.height = 'auto';
-        html.style.minHeight = '0';
-        html.style.background = 'transparent';
-    }
-    if (body) {
-        body.style.margin = '0';
-        body.style.height = 'auto';
-        body.style.minHeight = '0';
-        body.style.background = 'transparent';
-        body.style.overflow = 'hidden';
-        void body.offsetHeight;
-    }
-    const top = rootEl.offsetTop || 0;
-    const box = typeof rootEl.getBoundingClientRect === 'function'
-        ? rootEl.getBoundingClientRect().height
-        : rootEl.scrollHeight;
-    const height = Math.ceil(top + (Number(box) || 0));
-    if (!height) {
-        return;
-    }
-    frame.style.setProperty('height', `${height}px`, 'important');
-    frame.style.setProperty('min-height', '0', 'important');
-    frame.style.setProperty('border', '0', 'important');
-    frame.style.setProperty('background', 'transparent', 'important');
-    frame.style.setProperty('display', 'block', 'important');
-    const parent = frame.parentElement;
-    const parentClass = String(parent?.className || '');
-    if (parent && !/mes_text|mes_block/.test(parentClass)) {
-        parent.style.setProperty('min-height', '0', 'important');
-        parent.style.setProperty('padding', '0', 'important');
-        parent.style.setProperty('border', '0', 'important');
-        parent.style.setProperty('background', 'transparent', 'important');
+    rootEl.__ndFitting = true;
+    try {
+        const html = doc.documentElement;
+        const body = doc.body;
+        if (html) {
+            html.style.height = 'auto';
+            html.style.minHeight = '0';
+            html.style.background = 'transparent';
+        }
+        if (body) {
+            body.style.margin = '0';
+            body.style.height = 'auto';
+            body.style.minHeight = '0';
+            body.style.background = 'transparent';
+            body.style.overflow = 'hidden';
+            void body.offsetHeight;
+        }
+        const top = rootEl.offsetTop || 0;
+        const box = typeof rootEl.getBoundingClientRect === 'function'
+            ? rootEl.getBoundingClientRect().height
+            : rootEl.scrollHeight;
+        const height = Math.ceil(top + (Number(box) || 0));
+        if (!height) {
+            return;
+        }
+        if (rootEl.__ndFitTarget !== height) {
+            rootEl.__ndFitTarget = height;
+            rootEl.__ndFitWrites = 0;
+        }
+        if (Math.abs(currentFrameHeight(frame) - height) <= 1) {
+            return;
+        }
+        const writes = Number(rootEl.__ndFitWrites) || 0;
+        if (writes >= MAX_FRAME_FIT_WRITES) {
+            return;
+        }
+        rootEl.__ndFitWrites = writes + 1;
+        frame.style.height = `${height}px`;
+        frame.style.minHeight = '0';
+        if (!frame.__ndFrameChrome) {
+            frame.__ndFrameChrome = true;
+            frame.style.setProperty('border', '0', 'important');
+            frame.style.setProperty('background', 'transparent', 'important');
+            frame.style.setProperty('display', 'block', 'important');
+            const parent = frame.parentElement;
+            const parentClass = String(parent?.className || '');
+            if (parent && !/mes_text|mes_block/.test(parentClass)) {
+                parent.style.setProperty('min-height', '0', 'important');
+                parent.style.setProperty('padding', '0', 'important');
+                parent.style.setProperty('border', '0', 'important');
+                parent.style.setProperty('background', 'transparent', 'important');
+            }
+        }
+    } finally {
+        rootEl.__ndFitting = false;
     }
 }
 
 /**
- * 宿主会在我们量完之后再把 iframe 撑回旧高度。排版稳定后再收两次。
+ * 宿主会在我们量完之后再改一次高度。只补一次，高度对上就不再写。
  * @param {Element} rootEl
  */
 function fitHostFrame(rootEl) {
@@ -239,12 +278,8 @@ function fitHostFrame(rootEl) {
     }
     /** @type {{ raf?: number, timers: number[] }} */
     const next = { timers: [] };
-    if (typeof win.requestAnimationFrame === 'function') {
-        next.raf = win.requestAnimationFrame(() => fitHostFrameNow(rootEl));
-    }
     if (typeof win.setTimeout === 'function') {
         next.timers.push(win.setTimeout(() => fitHostFrameNow(rootEl), 80));
-        next.timers.push(win.setTimeout(() => fitHostFrameNow(rootEl), 400));
     }
     rootEl.__ndFitTimers = next;
 }
@@ -644,6 +679,9 @@ export function mountSlotWidget(rootEl, messageId, deps) {
     }
 
     btn.addEventListener('click', onBtnClick);
+    if (typeof btn.removeAttribute === 'function') {
+        btn.removeAttribute('onclick');
+    }
 
     /** @type {Array<() => void>} */
     const busUnsubs = [];
