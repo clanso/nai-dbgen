@@ -54,6 +54,13 @@ export function mountTriggerPanel(root, deps) {
         hint: '写完 slot 后自动出图；已生过的不会重出',
         checked: current.autoRenderSlots === true,
     });
+    const floorImageScale = createNumberField({
+        label: '楼层图片显示比例（%）',
+        value: current.floorImageScale ?? 100,
+        min: 20,
+        max: 100,
+        step: 5,
+    });
     const naiParallel = createToggle({
         label: '并行出图',
         hint: '关闭时一张完成再请求下一张',
@@ -72,7 +79,7 @@ export function mountTriggerPanel(root, deps) {
 
     const basic = createFieldGroup({
         title: '运行开关',
-        children: [contextN.el, autoWrite.el, autoRender.el, naiParallel.el, caseSensitive.el, wholeWords.el],
+        children: [contextN.el, floorImageScale.el, autoWrite.el, autoRender.el, naiParallel.el, caseSensitive.el, wholeWords.el],
     });
     const naiGroup = createDetails({
         summary: '出图参数',
@@ -88,6 +95,7 @@ export function mountTriggerPanel(root, deps) {
             const notices = paramsForm.consumeNotices();
             const patch = pickAllowedSettingsPatch({
                 contextWindowSize: contextN.getValue(),
+                floorImageScale: floorImageScale.getValue(),
                 autoWriteSlots: autoWrite.getValue(),
                 autoRenderSlots: autoRender.getValue(),
                 naiParallel: naiParallel.getValue(),
@@ -115,6 +123,7 @@ export function mountTriggerPanel(root, deps) {
             destroyed = true;
             err.destroy();
             contextN.destroy();
+            floorImageScale.destroy();
             autoWrite.destroy();
             autoRender.destroy();
             naiParallel.destroy();

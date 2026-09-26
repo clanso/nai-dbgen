@@ -150,8 +150,8 @@ describe('preview smoke · same assembly as demo page', () => {
         assert.ok(r.value.llmCallCount >= 1);
 
         const kinds = llm._ctrl.getCalls().slice(before).map((c) => c.kind);
-        assert.ok(kinds.includes('single-recall') || kinds.includes('recall'));
-        assert.ok(kinds.includes('single-prompt'));
+        assert.ok(kinds.includes('recall'));
+        assert.ok(kinds.includes('prompt') || kinds.includes('workbench'));
     });
 
     it('工作台写提示词 + 出图', async () => {

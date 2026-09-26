@@ -281,7 +281,9 @@ export function assembleWorkbenchNaiParams(base, form) {
  * 组装 writePrompt 入参。本函数绝不碰 imageGen / generateImage。
  * @param {object} opts
  * @param {string} opts.naturalLanguage
- * @param {string[]} opts.libraryIds
+ * @param {string[]} [opts.libraryIds]
+ * @param {string[]} [opts.entryIds] 本次勾选的条目。传入后只发送这些条目
+ * @param {'entries'|'floor'} [opts.mode] entries=勾选条目；floor=楼内召回后交给生图预设
  * @param {AbortSignal} [opts.signal]
  * @param {string} [opts.traceId]
  */
@@ -291,6 +293,10 @@ export function buildWritePromptInput(opts) {
         libraryIds: Array.isArray(opts?.libraryIds)
             ? opts.libraryIds.map((id) => String(id))
             : [],
+        entryIds: Array.isArray(opts?.entryIds)
+            ? opts.entryIds.map((id) => String(id))
+            : undefined,
+        mode: opts?.mode === 'floor' ? 'floor' : 'entries',
         signal: opts?.signal,
         traceId: opts?.traceId,
     };

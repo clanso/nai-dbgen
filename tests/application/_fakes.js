@@ -529,7 +529,7 @@ export function buildPipeline(overrides = {}) {
     });
     const workbench = createWorkbenchService({
         llm, imageGen, characterRepo, tagRepo, presetRepo, llmConfigRepo,
-        tagRecall, loadSettings, runHostMacros,
+        tagRecall, host, viewpointBlocks, slotRepo, loadSettings, runHostMacros,
     });
     const autoTrigger = createAutoTriggerService({
         host, generateSlots, renderSlot, slotRepo, loadSettings, bus,

@@ -29,7 +29,7 @@ import { openModal } from '../ui/common/modal.js';
 const log = createLogger('bootstrap/lifecycle');
 
 /** @type {string} */
-export const PLUGIN_VERSION = '0.1.0';
+export const PLUGIN_VERSION = '0.2.0';
 
 /** @type {string} */
 export const PUBLIC_API_NAME = 'NaiDbGen';
@@ -251,7 +251,8 @@ function exposePublicApi(container) {
             return c.services.imageGen.generate(req);
         },
         /**
-         * 4.16 对外单图提示词。只返回 caption，不出图、不写 slot。
+         * 对外单图提示词：当前楼的召回预设和生图预设，末尾带上拍摄要求，只要这一帧。
+         * 只返回 caption，不出图、不写 slot。
          * @param {{ description: string, messageId?: number, signal?: AbortSignal }} req
          */
         async generateSinglePrompt(req) {
@@ -262,7 +263,12 @@ function exposePublicApi(container) {
             if (!req || typeof req !== 'object') {
                 throw new Error('invalid argument: req');
             }
-            return c.useCases.singlePrompt.execute(req);
+            return c.services.workbench.writePrompt({
+                mode: 'floor',
+                naturalLanguage: req.description,
+                messageId: req.messageId,
+                signal: req.signal,
+            });
         },
         async getActiveArtist() {
             const c = liveContainer();
@@ -871,6 +877,10 @@ async function mountOneSlot(container, slotEl, messageId, slotId) {
                 const r = await container.repos.image.getUrl(imageRef);
                 return r?.ok ? (r.value ?? null) : null;
             },
+            getFloorImageScale: () => {
+                const n = Number(container.loadSettings()?.floorImageScale);
+                return Number.isInteger(n) ? n : 100;
+            },
         });
     } catch {
         slotRoot.removeAttribute?.('data-nai-mounted');
@@ -1002,6 +1012,24 @@ export async function activate(opts = {}) {
         });
         slotObserver.start();
         runtime.slotObserver = slotObserver;
+        if (typeof container.settingsStore.onChange === 'function') {
+            const unsubScale = container.settingsStore.onChange(() => {
+                for (const handle of runtime.slotWidgets.values()) {
+                    try {
+                        handle.refresh?.();
+                    } catch {
+                        // ignore
+                    }
+                }
+            });
+            rollback.push(() => {
+                try {
+                    unsubScale();
+                } catch {
+                    // ignore
+                }
+            });
+        }
         const onSlotFrameMessage = (event) => {
             const data = event?.data;
             if (!data || data.source !== 'nai-dbgen' || data.action !== 'generate') {

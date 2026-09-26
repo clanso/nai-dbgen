@@ -102,7 +102,7 @@ describe('preset-panel four kinds', () => {
         return { root, api };
     }
 
-    it('renders four kind segmented tabs', async () => {
+    it('renders imagegen and recall tabs', async () => {
         const { root, api } = mount();
         await new Promise((r) => setTimeout(r, 0));
         const tabs = findAllByClass(root, 'nd-segment');
@@ -110,7 +110,7 @@ describe('preset-panel four kinds', () => {
         const labels = [...(tabs[0].childNodes || [])]
             .map((n) => String(n.textContent || '').trim())
             .filter(Boolean);
-        assert.deepEqual(labels, ['生图预设', '召回预设', '单图生图预设', '单图召回预设']);
+        assert.deepEqual(labels, ['生图预设', '召回预设']);
         api.destroy();
     });
 

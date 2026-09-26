@@ -47,6 +47,7 @@ import { requireArg } from '../infra/validate.js';
  * @property {(settings: import('../domain/model/plugin-settings.js').PluginSettings) => void} save
  * @property {(key: string, fallback?: any) => any} get
  * @property {(key: string, value: any) => void} set
+ * @property {(fn: (settings: import('../domain/model/plugin-settings.js').PluginSettings) => void) => (() => void)} [onChange]
  */
 
 /**

@@ -1394,6 +1394,15 @@
     font-size: var(--nd-fs-xs);
 }
 
+:is(#nai-dbgen-root, .nd-root) .nd-import-group td {
+    background: var(--nd-surface-2);
+    font-weight: 650;
+}
+
+:is(#nai-dbgen-root, .nd-root) .nd-import-child td:nth-child(2) {
+    padding-left: 28px;
+}
+
 :is(#nai-dbgen-root, .nd-root) .nd-table-scroll th,
 :is(#nai-dbgen-root, .nd-root) .nd-table-scroll td {
     padding: 10px;
@@ -1912,28 +1921,47 @@ dialog.nd-popup.nd-root > .nd-native-dialog__close {
     overflow: hidden;
 }
 
-/* 图片查看器：外框 dialog.nd-popup（lg）唯一画皮；内图 md + 内边距，不贴角叠双层 */
-.nd-slot-viewer {
+/* 看图：dialog 进顶层，盖住工作台；里面只有这一张图 */
+dialog.nd-image-only {
+    position: fixed !important;
+    inset: 0 !important;
+    width: 100vw !important;
+    height: 100vh !important;
+    max-width: none !important;
+    max-height: none !important;
     display: flex;
-    justify-content: center;
     align-items: center;
-    width: 100%;
-    max-width: 100%;
-    padding: 12px;
-    box-sizing: border-box;
+    justify-content: center;
+    margin: 0 !important;
+    padding: 0 !important;
+    border: 0 !important;
+    border-radius: 0 !important;
+    background: rgba(0, 0, 0, 0.88) !important;
+    color: inherit;
+    cursor: zoom-out;
+    overflow: hidden;
+    box-shadow: none !important;
+}
+
+dialog.nd-image-only::backdrop {
     background: transparent;
 }
 
+.nd-image-only__img,
 .nd-slot-viewer__img {
     display: block;
-    max-width: 100%;
-    max-height: min(80vh, 900px);
     width: auto;
     height: auto;
-    object-fit: contain;
+    max-width: 100vw;
+    max-height: 100vh;
     margin: 0;
-    border-radius: var(--nd-radius-md);
+    padding: 0;
+    border: 0;
+    border-radius: 0;
+    box-shadow: none;
     background: transparent;
+    object-fit: contain;
+    cursor: zoom-out;
 }
 
 /* —— 4.13 出图参数表单（运行配置 / 工作台共用） —— */

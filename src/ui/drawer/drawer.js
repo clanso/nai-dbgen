@@ -109,6 +109,17 @@ export function mountDrawer(root, deps) {
         checked: current.autoRenderSlots === true,
         onChange: (v) => patch({ autoRenderSlots: v }),
     });
+    const floorImageScale = createNumberField({
+        label: '楼层图片显示比例（%）',
+        value: current.floorImageScale ?? 100,
+        min: 20,
+        max: 100,
+        step: 5,
+        onChange: (v) => {
+            if (!Number.isInteger(v) || v < 20 || v > 100) return;
+            patch({ floorImageScale: v });
+        },
+    });
     const naiParallel = createToggle({
         label: '并行出图',
         checked: current.naiParallel === true,
@@ -284,7 +295,7 @@ export function mountDrawer(root, deps) {
 
     const group = createFieldGroup({
         title: '高频开关',
-        children: [contextN.el, autoWrite.el, autoRender.el, naiParallel.el],
+        children: [contextN.el, floorImageScale.el, autoWrite.el, autoRender.el, naiParallel.el],
     });
 
     shell.append(title, group.el, pickers, openBtn);
@@ -366,6 +377,7 @@ export function mountDrawer(root, deps) {
             cleanups.length = 0;
             for (const h of pickerHandles) h.destroy();
             contextN.destroy();
+            floorImageScale.destroy();
             autoWrite.destroy();
             autoRender.destroy();
             naiParallel.destroy();

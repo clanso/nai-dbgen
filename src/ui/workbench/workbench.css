@@ -46,6 +46,34 @@
     flex-direction: column;
     gap: 0.35em;
     margin: 0.4em 0;
+    max-height: 420px;
+    overflow: auto;
+}
+
+:is(#nai-dbgen-root, .nd-root) .nd-wb-lib {
+    padding: 0.35em 0.5em;
+    border: 1px solid var(--nd-line);
+    border-radius: var(--nd-radius-sm);
+}
+
+:is(#nai-dbgen-root, .nd-root) .nd-wb-lib__head,
+:is(#nai-dbgen-root, .nd-root) .nd-wb-cat__head {
+    display: flex;
+    align-items: center;
+    gap: 0.45em;
+}
+
+:is(#nai-dbgen-root, .nd-root) .nd-wb-lib__body,
+:is(#nai-dbgen-root, .nd-root) .nd-wb-cat__body {
+    display: flex;
+    flex-direction: column;
+    gap: 0.15em;
+    margin-left: 1.2em;
+}
+
+:is(#nai-dbgen-root, .nd-root) .nd-wb-lib__body[hidden],
+:is(#nai-dbgen-root, .nd-root) .nd-wb-cat__body[hidden] {
+    display: none;
 }
 
 :is(#nai-dbgen-root, .nd-root) .nd-wb-unmatched {
@@ -148,6 +176,7 @@
     object-fit: contain;
     border-radius: var(--nd-radius-xs);
     background: var(--nd-surface-2);
+    cursor: zoom-in;
 }
 
 :is(#nai-dbgen-root, .nd-root) .nd-workbench .nd-button:disabled {

@@ -197,14 +197,14 @@ describe('assets/seed envelopes', () => {
     });
 });
 describe('installSeedAssets', () => {
-    it('首次安装导入四套预设与默认 API 并自动选中', async () => {
+    it('首次安装导入生图/召回预设与默认 API 并自动选中', async () => {
         const ctx = makeDeps();
         const r1 = await installSeedAssets(ctx.deps);
         assert.equal(r1.ok, true, r1.errors.join('; '));
         assert.ok(r1.imported.includes('seed-preset-imagegen-v1'));
         assert.ok(r1.imported.includes('seed-preset-recall-v1'));
-        assert.ok(r1.imported.includes('seed-preset-single-recall-v1'));
-        assert.ok(r1.imported.includes('seed-preset-single-imagegen-v1'));
+        assert.equal(r1.imported.includes('seed-preset-single-recall-v1'), false);
+        assert.equal(r1.imported.includes('seed-preset-single-imagegen-v1'), false);
         assert.ok(r1.imported.includes(SEED_LLM_DEFAULT_ID));
         assert.ok(r1.imported.includes(SEED_NAI_DEFAULT_ID));
 
@@ -220,8 +220,8 @@ describe('installSeedAssets', () => {
         assert.equal(nai.value.baseUrl, 'https://image.novelai.net');
         assert.equal(ctx.settings.activeImagegenPresetId, 'seed-preset-imagegen-v1');
         assert.equal(ctx.settings.activeRecallPresetId, 'seed-preset-recall-v1');
-        assert.equal(ctx.settings.activeSingleRecallPresetId, 'seed-preset-single-recall-v1');
-        assert.equal(ctx.settings.activeSingleImagegenPresetId, 'seed-preset-single-imagegen-v1');
+        assert.equal(ctx.settings.activeSingleRecallPresetId, null);
+        assert.equal(ctx.settings.activeSingleImagegenPresetId, null);
         assert.equal(ctx.settings.recallLlmConfigId, SEED_LLM_DEFAULT_ID);
         assert.equal(ctx.settings.promptGenLlmConfigId, SEED_LLM_DEFAULT_ID);
         assert.equal(ctx.settings.activeNaiConfigId, SEED_NAI_DEFAULT_ID);
@@ -305,7 +305,7 @@ describe('installSeedAssets', () => {
         assert.ok(r2.skipped.includes('seed-preset-imagegen-v1'));
         assert.ok(r2.skipped.includes('seed-preset-recall-v1'));
         const list = await ctx.deps.repos.preset.list();
-        assert.equal(list.value.length, 4);
+        assert.equal(list.value.length, 2);
     });
 
     it('用户改过种子预设 → 再安装修改仍在（不覆盖）', async () => {

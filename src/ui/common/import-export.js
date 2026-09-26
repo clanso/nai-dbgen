@@ -37,6 +37,10 @@ export function extractPreviewRows(data) {
     if (typeof data !== 'object') return [];
 
     const obj = /** @type {Record<string, unknown>} */ (data);
+    const grouped = extractGroupedLeaves(obj);
+    if (grouped) {
+        return grouped;
+    }
     for (const key of FLAT_LEAF_KEYS) {
         if (Array.isArray(obj[key])) {
             return /** @type {object[]} */ (obj[key]).filter((item) => item && typeof item === 'object');
@@ -88,6 +92,76 @@ export function extractPreviewRows(data) {
     }
 
     return [obj];
+}
+
+/**
+ * 同时有父库和条目时，按库/组挂上名称，避免预览只剩一条平铺列表。
+ * @param {Record<string, unknown>} obj
+ * @returns {object[]|null}
+ */
+function extractGroupedLeaves(obj) {
+    if (Array.isArray(obj.libraries) && Array.isArray(obj.entries)) {
+        /** @type {Map<string, { name: string, kind: string }>} */
+        const libs = new Map();
+        for (const lib of obj.libraries) {
+            if (!lib || typeof lib !== 'object') continue;
+            const row = /** @type {Record<string, unknown>} */ (lib);
+            if (row.id == null) continue;
+            libs.set(String(row.id), {
+                name: row.name != null ? String(row.name) : String(row.id),
+                kind: row.kind != null ? String(row.kind) : '',
+            });
+        }
+        return obj.entries.filter((item) => item && typeof item === 'object').map((entry) => {
+            const row = /** @type {Record<string, unknown>} */ (entry);
+            const lib = libs.get(row.libraryId != null ? String(row.libraryId) : '');
+            return {
+                ...row,
+                _libraryName: lib?.name || '未归库',
+                _libraryKind: lib?.kind || '',
+            };
+        });
+    }
+    if (Array.isArray(obj.groups) && Array.isArray(obj.characters)) {
+        /** @type {Map<string, string>} */
+        const groups = new Map();
+        for (const group of obj.groups) {
+            if (!group || typeof group !== 'object') continue;
+            const row = /** @type {Record<string, unknown>} */ (group);
+            if (row.id == null) continue;
+            groups.set(String(row.id), row.name != null ? String(row.name) : String(row.id));
+        }
+        return obj.characters.filter((item) => item && typeof item === 'object').map((ch) => {
+            const row = /** @type {Record<string, unknown>} */ (ch);
+            const name = groups.get(row.groupId != null ? String(row.groupId) : '');
+            return {
+                ...row,
+                _groupName: name || '未分组',
+            };
+        });
+    }
+    return null;
+}
+
+/**
+ * @param {object} item
+ * @returns {string}
+ */
+function previewGroupTitle(item) {
+    if (item._libraryName != null) {
+        const kind = item._libraryKind === 'feature'
+            ? '特征库'
+            : item._libraryKind === 'constant'
+                ? '常驻库'
+                : item._libraryKind === 'composition'
+                    ? '构图库'
+                    : '';
+        return kind ? `${item._libraryName} · ${kind}` : String(item._libraryName);
+    }
+    if (item._groupName != null) {
+        return String(item._groupName);
+    }
+    return '';
 }
 
 /**
@@ -373,7 +447,7 @@ export function mountImportExport(root, deps) {
             if (!exportJson) return;
             try {
                 const data = await exportJson();
-                downloadJson(data ?? {}, `nai-dbgen-export-${Date.now()}.json`);
+                showPreview(data ?? {}, '当前库');
             } catch (err) {
                 setError(err instanceof Error ? err.message : String(err));
             }
@@ -415,6 +489,13 @@ export function mountImportExport(root, deps) {
     }
     strategyLabel.append(strategyTitle, strategySelect);
 
+    const exportSelectedBtn = createButton({
+        label: t('import.exportSelected'),
+        variant: 'ghost',
+        onClick: () => {
+            exportChecked();
+        },
+    });
     const commitBtn = createButton({
         label: t('import.commit'),
         variant: 'primary',
@@ -427,7 +508,7 @@ export function mountImportExport(root, deps) {
     statusEl.className = 'nd-import-status';
     statusEl.setAttribute('aria-live', 'polite');
 
-    toolbar.append(toolbarCopy, strategyLabel, commitBtn, statusEl);
+    toolbar.append(toolbarCopy, strategyLabel, exportSelectedBtn, commitBtn, statusEl);
 
     const tableWrap = document.createElement('div');
     tableWrap.className = 'nd-table-scroll';
@@ -485,30 +566,66 @@ export function mountImportExport(root, deps) {
             setError('');
         }
 
-        previewRows.forEach((row, index) => {
-            const tr = document.createElement('tr');
-            tr.dataset.index = String(index);
+        /** @type {Map<string, { item: object, checked: boolean, check: HTMLInputElement }[]>} */
+        const groups = new Map();
+        for (const row of previewRows) {
+            const title = previewGroupTitle(row.item);
+            if (!groups.has(title)) groups.set(title, []);
+            groups.get(title).push(/** @type {any} */ (row));
+        }
+        const namedGroups = [...groups.keys()].some((title) => title !== '');
+        if (!namedGroups) {
+            groups.clear();
+            groups.set('', previewRows.map((row) => /** @type {any} */ (row)));
+        }
 
-            const tdCheck = document.createElement('td');
-            const check = document.createElement('input');
-            check.type = 'checkbox';
-            check.checked = true;
-            check.addEventListener('change', () => {
-                row.checked = check.checked;
-            });
-            tdCheck.appendChild(check);
-
-            const meta = rowMeta(row.item);
-            const tdName = document.createElement('td');
-            tdName.textContent = meta.name;
-            const tdId = document.createElement('td');
-            tdId.textContent = meta.id;
-            const tdKind = document.createElement('td');
-            tdKind.textContent = meta.kind;
-
-            tr.append(tdCheck, tdName, tdId, tdKind);
-            tbody.appendChild(tr);
-        });
+        for (const [title, members] of groups) {
+            if (title) {
+                const head = document.createElement('tr');
+                head.className = 'nd-import-group';
+                const tdCheck = document.createElement('td');
+                const groupCheck = document.createElement('input');
+                groupCheck.type = 'checkbox';
+                groupCheck.checked = true;
+                groupCheck.addEventListener('change', () => {
+                    for (const member of members) {
+                        member.checked = groupCheck.checked;
+                        if (member.check) member.check.checked = groupCheck.checked;
+                    }
+                });
+                tdCheck.appendChild(groupCheck);
+                const tdName = document.createElement('td');
+                tdName.colSpan = 3;
+                tdName.textContent = `${title}（${members.length}）`;
+                head.append(tdCheck, tdName);
+                tbody.appendChild(head);
+            }
+            for (const row of members) {
+                const tr = document.createElement('tr');
+                if (title) tr.classList.add('nd-import-child');
+                const tdCheck = document.createElement('td');
+                const check = document.createElement('input');
+                check.type = 'checkbox';
+                check.checked = true;
+                row.check = check;
+                check.addEventListener('change', () => {
+                    row.checked = check.checked;
+                });
+                tdCheck.appendChild(check);
+                const meta = rowMeta(row.item);
+                const tdName = document.createElement('td');
+                tdName.textContent = meta.name;
+                const tdId = document.createElement('td');
+                tdId.textContent = meta.id;
+                const tdKind = document.createElement('td');
+                tdKind.textContent = meta.kind === `library:${row.item._libraryName}`
+                    || meta.kind === `group:${row.item._groupName}`
+                    ? ''
+                    : meta.kind;
+                tr.append(tdCheck, tdName, tdId, tdKind);
+                tbody.appendChild(tr);
+            }
+        }
 
         preview.classList.remove('nd-hidden');
     }
@@ -556,6 +673,26 @@ export function mountImportExport(root, deps) {
             parts.push(`失败 ${errors.length}：${errors.slice(0, 2).join('；')}`);
         }
         return parts.join('，');
+    }
+
+    function exportChecked() {
+        if (!pendingData) {
+            setError('先载入当前库或解析文件');
+            return;
+        }
+        const checked = previewRows.map((row) => Boolean(row.checked));
+        const filtered = filterImportPayload(pendingData, checked);
+        if (filtered == null) {
+            setError(t('import.empty'));
+            return;
+        }
+        try {
+            downloadJson(filtered, `nai-dbgen-export-${Date.now()}.json`);
+            statusEl.textContent = `已导出 ${checked.filter(Boolean).length} 条`;
+            setError('');
+        } catch (err) {
+            setError(err instanceof Error ? err.message : String(err));
+        }
     }
 
     async function commitImport() {

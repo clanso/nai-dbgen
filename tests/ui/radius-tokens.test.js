@@ -84,7 +84,7 @@ describe('D69 radius tokens (no hardcoded px)', () => {
         );
         assert.match(
             components,
-            /\.nd-slot-viewer__img\s*\{[^}]*border-radius:\s*var\(--nd-radius-md\)/s,
+            /\.nd-image-only__img,\s*\.nd-slot-viewer__img\s*\{[^}]*border-radius:\s*0/s,
         );
         assert.match(components, /\.nd-native-dialog__shell\s*\{[^}]*background:\s*transparent/s);
         assert.doesNotMatch(

@@ -57,7 +57,6 @@ import { createRenderSlotUseCase } from '../application/render-slot.usecase.js';
 import { createArtistPreviewService } from '../application/artist-preview.service.js';
 import { createWorkbenchService } from '../application/workbench.service.js';
 import { createAutoTriggerService } from '../application/auto-trigger.service.js';
-import { createSinglePromptUseCase } from '../application/single-prompt.usecase.js';
 import { createStorageCleanupService } from '../application/storage-cleanup.service.js';
 import { createImageCacheTrimService } from '../application/image-cache-trim.service.js';
 import { scaleImageToCard } from '../adapters/storage/image-scale.js';
@@ -122,10 +121,6 @@ export const REQUIRED_APP_DEPS = Object.freeze({
     ]),
     createViewpointBlocksBuilder: Object.freeze([
         'host', 'characterRepo', 'tagRepo', 'contextCollector', 'worldInfoResolver', 'loadSettings',
-    ]),
-    createSinglePromptUseCase: Object.freeze([
-        'host', 'llm', 'tagRepo', 'presetRepo', 'llmConfigRepo', 'slotRepo',
-        'viewpointBlocks', 'loadSettings', 'runHostMacros', 'newTraceId',
     ]),
 });
 
@@ -305,7 +300,6 @@ export async function createContainer(opts = {}) {
         createAutoTriggerService,
         createGenerateFloorUseCase,
         createViewpointBlocksBuilder,
-        createSinglePromptUseCase,
         ...(opts.factories && typeof opts.factories === 'object' ? opts.factories : {}),
     };
 
@@ -412,6 +406,9 @@ export async function createContainer(opts = {}) {
         presetRepo,
         llmConfigRepo,
         tagRecall,
+        host,
+        viewpointBlocks,
+        slotRepo,
         loadSettings,
         runHostMacros,
     };
@@ -440,22 +437,6 @@ export async function createContainer(opts = {}) {
     };
     assertRequiredDeps('createGenerateFloorUseCase', generateFloorDeps, REQUIRED_APP_DEPS.createGenerateFloorUseCase);
     const generateFloor = factories.createGenerateFloorUseCase(generateFloorDeps);
-
-    // ── 4.16 单图提示词（共用上方 viewpointBlocks）───────────────
-    const singlePromptDeps = {
-        host,
-        llm,
-        tagRepo,
-        presetRepo,
-        llmConfigRepo,
-        slotRepo,
-        viewpointBlocks,
-        loadSettings,
-        runHostMacros,
-        newTraceId,
-    };
-    assertRequiredDeps('createSinglePromptUseCase', singlePromptDeps, REQUIRED_APP_DEPS.createSinglePromptUseCase);
-    const singlePrompt = factories.createSinglePromptUseCase(singlePromptDeps);
 
     const storageCleanup = createStorageCleanupService({
         host,
@@ -518,7 +499,6 @@ export async function createContainer(opts = {}) {
             generateSlots,
             renderSlot,
             generateFloor,
-            singlePrompt,
         },
         shared: Object.freeze({ llm, tagRecall, bus }),
         dispose() {

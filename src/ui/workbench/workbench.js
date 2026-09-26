@@ -11,6 +11,7 @@
 
 import {
     createButton,
+    createMiniAction,
     createToggle,
     createCheckbox,
     createFieldGroup,
@@ -23,7 +24,10 @@ import { openModal } from '../common/modal.js';
 import {
     parsePromptText,
 } from '../common/prompt-text.js';
+import { openSlotImageViewer } from '../common/image-viewer.js';
 import { emptyNaiCaption } from '../../domain/model/nai-params.js';
+import { normalizeTagLibraryKind } from '../../domain/model/tag.js';
+import { parseCompositionKey } from '../../domain/model/composition-key.js';
 import { mergePluginSettings } from '../../domain/model/plugin-settings.js';
 import { mountCaptionEditor } from './caption-editor.js';
 import {
@@ -40,6 +44,35 @@ import {
     previewUrlFromImage,
     resolvePasteArtistAction,
 } from './workbench-logic.js';
+
+const WORKBENCH_DRAFT_KEY = 'nai-dbgen:workbench-draft';
+
+/**
+ * @returns {Record<string, unknown>|null}
+ */
+function readWorkbenchDraft() {
+    try {
+        if (typeof localStorage === 'undefined') return null;
+        const raw = localStorage.getItem(WORKBENCH_DRAFT_KEY);
+        if (!raw) return null;
+        const data = JSON.parse(raw);
+        return data && typeof data === 'object' ? data : null;
+    } catch {
+        return null;
+    }
+}
+
+/**
+ * @param {Record<string, unknown>} data
+ */
+function writeWorkbenchDraft(data) {
+    try {
+        if (typeof localStorage === 'undefined') return;
+        localStorage.setItem(WORKBENCH_DRAFT_KEY, JSON.stringify(data));
+    } catch {
+        /* 隐私模式或配额满时，这一次打不开也只是不记住 */
+    }
+}
 
 /**
  * @param {string} tag
@@ -110,7 +143,10 @@ export function mountWorkbench(root, deps) {
         || deps?.repos?.artist
         || null;
 
-    const sessionParams = resolveSessionParams(loadSettings());
+    const draft = readWorkbenchDraft();
+    const sessionParams = resolveSessionParams(
+        draft?.naiParams ? { naiParams: draft.naiParams } : loadSettings(),
+    );
 
     const shell = el('div', 'nd-workbench');
     const writeErr = createInlineError();
@@ -132,6 +168,9 @@ export function mountWorkbench(root, deps) {
         ta.rows = 4;
         ta.placeholder = '描述想要的画面';
         wrap.append(label, ta);
+        if (typeof draft?.naturalLanguage === 'string') {
+            ta.value = draft.naturalLanguage;
+        }
         return {
             el: wrap,
             getValue: () => ta.value,
@@ -140,35 +179,242 @@ export function mountWorkbench(root, deps) {
         };
     })();
 
+    const floorToggle = createToggle({
+        label: '楼内流程',
+        hint: '从当前这一楼里按你的拍摄要求只画一帧，再交给生图预设，结果填回这里',
+        checked: draft?.floorMode === true,
+        onChange: (on) => {
+            libBox.hidden = on;
+        },
+    });
+
     const libBox = el('div', 'nd-wb-libraries');
+    if (draft?.floorMode === true) {
+        libBox.hidden = true;
+    }
     const libTitle = el('span', 'nd-field__label');
-    setText(libTitle, '本次使用的标签库');
-    libBox.appendChild(libTitle);
-    /** @type {Array<{ id: string, control: ReturnType<typeof createCheckbox> }>} */
-    const libChecks = [];
+    setText(libTitle, '本次使用的条目');
+    const libHint = el('p', 'nd-muted');
+    setText(libHint, '只发送勾中的条目。勾库或分类会选中其下全部条目。');
+    libBox.append(libTitle, libHint);
+    /** @type {{ id: string, entryIds: string[] }[]} */
+    const libGroups = [];
+    /** @type {Map<string, boolean>} */
+    const picked = new Map();
+    /** @type {Array<{ destroy: () => void }>} */
+    const libControls = [];
+
+    /**
+     * @param {ReturnType<typeof createCheckbox>} control
+     * @param {boolean} on
+     * @param {boolean} partial
+     */
+    function paintCheck(control, on, partial) {
+        control.setValue(on && !partial);
+        const input = control.el.querySelector('input');
+        if (input) input.indeterminate = partial;
+    }
+
+    /**
+     * @param {string[]} ids
+     */
+    function countPicked(ids) {
+        let n = 0;
+        for (const id of ids) {
+            if (picked.get(id) === true) n += 1;
+        }
+        return n;
+    }
+
+    function syncGroupChecks() {
+        for (const group of libGroups) {
+            const n = countPicked(group.entryIds);
+            const total = group.entryIds.length;
+            paintCheck(group.control, total > 0 && n === total, n > 0 && n < total);
+            setText(group.count, total ? `${n}/${total}` : '0');
+            for (const cat of group.categories) {
+                const cn = countPicked(cat.entryIds);
+                const ct = cat.entryIds.length;
+                paintCheck(cat.control, ct > 0 && cn === ct, cn > 0 && cn < ct);
+                setText(cat.count, ct ? `${cn}/${ct}` : '0');
+            }
+            for (const row of group.rows) {
+                row.control.setValue(picked.get(row.id) === true);
+            }
+        }
+    }
+
+    /**
+     * @param {string[]} ids
+     * @param {boolean} on
+     */
+    function setPicked(ids, on) {
+        for (const id of ids) picked.set(id, on);
+        syncGroupChecks();
+    }
+
+    /**
+     * @param {object[]} entries
+     * @param {string} kind
+     * @returns {{ title: string, entries: object[] }[]}
+     */
+    function groupEntries(entries, kind) {
+        if (kind !== 'composition') {
+            return [{ title: '', entries }];
+        }
+        /** @type {Map<string, object[]>} */
+        const map = new Map();
+        for (const entry of entries) {
+            const parsed = parseCompositionKey(entry?.key);
+            const title = parsed.ok ? parsed.value.category : '未分类';
+            if (!map.has(title)) map.set(title, []);
+            map.get(title).push(entry);
+        }
+        return [...map.entries()].map(([title, list]) => ({ title, entries: list }));
+    }
+
+    /**
+     * @param {object} entry
+     * @param {string} kind
+     * @returns {string}
+     */
+    function entryLabel(entry, kind) {
+        const key = String(entry?.key ?? entry?.id ?? '');
+        let label = key;
+        if (kind === 'composition') {
+            const parsed = parseCompositionKey(key);
+            if (parsed.ok) label = parsed.value.name;
+        }
+        return entry?.active === false ? `${label}（已关闭）` : label;
+    }
+
+    /**
+     * @param {HTMLElement} host
+     * @param {object[]} entries
+     * @param {string} kind
+     * @param {{ rows: { id: string, control: ReturnType<typeof createCheckbox> }[] }} bucket
+     */
+    function paintEntries(host, entries, kind, bucket) {
+        host.replaceChildren();
+        for (const entry of entries) {
+            if (!entry || entry.id == null) continue;
+            const id = String(entry.id);
+            const control = createCheckbox({
+                label: entryLabel(entry, kind),
+                checked: picked.get(id) === true,
+                onChange: (on) => {
+                    picked.set(id, on);
+                    syncGroupChecks();
+                },
+            });
+            libControls.push(control);
+            bucket.rows.push({ id, control });
+            host.appendChild(control.el);
+        }
+    }
 
     async function loadLibraries() {
         const tagRepo = deps?.tagRepo;
         if (!tagRepo || typeof tagRepo.listLibraries !== 'function') return;
+        let libraries = [];
         try {
             const r = await tagRepo.listLibraries();
-            if (!r || !r.ok || !Array.isArray(r.value)) return;
-            for (const lib of r.value) {
-                if (!lib || lib.id == null) continue;
-                const kind = lib.kind === 'feature'
-                    ? '特征库'
-                    : lib.kind === 'constant'
-                        ? '常驻库'
-                        : '构图库';
-                const control = createCheckbox({
-                    label: `${String(lib.name || lib.id)}（${kind}）`,
-                    checked: lib.active === true,
-                });
-                libChecks.push({ id: String(lib.id), control });
-                libBox.appendChild(control.el);
-            }
+            if (r?.ok && Array.isArray(r.value)) libraries = r.value;
         } catch {
-            /* 列表失败不阻塞手填路径 */
+            return;
+        }
+        for (const lib of libraries) {
+            if (!lib || lib.id == null) continue;
+            const kind = normalizeTagLibraryKind(lib.kind);
+            const kindText = kind === 'feature' ? '特征库' : kind === 'constant' ? '常驻库' : '构图库';
+            /** @type {object[]} */
+            let entries = [];
+            if (typeof tagRepo.listEntries === 'function') {
+                try {
+                    const er = await tagRepo.listEntries(lib.id);
+                    if (er?.ok && Array.isArray(er.value)) entries = er.value.filter((entry) => entry && entry.id != null);
+                } catch {
+                    entries = [];
+                }
+            }
+            for (const entry of entries) picked.set(String(entry.id), false);
+
+            const entryIds = entries.map((entry) => String(entry.id));
+            const head = el('div', 'nd-wb-lib__head');
+            const control = createCheckbox({
+                label: `${String(lib.name || lib.id)}（${kindText}）`,
+                checked: false,
+                onChange: (on) => setPicked(entryIds, on),
+            });
+            libControls.push(control);
+            const count = el('span', 'nd-muted');
+            setText(count, entryIds.length ? `0/${entryIds.length}` : '0');
+            head.append(control.el, count);
+
+            const body = el('div', 'nd-wb-lib__body');
+            body.hidden = true;
+            /** @type {{ title: string, entryIds: string[], control: ReturnType<typeof createCheckbox>, count: HTMLElement }[]} */
+            const categories = [];
+            /** @type {{ id: string, control: ReturnType<typeof createCheckbox> }[]} */
+            const rows = [];
+            const grouped = groupEntries(entries, kind);
+            const bucket = { rows };
+            for (const cat of grouped) {
+                const catIds = cat.entries.map((entry) => String(entry.id));
+                if (!cat.title) {
+                    paintEntries(body, cat.entries, kind, bucket);
+                    continue;
+                }
+                const catHead = el('div', 'nd-wb-cat__head');
+                const catControl = createCheckbox({
+                    label: cat.title,
+                    checked: false,
+                    onChange: (on) => setPicked(catIds, on),
+                });
+                libControls.push(catControl);
+                const catCount = el('span', 'nd-muted');
+                setText(catCount, catIds.length ? `0/${catIds.length}` : '0');
+                const catBody = el('div', 'nd-wb-cat__body');
+                catBody.hidden = true;
+                let painted = false;
+                const toggle = createMiniAction({
+                    label: '展开',
+                    onClick: () => {
+                        catBody.hidden = !catBody.hidden;
+                        toggle.textContent = catBody.hidden ? '展开' : '收起';
+                        if (!painted) {
+                            painted = true;
+                            paintEntries(catBody, cat.entries, kind, bucket);
+                        }
+                    },
+                });
+                catHead.append(catControl.el, catCount, toggle);
+                body.append(catHead, catBody);
+                categories.push({ title: cat.title, entryIds: catIds, control: catControl, count: catCount });
+            }
+
+            const libToggle = createMiniAction({
+                label: '展开',
+                onClick: () => {
+                    body.hidden = !body.hidden;
+                    libToggle.textContent = body.hidden ? '展开' : '收起';
+                },
+            });
+            head.appendChild(libToggle);
+            const block = el('div', 'nd-wb-lib');
+            block.append(head, body);
+            libBox.appendChild(block);
+            libGroups.push({
+                id: String(lib.id),
+                entryIds,
+                control,
+                count,
+                categories,
+                rows,
+            });
+        }
+        if (Array.isArray(draft?.entryIds) && draft.entryIds.length) {
+            setPicked(draft.entryIds.map((id) => String(id)), true);
         }
     }
 
@@ -194,7 +440,9 @@ export function mountWorkbench(root, deps) {
     // ── Caption 编辑器（手填 / 自动生成共用同一结构）────────────
     const captionMount = el('div', 'nd-wb-caption-mount');
     const captionEditor = mountCaptionEditor(captionMount, {
-        initial: emptyNaiCaption(),
+        initial: draft?.caption && typeof draft.caption === 'object'
+            ? draft.caption
+            : emptyNaiCaption(),
     });
 
     const captionToolbar = el('div', 'nd-wb-caption-toolbar');
@@ -305,6 +553,7 @@ export function mountWorkbench(root, deps) {
             toast(host, 'warning', side.truncateMessage);
         }
         toast(host, 'success', '已粘贴');
+        persistWorkbenchDraft();
 
         if (side.artistAction === 'matched' && side.matchedArtist) {
             const next = mergePluginSettings(loadSettings(), {
@@ -331,7 +580,7 @@ export function mountWorkbench(root, deps) {
     const replaceToggle = createToggle({
         label: '替换角色关键字',
         hint: '把提示词里的角色关键字换成该角色固定特征后再出图',
-        checked: false,
+        checked: draft?.replaceCharacterKeywords === true,
     });
 
     // 4.13 共用组件（与运行配置同一套）
@@ -347,6 +596,11 @@ export function mountWorkbench(root, deps) {
     let generating = false;
     /** @type {Array<() => void>} */
     const previewRevokers = [];
+    const imageRepo = deps?.imageRepo || null;
+    /** @type {string[]} */
+    let savedImageRefs = Array.isArray(draft?.imageRefs)
+        ? draft.imageRefs.map((id) => String(id)).filter(Boolean)
+        : [];
 
     const previewBox = el('div', 'nd-wb-preview');
     const previewHint = el('p', 'nd-muted');
@@ -409,7 +663,23 @@ export function mountWorkbench(root, deps) {
                 const img = document.createElement('img');
                 img.className = 'nd-wb-preview__img';
                 img.alt = `预览 ${i + 1}`;
+                img.title = '点击查看大图';
+                img.tabIndex = 0;
                 img.src = url;
+                const openLarge = () => {
+                    void openSlotImageViewer({ host }, {
+                        url,
+                        title: `预览 ${i + 1}`,
+                        alt: `预览 ${i + 1}`,
+                    });
+                };
+                img.addEventListener('click', openLarge);
+                img.addEventListener('keydown', (event) => {
+                    if (event.key === 'Enter' || event.key === ' ') {
+                        event.preventDefault();
+                        openLarge();
+                    }
+                });
                 card.appendChild(img);
                 const dl = document.createElement('a');
                 dl.className = 'nd-button nd-button--ghost';
@@ -460,12 +730,19 @@ export function mountWorkbench(root, deps) {
         writeAbort = typeof AbortController !== 'undefined' ? new AbortController() : null;
         setWritingUi(true);
         try {
-            const libraryIds = libChecks
-                .filter((c) => c.control.getValue())
-                .map((c) => c.id);
+            const entryIds = [];
+            const libraryIds = [];
+            for (const group of libGroups) {
+                const ids = group.entryIds.filter((id) => picked.get(id) === true);
+                if (!ids.length) continue;
+                libraryIds.push(group.id);
+                entryIds.push(...ids);
+            }
             const input = buildWritePromptInput({
                 naturalLanguage: nlField.getValue(),
                 libraryIds,
+                entryIds,
+                mode: floorToggle.getValue() ? 'floor' : 'entries',
                 signal: writeAbort?.signal,
             });
             // 只走 writePrompt；createDecoupledWorkbenchApi 保证不碰 generateImage
@@ -497,6 +774,7 @@ export function mountWorkbench(root, deps) {
             } else {
                 toast(host, 'success', '提示词已填入工作台');
             }
+            persistWorkbenchDraft();
         } catch (err) {
             if (isWorkbenchAbort(err)) return;
             const msg = workbenchErrorMessage(err);
@@ -536,7 +814,9 @@ export function mountWorkbench(root, deps) {
                 return;
             }
             const images = Array.isArray(result.value) ? result.value : [];
+            await rememberPreviews(images);
             showPreviews(images);
+            persistWorkbenchDraft();
             toast(host, 'success', `已生成 ${images.length} 张`);
         } catch (err) {
             if (isWorkbenchAbort(err)) return;
@@ -555,7 +835,7 @@ export function mountWorkbench(root, deps) {
 
     const writeSection = createFieldGroup({
         title: '写提示词',
-        children: [nlField.el, libBox, writeActions, writeErr.el, unmatchedEl],
+        children: [nlField.el, floorToggle.el, libBox, writeActions, writeErr.el, unmatchedEl],
     });
 
     const captionSection = createFieldGroup({
@@ -590,12 +870,86 @@ export function mountWorkbench(root, deps) {
     shell.append(header, writeSection.el, captionSection.el, genSection.el);
     root.appendChild(shell);
 
+    function persistWorkbenchDraft() {
+        const entryIds = [];
+        for (const [id, on] of picked) {
+            if (on) entryIds.push(id);
+        }
+        const savedEntryIds = entryIds.length || picked.size
+            ? entryIds
+            : (Array.isArray(draft?.entryIds) ? draft.entryIds.map((id) => String(id)) : []);
+        writeWorkbenchDraft({
+            naturalLanguage: nlField.getValue(),
+            floorMode: floorToggle.getValue(),
+            entryIds: savedEntryIds,
+            caption: captionEditor.getCaption(),
+            replaceCharacterKeywords: replaceToggle.getValue(),
+            naiParams: paramsForm.getValue(),
+            imageRefs: savedImageRefs,
+        });
+    }
+
+    shell.addEventListener('input', persistWorkbenchDraft);
+    shell.addEventListener('change', persistWorkbenchDraft);
+
     void loadLibraries();
 
     let destroyed = false;
+    void restorePreviews();
+
+    /**
+     * 出图结果写入图片库并钉住，避免被缓存上限清掉。下一轮出图换掉上一轮。
+     * @param {Array<{ blob?: Blob, mimeType?: string }>} images
+     */
+    async function rememberPreviews(images) {
+        if (!imageRepo || typeof imageRepo.put !== 'function') return;
+        const next = [];
+        for (const image of images) {
+            if (!image?.blob) continue;
+            try {
+                const put = await imageRepo.put(image.blob, { pinned: true });
+                if (put?.ok && put.value) next.push(String(put.value));
+            } catch {
+                /* 存不上就只在这一次里显示 */
+            }
+        }
+        if (!next.length) return;
+        const prev = savedImageRefs;
+        savedImageRefs = next;
+        if (typeof imageRepo.remove === 'function') {
+            for (const ref of prev) {
+                if (next.includes(ref)) continue;
+                try { await imageRepo.remove(ref); } catch { /* ignore */ }
+            }
+        }
+    }
+
+    async function restorePreviews() {
+        if (!savedImageRefs.length || !imageRepo || typeof imageRepo.getBlob !== 'function') return;
+        const images = [];
+        const kept = [];
+        for (const ref of savedImageRefs) {
+            try {
+                const got = await imageRepo.getBlob(ref);
+                const blob = got?.ok ? got.value : null;
+                if (!blob) continue;
+                images.push({ blob, mimeType: blob.type || '' });
+                kept.push(ref);
+            } catch {
+                /* 这一张读不出来就跳过 */
+            }
+        }
+        if (kept.length !== savedImageRefs.length) {
+            savedImageRefs = kept;
+            persistWorkbenchDraft();
+        }
+        if (destroyed || !images.length) return;
+        showPreviews(images);
+    }
     return {
         destroy() {
             if (destroyed) return;
+            persistWorkbenchDraft();
             destroyed = true;
             if (writeAbort) writeAbort.abort();
             if (genAbort) genAbort.abort();
@@ -604,7 +958,8 @@ export function mountWorkbench(root, deps) {
             genErr.destroy();
             statusPill.destroy();
             nlField.destroy();
-            for (const c of libChecks) c.control.destroy();
+            floorToggle.destroy();
+            for (const c of libControls) c.destroy();
             captionEditor.destroy();
             replaceToggle.destroy();
             paramsForm.destroy();

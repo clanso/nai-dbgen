@@ -3,25 +3,28 @@
  * 归属：W2-F / 代理 A。
  *
  * 裁决 D13：工作台提示词为结构化 NaiCaption（base_caption + char_captions）。
- * 裁决 D33：仍注入 tagRecall 同实例（装配契约），但写提示词按 4.15 不跑召回。
- * 需求 4.15：勾选构图库/特征库/常驻库整库交给提示词 LLM；特征库不做关键字匹配。
+ * 勾选条目：不跑召回，只把勾中条目交给生图预设。
+ * 楼内流程：召回预设末尾带上生成内容并只要一张图，再把这一张交给生图预设，结果回填工作台。
+ * 只传 libraryIds、不传 entryIds 时仍按整库已启用条目注入（旧调用）。
  */
 
 import { Ok, Err } from '../infra/result.js';
-import { configError, contractError } from '../infra/errors.js';
+import { configError, contractError, domainError } from '../infra/errors.js';
 import { createLogger } from '../infra/logger.js';
 import { newId } from '../infra/id.js';
 import { createBlockSet, setBlock } from '../domain/blocks/block-set.js';
 import { VARIABLE_NAMES } from '../domain/template/variable-map.js';
 import { formatCharacterBlock } from '../domain/blocks/character.block.js';
-import { formatSingleCompositionBlock } from '../domain/blocks/composition.block.js';
+import { formatCompositionBlock, formatSingleCompositionBlock } from '../domain/blocks/composition.block.js';
+import { formatRecentSlotsBlock } from '../domain/blocks/recent-slots.block.js';
 import { formatFeatureBlock } from '../domain/blocks/feature.block.js';
 import { formatConstantBlock } from '../domain/blocks/constant.block.js';
 import { activateCharacters } from '../domain/matching/activation.js';
 import { normalizeTagLibraryKind } from '../domain/model/tag.js';
 import { renderPreset } from '../domain/template/preset-renderer.js';
 import { validateNaiCaption, emptyNaiCaption } from '../domain/model/nai-params.js';
-import { parseFlatSingleCaption } from '../domain/model/flat-imagegen.js';
+import { parseFlatSingleCaption, parseFlatSlotPlans } from '../domain/model/flat-imagegen.js';
+import { slotCaptionFromLlmItem } from '../domain/model/slot.js';
 import { recordParseFailure } from './parse-debug-log.js';
 import { parseSizeSpec } from '../domain/model/size-spec.js';
 import {
@@ -30,9 +33,214 @@ import {
     loadAllCharacters,
     extractSingleCaption,
     extractOptionalSizeAnalysis,
+    extractSlotPlanItems,
 } from './_helpers.js';
 
 const log = createLogger('application/workbench');
+
+/**
+ * 召回预设渲染完之后追加的用户消息。不改预设文件。
+ * @param {string} userText
+ * @returns {string}
+ */
+function floorRecallTrailing(userText) {
+    return [
+        `用户对这一张的拍摄要求：\n${userText}`,
+        '基于前面的规则，从当前这一楼的剧情里只选一帧来画。'
+            + '用户这句话只说明画这一楼里的哪一帧、用什么镜头，剧情仍是当前楼层，不要另起一场戏。'
+            + 'positions 只返回这一个位置。',
+    ].join('\n\n');
+}
+
+/**
+ * 生图预设渲染完之后追加：这一张是当前楼的绘制，用户要求只决定镜头。
+ * @param {string} userText
+ * @returns {string}
+ */
+function floorImagegenTrailing(userText) {
+    return [
+        `这一张是当前楼层剧情的一次绘制。用户的拍摄要求是：\n${userText}`,
+        '按这个要求画当前剧情里的这一帧，不要另起一场戏。只输出这一张的提示词。',
+    ].join('\n\n');
+}
+
+/**
+ * 楼内流程：视点块与楼内生图相同，召回末尾带上生成内容，只要一张，再交给生图预设。
+ * 不写 slot，不出图。
+ * @param {WorkbenchDeps} deps
+ * @param {WorkbenchWritePromptInput} input
+ * @param {string} traceId
+ */
+async function writeFloorPrompt(deps, input, traceId) {
+    const nl = String(input?.naturalLanguage ?? '').trim();
+    if (!nl) {
+        return Err(domainError({
+            code: 'WORKBENCH_DESC_EMPTY',
+            message: '生成内容为空',
+            hint: '楼内流程需要填写生成内容',
+            traceId,
+        }));
+    }
+    if (!deps.viewpointBlocks || !deps.host || typeof deps.tagRecall?.recall !== 'function') {
+        return Err(configError({
+            code: 'WORKBENCH_FLOOR_UNAVAILABLE',
+            message: '楼内流程未接上',
+            hint: '请刷新插件后再试',
+            traceId,
+        }));
+    }
+
+    const vpR = await deps.viewpointBlocks.build({
+        messageId: input?.messageId,
+        signal: input.signal,
+        traceId,
+    });
+    if (!vpR.ok) {
+        return attachTraceId(vpR, traceId);
+    }
+    const mes = deps.host.getMessage(vpR.value.messageId);
+    const targetFloorText = String(mes?.text ?? '');
+    const tagR = await deps.tagRecall.recall({
+        contextText: vpR.value.contextText,
+        targetFloorText,
+        traceId,
+        signal: input.signal,
+        trailingUserText: floorRecallTrailing(nl),
+    });
+    if (!tagR.ok) {
+        return attachTraceId(tagR, traceId);
+    }
+    const one = tagR.value.positions[0];
+    let recentSlotsText = '';
+    if (deps.slotRepo && typeof deps.slotRepo.listRetained === 'function') {
+        const retainedR = await deps.slotRepo.listRetained();
+        if (!retainedR.ok) {
+            return attachTraceId(retainedR, traceId);
+        }
+        recentSlotsText = formatRecentSlotsBlock(
+            retainedR.value.filter((row) => row && Number(row.slotId) !== Number(one.slotId)),
+        );
+    }
+
+    let blocks = createBlockSet();
+    blocks = setBlock(blocks, VARIABLE_NAMES.WORLDINFO, vpR.value.worldInfoText);
+    blocks = setBlock(blocks, VARIABLE_NAMES.CONTEXT, vpR.value.contextText);
+    blocks = setBlock(blocks, VARIABLE_NAMES.CHARACTER, vpR.value.characterText);
+    blocks = setBlock(blocks, VARIABLE_NAMES.COMPOSITION, formatCompositionBlock([one]));
+    blocks = setBlock(blocks, VARIABLE_NAMES.FEATURE, vpR.value.featureText);
+    blocks = setBlock(blocks, VARIABLE_NAMES.CONSTANT, vpR.value.constantText);
+    blocks = setBlock(blocks, VARIABLE_NAMES.RECENT_SLOTS, recentSlotsText);
+
+    const settings = deps.loadSettings();
+    if (!settings.promptGenLlmConfigId) {
+        return Err(configError({
+            code: 'PROMPT_LLM_UNSET',
+            message: '未选择提示词生成用的 LLM 配置',
+            hint: '请在运行配置中为「提示词生成」选定 LLM',
+            traceId,
+        }));
+    }
+    if (!deps.presetRepo || !settings.activeImagegenPresetId) {
+        return Err(configError({
+            code: 'IMAGEGEN_PRESET_UNSET',
+            message: '未选择生图预设',
+            hint: '请先编写并选中一份生图预设',
+            traceId,
+        }));
+    }
+    const llmCfgR = await deps.llmConfigRepo.get(settings.promptGenLlmConfigId);
+    if (!llmCfgR.ok) {
+        return attachTraceId(llmCfgR, traceId);
+    }
+    if (!llmCfgR.value) {
+        return Err(configError({
+            code: 'PROMPT_LLM_MISSING',
+            message: '提示词生成 LLM 配置不存在',
+            hint: '请重新选择提示词生成用的 LLM',
+            traceId,
+        }));
+    }
+    const presetR = await deps.presetRepo.get(settings.activeImagegenPresetId);
+    if (!presetR.ok) {
+        return attachTraceId(presetR, traceId);
+    }
+    if (!presetR.value || presetR.value.kind !== 'imagegen') {
+        return Err(configError({
+            code: 'IMAGEGEN_PRESET_MISSING',
+            message: '生图预设不存在或类型不对',
+            hint: '请选择一份生图预设',
+            traceId,
+        }));
+    }
+    const messages = renderPreset(presetR.value, blocks, {
+        runHostMacros: deps.runHostMacros,
+    });
+    messages.push({ role: 'user', content: floorImagegenTrailing(nl) });
+    const aborted = abortErrIfNeeded(input?.signal, traceId);
+    if (aborted) {
+        return aborted;
+    }
+    const llmR = await deps.llm.complete({
+        messages,
+        config: llmCfgR.value,
+        signal: input.signal,
+        traceId,
+    });
+    if (!llmR.ok) {
+        if (llmR.error?.context?.rawText != null) {
+            recordParseFailure({
+                stage: '生图',
+                code: llmR.error.code,
+                message: llmR.error.message,
+                rawText: llmR.error.context.rawText,
+            });
+        }
+        return attachTraceId(llmR, traceId);
+    }
+
+    const imagegenRawText = llmR.value.text;
+    const plans = parseFlatSlotPlans(imagegenRawText);
+    const jsonItems = plans.length > 0 ? plans : extractSlotPlanItems(llmR.value.json);
+    const firstPlan = jsonItems.length > 0 ? slotCaptionFromLlmItem(jsonItems[0]) : null;
+    const flat = firstPlan?.ok
+        ? { caption: firstPlan.value.caption, size: firstPlan.value.size, analysis: firstPlan.value.analysis }
+        : parseFlatSingleCaption(imagegenRawText);
+    const fromWrapped = extractSingleCaption(llmR.value.json);
+    const captionCandidate = flat?.caption ?? (fromWrapped != null ? fromWrapped : llmR.value.json);
+    const capR = validateNaiCaption(captionCandidate ?? emptyNaiCaption());
+    if (!capR.ok) {
+        recordParseFailure({
+            stage: '生图',
+            code: 'WORKBENCH_CAPTION_INVALID',
+            message: '工作台提示词生成结果格式无效',
+            rawText: imagegenRawText,
+        });
+        return Err(contractError({
+            code: 'WORKBENCH_CAPTION_INVALID',
+            message: '工作台提示词生成结果格式无效',
+            hint: '请检查模型是否按生图提示词结构输出',
+            traceId,
+            cause: capR.error,
+            context: { rawText: imagegenRawText, json: llmR.value.json },
+        }));
+    }
+    /** @type {WorkbenchWritePromptResult} */
+    const result = {
+        caption: capR.value,
+        unmatchedKeys: tagR.value.unmatchedKeys ?? [],
+        messageId: vpR.value.messageId,
+        llmCallCount: 2,
+    };
+    const sizeText = flat?.size;
+    if (sizeText) {
+        const sizeR = parseSizeSpec(sizeText);
+        if (sizeR.ok) {
+            result.width = sizeR.value.width;
+            result.height = sizeR.value.height;
+        }
+    }
+    return Ok(result);
+}
 
 /**
  * @typedef {import('../domain/model/nai-params.js').NaiCaption} NaiCaption
@@ -51,7 +259,9 @@ const log = createLogger('application/workbench');
  * @property {import('../ports/repository.port.js').Repository<import('../domain/model/preset.js').Preset>} [presetRepo]
  * @property {import('../ports/repository.port.js').Repository<import('../domain/model/api-config.js').LlmApiConfig>} llmConfigRepo
  * @property {ReturnType<import('./tag-recall.service.js').createTagRecallService>} [tagRecall]
- *   裁决 D33：装配仍注入同实例；本服务写提示词路径不调用（需求 4.15）
+ * @property {import('../ports/host.port.js').HostPort} [host]
+ * @property {ReturnType<import('./viewpoint-blocks.js').createViewpointBlocksBuilder>} [viewpointBlocks]
+ * @property {import('../ports/repository.port.js').SlotRepository} [slotRepo]
  * @property {() => PluginSettings} loadSettings
  * @property {(template: string) => string} runHostMacros
  */
@@ -59,7 +269,10 @@ const log = createLogger('application/workbench');
 /**
  * @typedef {object} WorkbenchWritePromptInput
  * @property {string} naturalLanguage
- * @property {string[]} libraryIds 本次勾选的标签库（不改全局激活）
+ * @property {string[]} [libraryIds] 只传库 id、不传 entryIds 时，纳入这些库里已启用的全部条目
+ * @property {string[]} [entryIds] 本次勾选的条目。传入后只发送这些条目，库开关和条目开关都不再扩大范围
+ * @property {'entries'|'floor'} [mode] floor=楼内召回后只取一张交给生图预设
+ * @property {number} [messageId] 楼内流程的视点楼；缺省为最新 AI 楼
  * @property {AbortSignal} [signal]
  * @property {string} [traceId]
  */
@@ -67,9 +280,11 @@ const log = createLogger('application/workbench');
 /**
  * @typedef {object} WorkbenchWritePromptResult
  * @property {NaiCaption} caption
- * @property {string[]} unmatchedKeys 工作台不跑召回，恒为空（供 UI 展示）
+ * @property {string[]} unmatchedKeys 勾选条目路径恒为空；楼内流程为召回未对上的编号
  * @property {number} [width] 模型回了合法「尺寸」时填入
  * @property {number} [height]
+ * @property {number} [messageId] 楼内流程实际使用的视点楼
+ * @property {number} [llmCallCount] 楼内流程为召回 + 生图共 2 次
  */
 
 /**
@@ -101,6 +316,10 @@ export function createWorkbenchService(deps) {
                 return aborted;
             }
 
+            if (input?.mode === 'floor') {
+                return writeFloorPrompt(deps, input, traceId);
+            }
+
             const settings = deps.loadSettings();
             const nl = String(input?.naturalLanguage ?? '');
 
@@ -129,20 +348,38 @@ export function createWorkbenchService(deps) {
             /** @type {TagEntry[]} */
             const constantEntries = [];
 
-            if (Array.isArray(input.libraryIds) && input.libraryIds.length > 0) {
+            const pickEntries = Array.isArray(input.entryIds);
+            const entryIdSet = pickEntries
+                ? new Set(input.entryIds.map((id) => String(id)))
+                : null;
+            const libraryIdSet = Array.isArray(input.libraryIds)
+                ? new Set(input.libraryIds.map((id) => String(id)))
+                : null;
+            const shouldLoad = pickEntries
+                ? entryIdSet.size > 0
+                : libraryIdSet != null && libraryIdSet.size > 0;
+
+            if (shouldLoad) {
                 const libsR = await deps.tagRepo.listLibraries();
                 if (!libsR.ok) {
                     return attachTraceId(libsR, traceId);
                 }
-                const idSet = new Set(input.libraryIds.map(String));
-                const selected = libsR.value.filter((lib) => lib && idSet.has(String(lib.id)));
+                const selected = libsR.value.filter((lib) => {
+                    if (!lib) return false;
+                    if (pickEntries && (!libraryIdSet || libraryIdSet.size === 0)) return true;
+                    return libraryIdSet != null && libraryIdSet.has(String(lib.id));
+                });
                 for (const lib of selected) {
                     const er = await deps.tagRepo.listEntries(lib.id);
                     if (!er.ok) {
                         return attachTraceId(er, traceId);
                     }
                     const kind = normalizeTagLibraryKind(lib.kind);
-                    const live = er.value.filter((entry) => entry && entry.active !== false);
+                    const live = er.value.filter((entry) => {
+                        if (!entry) return false;
+                        if (entryIdSet) return entryIdSet.has(String(entry.id));
+                        return entry.active !== false;
+                    });
                     if (kind === 'feature') {
                         featureEntries.push(...live);
                     } else if (kind === 'constant') {

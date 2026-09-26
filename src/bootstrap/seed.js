@@ -36,8 +36,6 @@ export const SEED_LEDGER_EXTENSION_KEY = 'nai-dbgen-seed-ledger';
 export const SEED_ASSET_FILES = Object.freeze([
     'preset-imagegen.json',
     'preset-recall.json',
-    'preset-single-recall.json',
-    'preset-single-imagegen.json',
     'artists.json',
     'llm-default.json',
     'nai-default.json',
@@ -341,8 +339,6 @@ async function importEnvelopeItems(args) {
  * @param {{
  *   imagegenId?: string|null,
  *   recallId?: string|null,
- *   singleRecallId?: string|null,
- *   singleImagegenId?: string|null,
  *   llmId?: string|null,
  *   naiId?: string|null,
  * }} ids
@@ -357,12 +353,6 @@ function maybeActivateSeeds(deps, ids) {
         }
         if (!settings.activeRecallPresetId && ids.recallId) {
             patch.activeRecallPresetId = ids.recallId;
-        }
-        if (!settings.activeSingleRecallPresetId && ids.singleRecallId) {
-            patch.activeSingleRecallPresetId = ids.singleRecallId;
-        }
-        if (!settings.activeSingleImagegenPresetId && ids.singleImagegenId) {
-            patch.activeSingleImagegenPresetId = ids.singleImagegenId;
         }
         if (!settings.recallLlmConfigId && ids.llmId) {
             patch.recallLlmConfigId = ids.llmId;
@@ -421,10 +411,6 @@ export async function installSeedAssets(deps) {
     /** @type {string|null} */
     let recallId = null;
     /** @type {string|null} */
-    let singleRecallId = null;
-    /** @type {string|null} */
-    let singleImagegenId = null;
-    /** @type {string|null} */
     let llmId = null;
     /** @type {string|null} */
     let naiId = null;
@@ -434,8 +420,6 @@ export async function installSeedAssets(deps) {
 
         const presetEnv = envelopes['preset-imagegen.json'];
         const recallEnv = envelopes['preset-recall.json'];
-        const singleRecallEnv = envelopes['preset-single-recall.json'];
-        const singleImagegenEnv = envelopes['preset-single-imagegen.json'];
         const artistEnv = envelopes['artists.json'];
         const llmEnv = envelopes['llm-default.json'];
         const naiEnv = envelopes['nai-default.json'];
@@ -444,8 +428,6 @@ export async function installSeedAssets(deps) {
         const presetItems = [
             ...(Array.isArray(presetEnv?.items) ? presetEnv.items : []),
             ...(Array.isArray(recallEnv?.items) ? recallEnv.items : []),
-            ...(Array.isArray(singleRecallEnv?.items) ? singleRecallEnv.items : []),
-            ...(Array.isArray(singleImagegenEnv?.items) ? singleImagegenEnv.items : []),
         ];
         const presetEnvelope = {
             schemaVersion: 1,
@@ -469,12 +451,6 @@ export async function installSeedAssets(deps) {
             }
             if (item?.kind === 'recall' && item?.id) {
                 recallId = String(item.id);
-            }
-            if (item?.kind === 'single-recall' && item?.id) {
-                singleRecallId = String(item.id);
-            }
-            if (item?.kind === 'single-imagegen' && item?.id) {
-                singleImagegenId = String(item.id);
             }
         }
 
@@ -533,8 +509,6 @@ export async function installSeedAssets(deps) {
         maybeActivateSeeds(deps, {
             imagegenId,
             recallId,
-            singleRecallId,
-            singleImagegenId,
             llmId,
             naiId,
         });

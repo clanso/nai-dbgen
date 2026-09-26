@@ -21,14 +21,12 @@ import {
     toast,
 } from '../_lib/panel-kit.js';
 
-/** @typedef {'imagegen'|'recall'|'single-imagegen'|'single-recall'} PresetKindTab */
+/** @typedef {'imagegen'|'recall'} PresetKindTab */
 
 /** @type {{ id: PresetKindTab, label: string, activeKey: string }[]} */
 const PRESET_TABS = Object.freeze([
     { id: 'imagegen', label: '生图预设', activeKey: 'activeImagegenPresetId' },
     { id: 'recall', label: '召回预设', activeKey: 'activeRecallPresetId' },
-    { id: 'single-imagegen', label: '单图生图预设', activeKey: 'activeSingleImagegenPresetId' },
-    { id: 'single-recall', label: '单图召回预设', activeKey: 'activeSingleRecallPresetId' },
 ]);
 
 const KIND_LABEL = Object.freeze({

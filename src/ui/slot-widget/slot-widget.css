@@ -65,6 +65,7 @@
     --nd-radius-xs: 6px;
     --nd-radius-pill: 999px;
     --nd-h: 36px;
+    --nd-floor-image-width: 100%;
     --nd-accent-wash: color-mix(in srgb, var(--nd-accent-soft) 18%, var(--nd-surface));
     --nd-danger-wash: color-mix(in srgb, var(--nd-danger) 6%, var(--nd-surface));
     --nd-danger-ring: color-mix(in srgb, var(--nd-danger) 22%, transparent);
@@ -199,8 +200,8 @@
 
 .nd-slot .nd-slot__img {
     display: block;
-    width: 100% !important;
-    max-width: 100%;
+    width: var(--nd-floor-image-width) !important;
+    max-width: var(--nd-floor-image-width) !important;
     margin: 0;
     padding: 0 !important;
     border: 0 !important;
@@ -234,11 +235,11 @@
 }
 
 .nd-slot .nd-slot__error {
-    margin: 0;
-    padding: 0.55em 0.7em !important;
-    border: 1px solid var(--nd-danger-ring) !important;
-    border-radius: var(--nd-radius-sm) !important;
-    background: var(--nd-danger-wash) !important;
+    margin: 0.35em 0 0;
+    padding: 0 !important;
+    border: 0 !important;
+    border-radius: 0 !important;
+    background: transparent !important;
     color: var(--nd-danger) !important;
     font-family: inherit !important;
     font-size: var(--nd-fs-sm) !important;

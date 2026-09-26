@@ -6,8 +6,6 @@
  */
 
 import { safeImageUrl } from './safe-url.js';
-import { openModal } from './modal.js';
-import { t } from '../i18n/zh-CN.js';
 
 /**
  * 构建查看器内容根（带 .nd-root，令牌生效；D52 不用 id）。
@@ -37,21 +35,43 @@ export function buildImageViewerElement(safeUrl, alt) {
  * @param {string} [opts.alt]
  * @returns {Promise<{ destroy: () => void }|null>}
  */
-export async function openSlotImageViewer(deps, opts) {
+export async function openSlotImageViewer(_deps, opts) {
     const safe = safeImageUrl(opts?.url);
     if (!safe) {
         return null;
     }
-    const title = opts?.title != null ? String(opts.title) : t('common.preview');
-    const element = buildImageViewerElement(safe, opts?.alt);
-    return openModal(
-        { host: deps?.host },
-        {
-            title,
-            element,
-            wide: true,
-            large: true,
-            allowVerticalScrolling: true,
-        },
-    );
+    const overlay = document.createElement('dialog');
+    overlay.className = 'nd-image-only';
+    const img = document.createElement('img');
+    img.className = 'nd-image-only__img';
+    img.src = safe;
+    img.alt = opts?.alt == null ? '' : String(opts.alt);
+    overlay.appendChild(img);
+
+    let closed = false;
+    function close() {
+        if (closed) return;
+        closed = true;
+        document.removeEventListener('keydown', onKey, true);
+        try {
+            if (overlay.open && typeof overlay.close === 'function') overlay.close();
+        } catch { /* ignore */ }
+        overlay.remove();
+    }
+    /** @param {KeyboardEvent} event */
+    function onKey(event) {
+        if (event.key !== 'Escape') return;
+        event.preventDefault();
+        event.stopPropagation();
+        close();
+    }
+    overlay.addEventListener('click', close);
+    overlay.addEventListener('close', close);
+    document.addEventListener('keydown', onKey, true);
+    const parent = document.body || document.documentElement;
+    parent.appendChild(overlay);
+    if (typeof overlay.showModal === 'function') {
+        overlay.showModal();
+    }
+    return { destroy: close };
 }

@@ -273,6 +273,7 @@ describe('model/plugin-settings', () => {
         const d = defaultPluginSettings();
         assert.equal(d.contextWindowSize, 5);
         assert.equal(d.imageCacheLimit, 500);
+        assert.equal(d.floorImageScale, 100);
         assert.equal(d.matchDefaults.caseSensitive, false);
         assert.equal(d.autoWriteSlots, false);
         assert.equal(d.activeSingleRecallPresetId, null);

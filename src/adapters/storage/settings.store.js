@@ -28,6 +28,22 @@ export function createSettingsStore(deps) {
         throw new Error('createSettingsStore requires deps.host with loadSettings/saveSettings');
     }
 
+    /** @type {Set<(settings: PluginSettings) => void>} */
+    const listeners = new Set();
+
+    /**
+     * @param {PluginSettings} settings
+     */
+    function emit(settings) {
+        for (const fn of listeners) {
+            try {
+                fn(settings);
+            } catch {
+                // 监听方失败不影响保存
+            }
+        }
+    }
+
     const store = {
         /**
          * @returns {PluginSettings}
@@ -51,7 +67,23 @@ export function createSettingsStore(deps) {
         save(settings) {
             const merged = mergePluginSettings(defaultPluginSettings(), settings);
             const validated = validatePluginSettings(merged);
-            host.saveSettings(validated.ok ? validated.value : normalizePluginSettings(merged));
+            const saved = validated.ok ? validated.value : normalizePluginSettings(merged);
+            host.saveSettings(saved);
+            emit(saved);
+        },
+
+        /**
+         * @param {(settings: PluginSettings) => void} fn
+         * @returns {() => void}
+         */
+        onChange(fn) {
+            if (typeof fn !== 'function') {
+                return () => {};
+            }
+            listeners.add(fn);
+            return () => {
+                listeners.delete(fn);
+            };
         },
 
         /**

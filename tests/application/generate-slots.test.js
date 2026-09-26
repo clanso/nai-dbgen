@@ -269,6 +269,64 @@ describe('workbench', () => {
         assert.ok(promptMsg.includes('silver hair feature ref') || promptMsg.includes('Alice'));
     });
 
+    it('writePrompt entryIds sends only the checked entries', async () => {
+        const p = buildPipeline({
+            llmComplete: async () => Ok({
+                text: '{}',
+                json: makeCaption('picked'),
+            }),
+        });
+        const r = await p.workbench.writePrompt({
+            naturalLanguage: '只带花园',
+            libraryIds: ['lib1', 'lib-feat'],
+            entryIds: ['t1'],
+        });
+        assert.equal(isOk(r), true, r.ok ? '' : r.error?.message);
+        const promptMsg = p.llmCalls[0].messages.map((m) => m.content).join('\n');
+        assert.ok(promptMsg.includes('flower garden'));
+        assert.equal(promptMsg.includes('silver hair feature ref'), false);
+    });
+
+    it('floor mode appends user text to recall and fills one caption', async () => {
+        const p = buildPipeline({
+            llmComplete: async (req) => {
+                const joined = req.messages.map((m) => m.content).join('\n');
+                if (joined.includes('用户对这一张的拍摄要求')) {
+                    return Ok({
+                        text: '',
+                        json: {
+                            positions: [{
+                                anchor: 'Alice walked into the garden.',
+                                key: [1],
+                            }],
+                        },
+                    });
+                }
+                return Ok({
+                    text: 'slotid: 1\nscene: one garden shot\nscene_uc: bad hands',
+                    json: null,
+                });
+            },
+        });
+        const r = await p.workbench.writePrompt({
+            naturalLanguage: '只要花园这一张',
+            mode: 'floor',
+        });
+        assert.equal(isOk(r), true, r.ok ? '' : r.error?.message);
+        assert.equal(p.llmCalls.length, 2);
+        assert.equal(p.naiCalls.length, 0);
+        const recallJoined = p.llmCalls[0].messages.map((m) => m.content).join('\n');
+        assert.ok(recallJoined.includes('用户对这一张的拍摄要求'));
+        assert.ok(recallJoined.includes('只要花园这一张'));
+        assert.ok(recallJoined.includes('不要另起一场戏'));
+        assert.ok(recallJoined.includes('当前这一楼'));
+        const imageJoined = p.llmCalls[1].messages.map((m) => m.content).join('\n');
+        assert.ok(imageJoined.includes('flower garden'));
+        assert.ok(imageJoined.includes('当前楼层剧情的一次绘制'));
+        assert.ok(imageJoined.includes('只要花园这一张'));
+        assert.equal(r.value.caption.v4_prompt.caption.base_caption, 'one garden shot');
+    });
+
     it('generateImage passes explicit replaceCharacterKeywords through', async () => {
         const p = buildPipeline();
         const rFalse = await p.workbench.generateImage({

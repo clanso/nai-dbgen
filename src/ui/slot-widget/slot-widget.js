@@ -136,6 +136,7 @@ function ensureChrome(rootEl) {
         rootEl.appendChild(imgBox);
     }
     imgBox.classList.add(SLOT_IMG_CLASS);
+    setBlockShown(imgBox, false);
 
     let statusEl = /** @type {HTMLElement|null} */ (findDescendant(rootEl, (el) => (
         hasClassToken(el, 'nd-slot__status')
@@ -155,6 +156,7 @@ function ensureChrome(rootEl) {
         errEl.className = 'nd-slot__error';
         errEl.setAttribute('role', 'alert');
         errEl.hidden = true;
+        errEl.style.display = 'none';
         rootEl.appendChild(errEl);
     }
 
@@ -167,12 +169,126 @@ function ensureChrome(rootEl) {
  * @param {(event: Event) => void} onThumbClick
  * @returns {HTMLImageElement|null}
  */
+/**
+ * 按按钮这一块的实际高度收 iframe。
+ * 不能用 body.scrollHeight：第一次渲染时正文被撑满整框，量出来的就是空行本身。
+ * @param {Element} rootEl
+ */
+function fitHostFrameNow(rootEl) {
+    const doc = rootEl?.ownerDocument;
+    const frame = doc?.defaultView?.frameElement;
+    if (!frame || !doc) {
+        return;
+    }
+    const html = doc.documentElement;
+    const body = doc.body;
+    if (html) {
+        html.style.height = 'auto';
+        html.style.minHeight = '0';
+        html.style.background = 'transparent';
+    }
+    if (body) {
+        body.style.margin = '0';
+        body.style.height = 'auto';
+        body.style.minHeight = '0';
+        body.style.background = 'transparent';
+        body.style.overflow = 'hidden';
+        void body.offsetHeight;
+    }
+    const top = rootEl.offsetTop || 0;
+    const box = typeof rootEl.getBoundingClientRect === 'function'
+        ? rootEl.getBoundingClientRect().height
+        : rootEl.scrollHeight;
+    const height = Math.ceil(top + (Number(box) || 0));
+    if (!height) {
+        return;
+    }
+    frame.style.setProperty('height', `${height}px`, 'important');
+    frame.style.setProperty('min-height', '0', 'important');
+    frame.style.setProperty('border', '0', 'important');
+    frame.style.setProperty('background', 'transparent', 'important');
+    frame.style.setProperty('display', 'block', 'important');
+    const parent = frame.parentElement;
+    const parentClass = String(parent?.className || '');
+    if (parent && !/mes_text|mes_block/.test(parentClass)) {
+        parent.style.setProperty('min-height', '0', 'important');
+        parent.style.setProperty('padding', '0', 'important');
+        parent.style.setProperty('border', '0', 'important');
+        parent.style.setProperty('background', 'transparent', 'important');
+    }
+}
+
+/**
+ * 宿主会在我们量完之后再把 iframe 撑回旧高度。排版稳定后再收两次。
+ * @param {Element} rootEl
+ */
+function fitHostFrame(rootEl) {
+    fitHostFrameNow(rootEl);
+    const win = rootEl?.ownerDocument?.defaultView;
+    if (!win || !rootEl) {
+        return;
+    }
+    const prev = /** @type {{ raf?: number, timers?: number[] }} */ (rootEl.__ndFitTimers);
+    if (prev) {
+        if (prev.raf != null && typeof win.cancelAnimationFrame === 'function') {
+            win.cancelAnimationFrame(prev.raf);
+        }
+        for (const id of prev.timers || []) {
+            win.clearTimeout(id);
+        }
+    }
+    /** @type {{ raf?: number, timers: number[] }} */
+    const next = { timers: [] };
+    if (typeof win.requestAnimationFrame === 'function') {
+        next.raf = win.requestAnimationFrame(() => fitHostFrameNow(rootEl));
+    }
+    if (typeof win.setTimeout === 'function') {
+        next.timers.push(win.setTimeout(() => fitHostFrameNow(rootEl), 80));
+        next.timers.push(win.setTimeout(() => fitHostFrameNow(rootEl), 400));
+    }
+    rootEl.__ndFitTimers = next;
+}
+
+/**
+ * @param {HTMLElement} el
+ * @param {boolean} shown
+ */
+/**
+ * @param {Element} rootEl
+ * @param {HTMLElement} imgBox
+ * @param {() => number} [readScale]
+ */
+function applyFloorImageScale(rootEl, imgBox, readScale) {
+    let scale = 100;
+    if (typeof readScale === 'function') {
+        const n = Number(readScale());
+        if (Number.isInteger(n) && n >= 20 && n <= 100) {
+            scale = n;
+        }
+    }
+    const width = `${scale}%`;
+    if (rootEl?.style?.setProperty) {
+        rootEl.style.setProperty('--nd-floor-image-width', width);
+    }
+    if (imgBox?.style?.setProperty) {
+        imgBox.style.setProperty('width', width, 'important');
+        imgBox.style.setProperty('max-width', width, 'important');
+    }
+}
+
+function setBlockShown(el, shown) {
+    el.hidden = !shown;
+    el.style.display = shown ? '' : 'none';
+}
+
 function paintImage(imgBox, url, onThumbClick) {
     imgBox.replaceChildren();
     const safe = safeImageUrl(url);
     if (!safe) {
+        setBlockShown(imgBox, false);
         return null;
     }
+    setBlockShown(imgBox, true);
     const img = (imgBox.ownerDocument || document).createElement('img');
     img.className = 'nd-slot__thumb';
     img.alt = '';
@@ -386,6 +502,7 @@ export function mountSlotWidget(rootEl, messageId, deps) {
             hasCachedImage: Boolean(url) && runtime.hasCachedImage,
         });
 
+        applyFloorImageScale(rootEl, imgBox, deps?.getFloorImageScale);
         applyStateClasses(view.stateClass);
         btn.textContent = view.buttonLabel;
         const clickable = view.canClick !== false && !view.busy;
@@ -397,9 +514,14 @@ export function mountSlotWidget(rootEl, messageId, deps) {
         statusEl.textContent = view.busy
             ? (appHasPendingWrite() && !appIsRendering() ? '写入中…' : '生图中…')
             : (view.state === 'beyond_retain' ? '已超出保留范围' : '');
+        setBlockShown(statusEl, statusEl.textContent.length > 0);
 
-        if (view.showError) {
-            errEl.hidden = false;
+        if (view.showError && view.errorMessage) {
+            setBlockShown(errEl, true);
+            errEl.style.margin = '0.35em 0 0';
+            errEl.style.padding = '0';
+            errEl.style.border = '0';
+            errEl.style.background = 'transparent';
             errEl.replaceChildren();
             const msg = document.createElement('div');
             msg.className = 'nd-slot__error-msg';
@@ -412,7 +534,7 @@ export function mountSlotWidget(rootEl, messageId, deps) {
                 errEl.appendChild(tid);
             }
         } else {
-            errEl.hidden = true;
+            setBlockShown(errEl, false);
             errEl.replaceChildren();
         }
 
@@ -421,11 +543,14 @@ export function mountSlotWidget(rootEl, messageId, deps) {
                 paintImage(imgBox, null, onThumbClick);
                 currentImageUrl = null;
             }
+            fitHostFrame(rootEl);
             return;
         }
 
         currentImageUrl = url;
-        paintImage(imgBox, url, onThumbClick);
+        const img = paintImage(imgBox, url, onThumbClick);
+        img?.addEventListener('load', () => fitHostFrame(rootEl));
+        fitHostFrame(rootEl);
     }
 
     function bindInflightWatch() {

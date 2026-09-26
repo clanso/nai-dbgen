@@ -221,7 +221,7 @@ describe('bootstrap/lifecycle', () => {
 
         const r = await globalThis[PUBLIC_API_NAME].generateSinglePrompt({ description: '  ' });
         assert.equal(r.ok, false);
-        assert.equal(r.error.code, 'SINGLE_DESC_EMPTY');
+        assert.equal(r.error.code, 'WORKBENCH_DESC_EMPTY');
     });
 
     it('activate 中途失败 → 已建资源被回收、不抛到宿主', async () => {

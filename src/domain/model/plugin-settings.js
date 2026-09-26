@@ -54,6 +54,8 @@ export const PLUGIN_SETTINGS_SCHEMA_VERSION = 1;
  *   「当前上下文」取最近几条 AI 回复楼（需求 4.6）。默认 5。
  * @property {number} imageCacheLimit
  *   浏览器楼层图缓存张数上限（需求 4.17）。默认 500；整数 ≥1。没改过不写进扩展设置。
+ * @property {number} floorImageScale
+ *   楼层里已出图片相对正文的显示宽度，20–100。100 为铺满。只影响显示，不改生成尺寸。
  * @property {boolean} autoWriteSlots
  *   自动写 slot：新 AI 楼落定后走步骤 4–5（需求 4.12）。默认 false。
  * @property {boolean} autoRenderSlots
@@ -82,6 +84,7 @@ export function defaultPluginSettings() {
         activeSingleImagegenPresetId: null,
         contextWindowSize: 5,
         imageCacheLimit: 500,
+        floorImageScale: 100,
         autoWriteSlots: false,
         autoRenderSlots: false,
         naiParallel: false,
@@ -149,6 +152,9 @@ export function normalizePluginSettings(obj) {
         imageCacheLimit: isIntInRange(obj.imageCacheLimit, 1, Number.MAX_SAFE_INTEGER)
             ? Number(obj.imageCacheLimit)
             : base.imageCacheLimit,
+        floorImageScale: Number.isInteger(Number(obj.floorImageScale))
+            ? Math.min(100, Math.max(20, Number(obj.floorImageScale)))
+            : base.floorImageScale,
         autoWriteSlots: obj.autoWriteSlots === true,
         autoRenderSlots: obj.autoRenderSlots === true,
         naiParallel: obj.naiParallel === true,
@@ -174,6 +180,9 @@ export function validatePluginSettings(obj) {
     }
     if (obj.imageCacheLimit != null && !isIntInRange(obj.imageCacheLimit, 1, Number.MAX_SAFE_INTEGER)) {
         return validationErr('SETTINGS_IMAGE_CACHE_LIMIT', '图片缓存上限必须是 ≥1 的整数');
+    }
+    if (obj.floorImageScale != null && !isIntInRange(obj.floorImageScale, 20, 100)) {
+        return validationErr('SETTINGS_FLOOR_IMAGE_SCALE', '楼层图片显示比例必须是 20–100 的整数');
     }
     if (obj.naiParams != null) {
         const nai = validateNaiParams(obj.naiParams);
