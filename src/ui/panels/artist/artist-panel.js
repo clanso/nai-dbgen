@@ -13,7 +13,15 @@ import {
     nextArtistSequence,
 } from '../../../domain/model/artist.js';
 import { mountLibraryView } from '../library-view.js';
-import { gateCoverUrl, buildArtistPreviewRequest, applyFormFields, paidActionLabels, formatErrorDisplay } from '../_lib/library-logic.js';
+import {
+    gateCoverUrl,
+    buildArtistPreviewRequest,
+    applyFormFields,
+    paidActionLabels,
+    formatErrorDisplay,
+    readArtistPreviewPrompts,
+    writeArtistPreviewPrompts,
+} from '../_lib/library-logic.js';
 import {
     el,
     labeledTextarea,
@@ -158,8 +166,14 @@ export function mountArtistPanel(root, deps) {
         const nameField = createField({ label: '名称', value: item?.name ?? '' });
         const positive = labeledTextarea('正向画师串', item?.positivePrompt ?? '', 4);
         const negative = labeledTextarea('负向画师串', item?.negativePrompt ?? '', 3);
-        const promptField = labeledTextarea('预览提示词', '', 3);
-        const negPreview = labeledTextarea('预览负向', '', 2);
+        const savedPreview = readArtistPreviewPrompts();
+        const promptField = labeledTextarea('预览提示词', savedPreview.promptText, 3);
+        const negPreview = labeledTextarea('预览负向', savedPreview.negativeText, 2);
+        const rememberPreviewPrompts = () => {
+            writeArtistPreviewPrompts(promptField.getValue(), negPreview.getValue());
+        };
+        promptField.el.addEventListener('input', rememberPreviewPrompts);
+        negPreview.el.addEventListener('input', rememberPreviewPrompts);
 
         const coverBox = el('div', 'nd-artist-preview-cover');
         coverBox.style.cursor = 'pointer';
@@ -178,6 +192,10 @@ export function mountArtistPanel(root, deps) {
         form.appendChild(err.el);
 
         const modal = await openFormModal(deps, item ? '编辑画师串' : '新建画师串', form);
+        const closeModal = () => {
+            rememberPreviewPrompts();
+            modal.destroy();
+        };
 
         const activateBtn = createButton({
             label: '设为当前',
@@ -210,6 +228,7 @@ export function mountArtistPanel(root, deps) {
                         const draft = await persistDraft();
                         if (!draft) return;
 
+                        rememberPreviewPrompts();
                         const req = buildArtistPreviewRequest(draft, {
                             promptText: promptField.getValue(),
                             negativeText: negPreview.getValue(),
@@ -280,7 +299,7 @@ export function mountArtistPanel(root, deps) {
 
         const actions = el('div', 'nd-form__actions');
         actions.append(
-            createButton({ label: '取消', variant: 'ghost', onClick: () => modal.destroy() }),
+            createButton({ label: '取消', variant: 'ghost', onClick: () => closeModal() }),
             activateBtn,
             previewBtn,
             createButton({
@@ -289,7 +308,7 @@ export function mountArtistPanel(root, deps) {
                 onClick: async () => {
                     const saved = await persistDraft();
                     if (saved) {
-                        modal.destroy();
+                        closeModal();
                         toast(host, 'success', '已保存');
                         await view?.refresh();
                     }

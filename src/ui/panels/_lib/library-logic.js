@@ -353,6 +353,59 @@ export function buildArtistPreviewRequest(editingArtist, opts) {
     return req;
 }
 
+/** 画师串预览图的正负面。不进插件设置（D8 键名已冻结），只记在本机。 */
+export const ARTIST_PREVIEW_PROMPT_KEY = 'nai-dbgen:artist-preview-prompts';
+
+/**
+ * @returns {Storage|null}
+ */
+function browserStorage() {
+    try {
+        return typeof localStorage !== 'undefined' ? localStorage : null;
+    } catch {
+        return null;
+    }
+}
+
+/**
+ * @param {Storage|null|undefined} [storage]
+ * @returns {{ promptText: string, negativeText: string }}
+ */
+export function readArtistPreviewPrompts(storage) {
+    const empty = { promptText: '', negativeText: '' };
+    const store = storage === undefined ? browserStorage() : storage;
+    if (!store || typeof store.getItem !== 'function') return empty;
+    try {
+        const raw = store.getItem(ARTIST_PREVIEW_PROMPT_KEY);
+        if (!raw) return empty;
+        const data = JSON.parse(raw);
+        return {
+            promptText: typeof data?.promptText === 'string' ? data.promptText : '',
+            negativeText: typeof data?.negativeText === 'string' ? data.negativeText : '',
+        };
+    } catch {
+        return empty;
+    }
+}
+
+/**
+ * @param {string} promptText
+ * @param {string} negativeText
+ * @param {Storage|null|undefined} [storage]
+ */
+export function writeArtistPreviewPrompts(promptText, negativeText, storage) {
+    const store = storage === undefined ? browserStorage() : storage;
+    if (!store || typeof store.setItem !== 'function') return;
+    try {
+        store.setItem(ARTIST_PREVIEW_PROMPT_KEY, JSON.stringify({
+            promptText: String(promptText ?? ''),
+            negativeText: String(negativeText ?? ''),
+        }));
+    } catch {
+        /* 隐私模式或配额满时，这一次打不开也只是不记住 */
+    }
+}
+
 /**
  * 设置 patch 白名单：只保留 D8 键；嵌套 matchDefaults / naiParams 浅合并形状。
  * @param {unknown} patch

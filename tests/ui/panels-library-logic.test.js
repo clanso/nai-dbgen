@@ -8,6 +8,8 @@ import {
     roundTripJson,
     gateCoverUrl,
     buildArtistPreviewRequest,
+    readArtistPreviewPrompts,
+    writeArtistPreviewPrompts,
     pickAllowedSettingsPatch,
     PLUGIN_SETTINGS_KEYS,
     settingsKeysUnchanged,
@@ -147,6 +149,22 @@ describe('ui/panels library-logic', () => {
             width: ARTIST_PREVIEW_SIZE.width,
             height: ARTIST_PREVIEW_SIZE.height,
         });
+    });
+
+    it('artist preview prompts round-trip in local storage', () => {
+        const bag = new Map();
+        const storage = {
+            getItem: (key) => (bag.has(key) ? bag.get(key) : null),
+            setItem: (key, value) => { bag.set(key, String(value)); },
+        };
+        assert.deepEqual(readArtistPreviewPrompts(storage), { promptText: '', negativeText: '' });
+        writeArtistPreviewPrompts('1girl, smile', 'lowres', storage);
+        assert.deepEqual(readArtistPreviewPrompts(storage), {
+            promptText: '1girl, smile',
+            negativeText: 'lowres',
+        });
+        writeArtistPreviewPrompts('next', '', storage);
+        assert.deepEqual(readArtistPreviewPrompts(storage), { promptText: 'next', negativeText: '' });
     });
 
     it('settings patch only allows D8 keys; unknown keys dropped', () => {
