@@ -58,7 +58,9 @@ export function stripSlotTokens(text) {
 }
 
 /**
- * 正则 1 的 replaceString 骨架（含 $1）；由宿主安装器写入。
+ * 正则 1 的 replaceString（含 $1）；由宿主安装器写入。
+ * 必须是 ```html 围栏里的完整文档。JS-Slash-Runner 只把这种围栏画成 iframe，
+ * 光有围栏或只有一段 div，按钮都出不来。
  * @returns {string}
  */
 export function slotWidgetReplaceTemplate() {
@@ -87,8 +89,36 @@ export function slotWidgetReplaceTemplate() {
         'box-shadow:none !important',
         'cursor:pointer !important',
     ].join(';');
-    return '<div class="nai-slot" data-slot="$1">'
-        + `<button type="button" class="nai-slot-btn" style="${buttonStyle}" onclick="top.postMessage({source:'nai-dbgen',action:'generate',slot:'$1'},'*')">生成</button>`
-        + '<div class="nai-slot-img"></div>'
-        + '</div>';
+    const page = [
+        '<!DOCTYPE html>',
+        '<html lang="zh-CN">',
+        '<head>',
+        '<meta charset="UTF-8">',
+        '<meta name="viewport" content="width=device-width,initial-scale=1">',
+        '<style>',
+        'html,body{margin:0!important;padding:0!important;width:100%!important;height:auto!important;background:transparent!important;overflow:visible!important}',
+        '</style>',
+        '</head>',
+        '<body>',
+        '<div class="nai-slot" data-slot="$1">',
+        `<button type="button" class="nai-slot-btn" style="${buttonStyle}" onclick="top.postMessage({source:'nai-dbgen',action:'generate',slot:'$1'},'*')">生成</button>`,
+        '<div class="nai-slot-img"></div>',
+        '</div>',
+        '<script>',
+        '(() => {',
+        '  try {',
+        '    const frame = window.frameElement;',
+        '    const root = document.querySelector("[data-slot]");',
+        '    if (!frame || !root) return;',
+        '    const height = Math.max(1, Math.ceil(root.getBoundingClientRect().height || root.scrollHeight));',
+        '    frame.style.height = height + "px";',
+        '    frame.style.border = "0";',
+        '    frame.style.background = "transparent";',
+        '  } catch (_e) {}',
+        '})();',
+        '</script>',
+        '</body>',
+        '</html>',
+    ].join('\n');
+    return '```html\n' + page + '\n\n```';
 }

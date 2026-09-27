@@ -74,12 +74,14 @@ async function writeFloorPrompt(deps, input, traceId) {
     }
     const mes = deps.host.getMessage(vpR.value.messageId);
     const targetFloorText = String(mes?.text ?? '');
+    const includeWorkbenchOnly = input?.includeWorkbenchOnly === true;
     const tagR = await deps.tagRecall.recall({
         contextText: vpR.value.contextText,
         targetFloorText,
         traceId,
         signal: input.signal,
         userDesc: nl,
+        omitWorkbenchOnly: !includeWorkbenchOnly,
     });
     if (!tagR.ok) {
         return attachTraceId(tagR, traceId);
@@ -149,6 +151,7 @@ async function writeFloorPrompt(deps, input, traceId) {
     }
     const messages = renderPreset(presetR.value, blocks, {
         runHostMacros: deps.runHostMacros,
+        omitWorkbenchOnly: input?.includeWorkbenchOnly !== true,
     });
     const aborted = abortErrIfNeeded(input?.signal, traceId);
     if (aborted) {
@@ -246,6 +249,7 @@ async function writeFloorPrompt(deps, input, traceId) {
  * @property {string[]} [libraryIds] 只传库 id、不传 entryIds 时，纳入这些库里已启用的全部条目
  * @property {string[]} [entryIds] 本次勾选的条目。传入后只发送这些条目，库开关和条目开关都不再扩大范围
  * @property {'entries'|'floor'} [mode] floor=楼内召回后只取一张交给生图预设
+ * @property {boolean} [includeWorkbenchOnly] 对外接口为 true：楼内变量照旧，但带上工作台专用段
  * @property {number} [messageId] 楼内流程的视点楼；缺省为最新 AI 楼
  * @property {AbortSignal} [signal]
  * @property {string} [traceId]

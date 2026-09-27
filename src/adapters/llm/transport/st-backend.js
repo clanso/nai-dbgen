@@ -63,6 +63,25 @@ export function createStBackendLlmTransport(deps) {
                     traceId,
                 }));
             }
+            return completeWithSecret(req);
+        },
+
+        async listModels(config) {
+            const label = apiConfigDisplayName(config);
+            const ready = assertConfigReady(config, label, null);
+            if (!ready.ok) {
+                return ready;
+            }
+            return listModelsWithSecret(config);
+        },
+    };
+
+    /**
+     * @param {import('../../../ports/llm.port.js').LlmCompleteRequest} req
+     */
+    async function completeWithSecret(req) {
+            const config = req?.config;
+            const traceId = req?.traceId ?? null;
 
             let ctx;
             try {
@@ -151,17 +170,20 @@ export function createStBackendLlmTransport(deps) {
                     },
                 }));
             }
-        },
+    }
 
-        /**
-         * POST /api/backends/chat-completions/status → 模型列表。
-         * @param {import('../../../domain/model/api-config.js').LlmApiConfig} config
-         */
-        async listModels(config) {
-            const label = apiConfigDisplayName(config);
-            const ready = assertConfigReady(config, label, null);
-            if (!ready.ok) {
-                return ready;
+    /**
+     * 插件自己要模型名单：地址和密钥原文放进请求，酒馆只转发 GET /models。
+     * @param {import('../../../domain/model/api-config.js').LlmApiConfig} config
+     */
+    async function listModelsWithSecret(config) {
+            const apiKey = String(config.apiKey || '').trim();
+            if (!apiKey) {
+                return Err(configError({
+                    code: 'LLM_CONFIG_KEY',
+                    message: '请先填写 API 密钥',
+                    hint: '获取模型会把输入框里的密钥原文放进请求',
+                }));
             }
 
             let headers;
@@ -188,7 +210,7 @@ export function createStBackendLlmTransport(deps) {
 
             const body = buildCustomStatusRequest({
                 baseUrl: config.baseUrl,
-                secretId: /** @type {string} */ (config.secretId),
+                apiKey,
                 customIncludeHeaders: config.customIncludeHeaders,
             });
 
@@ -233,8 +255,7 @@ export function createStBackendLlmTransport(deps) {
 
             const models = extractModelIdsFromStatus(json);
             return Ok({ models, count: models.length });
-        },
-    };
+    }
 }
 
 /**
@@ -297,6 +318,9 @@ function extractStatusErrorMessage(json, text, status) {
         || null;
     if (msg) {
         return `拉取模型列表失败：${String(msg).slice(0, 200)}`;
+    }
+    if (json?.error === true) {
+        return '拉取模型列表失败：接口没有返回模型名单，请核对地址和密钥';
     }
     if (text && text.trim() && text.length < 200) {
         return `拉取模型列表失败：${text.trim()}`;

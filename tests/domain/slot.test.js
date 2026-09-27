@@ -19,7 +19,10 @@ describe('slot-token', () => {
         assert.equal(stripSlotTokens(text).replace(/\s+/g, ' ').trim(), 'hello world');
         assert.ok(createSlotTokenRegex().test(token));
         assert.ok(SLOT_TOKEN_PATTERN_SOURCE.includes('IMG'));
-        assert.ok(slotWidgetReplaceTemplate().includes('data-slot="$1"'));
+        const widget = slotWidgetReplaceTemplate();
+        assert.ok(widget.includes('data-slot="$1"'));
+        assert.equal(widget.startsWith('```html\n<!DOCTYPE html>\n'), true);
+        assert.equal(widget.endsWith('\n```'), true);
     });
 
     it('rejects invalid slotId', () => {

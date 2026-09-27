@@ -19,6 +19,7 @@ import { listRegisteredVariables, resolveVariableName } from './variable-map.js'
 /**
  * @typedef {object} RenderPresetDeps
  * @property {(template: string) => string} runHostMacros 通常桥接 substituteParams；必须先于四块注入
+ * @property {boolean} [omitWorkbenchOnly] 楼内生图为 true：跳过工作台专用段
  */
 
 /**
@@ -58,6 +59,9 @@ export function renderPreset(preset, blocks, deps) {
         }
         const prompt = promptsById.get(item.identifier);
         if (!prompt || prompt.enabled === false) {
+            continue;
+        }
+        if (deps.omitWorkbenchOnly && prompt.workbenchOnly === true) {
             continue;
         }
         const afterHost = deps.runHostMacros(String(prompt.content ?? ''));

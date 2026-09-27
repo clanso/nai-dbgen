@@ -504,9 +504,17 @@ export function mountApiConfigPanel(root, deps) {
         /**
          * @returns {Promise<object|null>}
          */
+        function currentApiKey() {
+            const typed = keyField.getValue().trim();
+            if (typed) {
+                return typed;
+            }
+            return String(item?.apiKey || '').trim();
+        }
+
         async function buildDraftConfig() {
-            const sid = await ensureSecretId();
-            if (!sid) {
+            const apiKey = currentApiKey();
+            if (!apiKey) {
                 modal.setError('请先填写 API 密钥');
                 return null;
             }
@@ -522,13 +530,15 @@ export function mountApiConfigPanel(root, deps) {
             return {
                 name: nameField.getValue().trim() || '未命名配置',
                 baseUrl,
-                secretId: sid,
+                apiKey,
+                secretId: secretId || item?.secretId || null,
                 model: modelCombo.getValue().trim() || 'probe',
                 customIncludeHeaders: includeHeaders.getValue().trim() || undefined,
             };
         }
 
         async function fetchModels() {
+            modal.setError('');
             setText(statusLine, '正在获取模型…');
             const draft = await buildDraftConfig();
             if (!draft) return;
@@ -591,6 +601,7 @@ export function mountApiConfigPanel(root, deps) {
             const name = nameField.getValue().trim();
             const baseUrl = urlField.getValue().trim();
             const model = modelCombo.getValue().trim();
+            const apiKey = currentApiKey();
             if (!name) {
                 modal.setError('请填写名称');
                 return null;
@@ -621,6 +632,7 @@ export function mountApiConfigPanel(root, deps) {
             const fields = {
                 name,
                 baseUrl,
+                apiKey,
                 secretId: finalSecretId,
                 model,
                 temperature: emptyToUndef(tempField.getValue()),

@@ -20,6 +20,7 @@ import {
     createStatusPill,
 } from '../common/controls.js';
 import { createNaiParamsForm } from '../common/nai-params-form.js';
+import { mountCurrentPicker } from '../common/current-picker.js';
 import { openModal } from '../common/modal.js';
 import {
     parsePromptText,
@@ -46,6 +47,7 @@ import {
 } from './workbench-logic.js';
 
 const WORKBENCH_DRAFT_KEY = 'nai-dbgen:workbench-draft';
+const WORKBENCH_HISTORY_LIMIT = 50;
 
 /**
  * @returns {Record<string, unknown>|null}
@@ -122,6 +124,8 @@ function resolveWorkbenchService(deps) {
 /**
  * @param {Element} root
  * @param {object} deps 含 workbenchService / tagRepo / host / loadSettings
+ * @param {object} [deps.artistFileUrl] 与抽屉共用的画师串封面解析器
+ * @param {(fn: () => void) => () => void} [deps.subscribeSettings]
  * @returns {{ destroy: () => void }}
  */
 export function mountWorkbench(root, deps) {
@@ -142,6 +146,9 @@ export function mountWorkbench(root, deps) {
     const artistRepo = deps?.artistRepo
         || deps?.repos?.artist
         || null;
+    let destroyed = false;
+    /** @type {Array<() => void>} */
+    const artistCleanups = [];
 
     const draft = readWorkbenchDraft();
     const sessionParams = resolveSessionParams(
@@ -736,6 +743,7 @@ export function mountWorkbench(root, deps) {
                 activeArtistId: side.matchedArtist.id,
             });
             saveSettings(next);
+            void artistPicker?.refresh();
             toast(host, 'success', `已切换画师串：${side.matchedArtist.name}`);
         } else if (side.artistAction === 'missing') {
             toast(host, 'warning', '画师串库里没有这一串，未切换');
@@ -777,6 +785,9 @@ export function mountWorkbench(root, deps) {
     let savedImageRefs = Array.isArray(draft?.imageRefs)
         ? draft.imageRefs.map((id) => String(id)).filter(Boolean)
         : [];
+    let previewImageRefs = Array.isArray(draft?.previewImageRefs)
+        ? draft.previewImageRefs.map(String).filter((ref) => savedImageRefs.includes(ref))
+        : savedImageRefs.slice(-1);
 
     const previewBox = el('div', 'nd-wb-preview');
     const previewHint = el('p', 'nd-muted');
@@ -843,10 +854,24 @@ export function mountWorkbench(root, deps) {
                 img.tabIndex = 0;
                 img.src = url;
                 const openLarge = () => {
+                    const history = savedImageRefs.map((imageRef) => ({
+                        imageRef, ...(imageRef === image.imageRef ? { url } : {}),
+                    }));
+                    let selected = history.findIndex((entry) => entry.imageRef === image.imageRef);
+                    if (selected < 0) {
+                        selected = history.length;
+                        history.push({ url });
+                    }
                     void openSlotImageViewer({ host }, {
                         url,
                         title: `预览 ${i + 1}`,
                         alt: `预览 ${i + 1}`,
+                        images: history,
+                        initialIndex: selected,
+                        getImageUrl: async (ref) => {
+                            const result = await imageRepo?.getUrl?.(ref);
+                            return result?.ok ? result.value : null;
+                        },
                     });
                 };
                 img.addEventListener('click', openLarge);
@@ -969,6 +994,7 @@ export function mountWorkbench(root, deps) {
         genAbort = typeof AbortController !== 'undefined' ? new AbortController() : null;
         setGeneratingUi(true);
         try {
+            await restoreReady;
             // replaceCharacterKeywords 只读开关；与提示词来源无关
             const input = buildGenerateImageInput({
                 caption: captionEditor.getCaption(),
@@ -990,8 +1016,8 @@ export function mountWorkbench(root, deps) {
                 return;
             }
             const images = Array.isArray(result.value) ? result.value : [];
-            await rememberPreviews(images);
-            showPreviews(images);
+            const previews = await rememberPreviews(images);
+            showPreviews(previews);
             persistWorkbenchDraft();
             toast(host, 'success', `已生成 ${images.length} 张`);
         } catch (err) {
@@ -1007,7 +1033,7 @@ export function mountWorkbench(root, deps) {
 
     // ── 拼装 DOM ──────────────────────────────────────────────
     const writeActions = el('div', 'nd-wb-actions');
-    writeActions.append(writeBtn, writeCancelBtn);
+    writeActions.append(writeBtn, writeCancelBtn, statusPill.el);
 
     const writeSection = createFieldGroup({
         title: '写提示词',
@@ -1025,8 +1051,51 @@ export function mountWorkbench(root, deps) {
         body: [paramsForm.el],
     });
 
-    const genActions = el('div', 'nd-wb-actions');
+    const genActions = el('div', 'nd-wb-actions nd-wb-actions--generate');
     genActions.append(genBtn, genCancelBtn);
+
+    /** @type {ReturnType<typeof mountCurrentPicker>|null} */
+    let artistPicker = null;
+    if (artistRepo && typeof artistRepo.list === 'function') {
+        const artistField = el('div', 'nd-wb-artist');
+        const artistLabel = el('span', 'nd-field__label');
+        setText(artistLabel, '当前画师串');
+        const artistMount = el('div');
+        artistField.append(artistLabel, artistMount);
+        genActions.appendChild(artistField);
+        artistPicker = mountCurrentPicker(artistMount, {
+            list: listArtists,
+            getActiveId: () => loadSettings().activeArtistId ?? null,
+            setActiveId: (id) => {
+                saveSettings(mergePluginSettings(loadSettings(), { activeArtistId: id }));
+            },
+            cover: true,
+            resolveCover: (item) => deps.artistFileUrl?.cardUrl?.(item) ?? null,
+        });
+
+        // current-picker 不自行订阅；与抽屉共用设置，并在关闭工作台时释放监听。
+        let lastArtistId = loadSettings().activeArtistId ?? null;
+        const syncArtist = () => {
+            if (destroyed) return;
+            const nextId = loadSettings().activeArtistId ?? null;
+            if (nextId === lastArtistId) return;
+            lastArtistId = nextId;
+            void artistPicker.refresh();
+        };
+        if (typeof deps.subscribeSettings === 'function') {
+            const unsubscribe = deps.subscribeSettings(syncArtist);
+            if (typeof unsubscribe === 'function') artistCleanups.push(unsubscribe);
+        } else {
+            const timer = setInterval(syncArtist, 400);
+            artistCleanups.push(() => clearInterval(timer));
+        }
+        if (typeof artistRepo.onChanged === 'function') {
+            const unsubscribe = artistRepo.onChanged(() => {
+                if (!destroyed) void artistPicker.refresh();
+            });
+            if (typeof unsubscribe === 'function') artistCleanups.push(unsubscribe);
+        }
+    }
 
     const genSection = createFieldGroup({
         title: '用当前提示词出图',
@@ -1039,11 +1108,7 @@ export function mountWorkbench(root, deps) {
         ],
     });
 
-    const header = el('div', 'nd-wb-header');
-    // 弹层 `.nd-popup-header` 已有「生成工作台」标题 + ×；此处只放状态
-    header.append(statusPill.el);
-
-    shell.append(header, writeSection.el, captionSection.el, genSection.el);
+    shell.append(writeSection.el, captionSection.el, genSection.el);
     root.appendChild(shell);
 
     function persistWorkbenchDraft() {
@@ -1062,6 +1127,7 @@ export function mountWorkbench(root, deps) {
             replaceCharacterKeywords: replaceToggle.getValue(),
             naiParams: paramsForm.getValue(),
             imageRefs: savedImageRefs,
+            previewImageRefs,
         });
     }
 
@@ -1070,53 +1136,60 @@ export function mountWorkbench(root, deps) {
 
     void loadLibraries();
 
-    let destroyed = false;
-    void restorePreviews();
+    const restoreReady = restorePreviews();
 
     /**
-     * 出图结果写入图片库并钉住，避免被缓存上限清掉。下一轮出图换掉上一轮。
+     * 最近 50 张工作台历史钉住；只淘汰超过历史上限的工作台图片。
      * @param {Array<{ blob?: Blob, mimeType?: string }>} images
      */
     async function rememberPreviews(images) {
-        if (!imageRepo || typeof imageRepo.put !== 'function') return;
+        if (!imageRepo || typeof imageRepo.put !== 'function') return images;
         const next = [];
+        const previews = [];
         for (const image of images) {
-            if (!image?.blob) continue;
+            let imageRef = null;
             try {
-                const put = await imageRepo.put(image.blob, { pinned: true });
-                if (put?.ok && put.value) next.push(String(put.value));
+                if (image?.blob) {
+                    const put = await imageRepo.put(image.blob, { pinned: true });
+                    if (put?.ok && put.value) {
+                        imageRef = String(put.value);
+                        next.push(imageRef);
+                    }
+                }
             } catch {
                 /* 存不上就只在这一次里显示 */
             }
+            previews.push({ ...image, imageRef });
         }
-        if (!next.length) return;
-        const prev = savedImageRefs;
-        savedImageRefs = next;
+        if (!next.length) return previews;
+        const history = [...new Set([...savedImageRefs, ...next])];
+        savedImageRefs = history.slice(-WORKBENCH_HISTORY_LIMIT);
+        previewImageRefs = next.filter((ref) => savedImageRefs.includes(ref));
         if (typeof imageRepo.remove === 'function') {
-            for (const ref of prev) {
-                if (next.includes(ref)) continue;
+            for (const ref of history.slice(0, -WORKBENCH_HISTORY_LIMIT)) {
                 try { await imageRepo.remove(ref); } catch { /* ignore */ }
             }
         }
+        return previews;
     }
 
     async function restorePreviews() {
         if (!savedImageRefs.length || !imageRepo || typeof imageRepo.getBlob !== 'function') return;
         const images = [];
         const kept = [];
-        for (const ref of savedImageRefs) {
+        for (const ref of previewImageRefs) {
             try {
                 const got = await imageRepo.getBlob(ref);
                 const blob = got?.ok ? got.value : null;
                 if (!blob) continue;
-                images.push({ blob, mimeType: blob.type || '' });
+                images.push({ blob, mimeType: blob.type || '', imageRef: ref });
                 kept.push(ref);
             } catch {
                 /* 这一张读不出来就跳过 */
             }
         }
-        if (kept.length !== savedImageRefs.length) {
-            savedImageRefs = kept;
+        if (kept.length !== previewImageRefs.length) {
+            previewImageRefs = kept;
             persistWorkbenchDraft();
         }
         if (destroyed || !images.length) return;
@@ -1129,6 +1202,9 @@ export function mountWorkbench(root, deps) {
             destroyed = true;
             if (writeAbort) writeAbort.abort();
             if (genAbort) genAbort.abort();
+            for (const cleanup of artistCleanups) cleanup();
+            artistCleanups.length = 0;
+            artistPicker?.destroy();
             clearPreviews();
             writeErr.destroy();
             genErr.destroy();

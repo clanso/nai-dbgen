@@ -365,6 +365,7 @@ export const APP_EVENTS = Object.freeze({
      * payload: { messageId, records, traceId, llmCallCount, unmatchedKeys, placements? }
      */
     SLOTS_WRITTEN: 'slots:written',
+    SLOTS_EDITED: 'slots:edited',
     /**
      * renderSlot 出图成功后发出（在 inflight 清表之后，保证订阅方读 isRendering===false）。
      * payload: { messageId, slotId, imageRef, traceId, record, chatId? }

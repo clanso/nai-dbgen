@@ -81,6 +81,7 @@ export function createSlotRepo(deps) {
     /** 串行化 ensureLoaded，避免 A/B 并行 load 交错写缓存 */
     /** @type {Promise<unknown>} */
     let loadChain = Promise.resolve();
+    let mutationChain = Promise.resolve();
 
     /**
      * @param {unknown} err
@@ -495,7 +496,7 @@ export function createSlotRepo(deps) {
         }, mapErr, Ok, Err);
     }
 
-    return {
+    const repo = {
         ensureLoaded,
         getLoadError() {
             return loadError;
@@ -536,6 +537,56 @@ export function createSlotRepo(deps) {
                 loadGeneration += 1;
             }
             return Ok(undefined);
+        },
+
+        /**
+         * 删掉这一楼的全部生图记录，并清掉对应图片。
+         * @param {number} messageId
+         */
+        async removeByMessage(messageId) {
+            return catchToResult(async () => {
+                const ready = await ensureLoaded();
+                if (isErr(ready)) {
+                    throw ready.error;
+                }
+                if (loadError) {
+                    throw loadError;
+                }
+                const sid = sessionId;
+                if (!sid) {
+                    throw hostError({
+                        code: 'SESSION_ID_MISSING',
+                        message: '当前没有可用的会话 id',
+                    });
+                }
+                const genAtStart = loadGeneration;
+                const mid = Number(messageId);
+                const nextMap = await baseMapForSession(sid);
+                /** @type {SlotRecord[]} */
+                const removed = [];
+                for (const [slotId, rec] of nextMap) {
+                    if (rec && rec.messageId === mid) {
+                        removed.push(rec);
+                        nextMap.delete(slotId);
+                    }
+                }
+                const trimmed = applyTrim(
+                    [...nextMap.values()].sort((a, b) => a.slotId - b.slotId),
+                    null,
+                );
+                await persist(sid, trimmed, null);
+                applyCacheIfCurrent(sid, trimmed, genAtStart);
+                for (const rec of removed) {
+                    await clearReusedSlotCache(rec.slotId, sid);
+                    const images = Array.isArray(rec.images) ? rec.images : [];
+                    for (const entry of images) {
+                        if (entry?.imageRef && imageRepo && typeof imageRepo.remove === 'function') {
+                            await imageRepo.remove(entry.imageRef);
+                        }
+                    }
+                }
+                changes.emit({ type: 'remove', messageId: mid, sessionId: sid });
+            }, mapErr, Ok, Err);
         },
 
         async getByMessage(messageId) {
@@ -666,8 +717,51 @@ export function createSlotRepo(deps) {
             return commitSlotImages(messageId, entries, opts);
         },
 
+        async replaceMessageRecords(messageId, records, opts = {}) {
+            return catchToResult(async () => {
+                const sid = String(opts.sessionId || readHostSessionId() || '');
+                if (!sid) throw hostError({ code: 'SESSION_ID_MISSING', message: '当前没有可用的会话 id' });
+                const mid = Number(messageId);
+                const gen = loadGeneration;
+                const nextMap = await baseMapForSession(sid);
+                const previous = [...nextMap.values()].filter((row) => row.messageId === mid)
+                    .sort((a, b) => a.slotId - b.slotId);
+                if (opts.expectedRecords
+                    && JSON.stringify(previous) !== JSON.stringify(opts.expectedRecords)) {
+                    throw hostError({ code: 'SLOT_EDIT_CONFLICT', message: '提示词或图片记录已变化，请重新打开编辑器' });
+                }
+                for (const row of previous) nextMap.delete(row.slotId);
+                const seen = new Set();
+                for (const record of records) {
+                    const checked = validateSlotRecord({ ...record, messageId: mid });
+                    if (!checked.ok) throw checked.error;
+                    const row = checked.value;
+                    if (seen.has(row.slotId) || nextMap.has(row.slotId)) {
+                        throw hostError({ code: 'SLOT_EDIT_ID', message: '图片编号重复或属于其他楼层' });
+                    }
+                    seen.add(row.slotId);
+                    nextMap.set(row.slotId, row);
+                }
+                const next = [...nextMap.values()].sort((a, b) => a.slotId - b.slotId);
+                await persist(sid, next, opts.chatLocation);
+                applyCacheIfCurrent(sid, next, gen);
+                changes.emit({ type: 'edit', messageId: mid, sessionId: sid });
+                return next.filter((row) => row.messageId === mid);
+            }, mapErr, Ok, Err);
+        },
+
         onChanged(fn) {
             return changes.subscribe(fn);
         },
     };
+    // Serialize the whole read-modify-write transaction, not merely the final upload.
+    for (const name of ['put', 'recordImage', 'recordImages', 'replaceMessageRecords', 'removeByMessage', 'deleteSessionFile']) {
+        const method = repo[name];
+        repo[name] = (...args) => {
+            const task = mutationChain.then(() => method(...args));
+            mutationChain = task.then(() => undefined, () => undefined);
+            return task;
+        };
+    }
+    return repo;
 }

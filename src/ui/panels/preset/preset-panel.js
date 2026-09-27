@@ -201,7 +201,7 @@ export function mountPresetPanel(root, deps) {
         }
 
         const promptsHost = el('div', 'nd-preset-prompts');
-        /** @type {{ name: ReturnType<typeof createField>, content: ReturnType<typeof labeledTextarea>, enabled: ReturnType<typeof createCheckbox>, role: ReturnType<typeof createSelect> }[]} */
+        /** @type {{ name: ReturnType<typeof createField>, content: ReturnType<typeof labeledTextarea>, enabled: ReturnType<typeof createCheckbox>, workbenchOnly: ReturnType<typeof createCheckbox>, role: ReturnType<typeof createSelect> }[]} */
         let promptControls = [];
 
         function paintPrompts() {
@@ -230,13 +230,17 @@ export function mountPresetPanel(root, deps) {
                     label: '启用',
                     checked: p.enabled !== false,
                 });
+                const workbenchOnly = createCheckbox({
+                    label: '工作台专用',
+                    checked: p.workbenchOnly === true,
+                });
                 const content = labeledTextarea(
                     '内容',
                     p.content != null ? String(p.content) : '',
                     6,
                 );
-                promptControls.push({ name, content, enabled, role });
-                block.append(name.el, role.el, enabled.el, content.el);
+                promptControls.push({ name, content, enabled, workbenchOnly, role });
+                block.append(name.el, role.el, enabled.el, workbenchOnly.el, content.el);
                 const moveRow = el('div', 'nd-form__actions');
                 if (index > 0) {
                     moveRow.appendChild(createButton({
@@ -345,6 +349,7 @@ export function mountPresetPanel(root, deps) {
                 role: c.role.getValue(),
                 content: c.content.getValue(),
                 enabled: c.enabled.getValue(),
+                workbenchOnly: c.workbenchOnly.getValue(),
             }));
         }
 

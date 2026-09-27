@@ -273,18 +273,22 @@ export function classifyLlmRequest(req) {
         && /候选 key/.test(joined)) {
         return 'single-recall';
     }
-    if (/单图生图|single_imagegen|用户描述/.test(joined)
-        && /生图内容/.test(joined)) {
+    // 楼内生图：构图标签里有真实图编号。预设里的「用户描述」不能据此判成单图。
+    if (/生图内容/.test(joined) && parseSlotIdsFromPromptMessages(joined).length > 0) {
+        return 'prompt';
+    }
+    // 工作台非楼内：同一套生图预设，但没有图编号。
+    if (/用户描述/.test(joined) && /生图内容/.test(joined)
+        && parseSlotIdsFromPromptMessages(joined).length === 0) {
+        return 'workbench';
+    }
+    if (/单图生图|single_imagegen/.test(joined) && /生图内容/.test(joined)) {
         return 'single-prompt';
     }
     // 召回：靠【候选 key】或明确召回措辞；勿被生图预设示例 JSON 里的 slotid 骗成 prompt
     if (/【候选 key】/.test(joined)
         || (/构图召回|标签召回/.test(joined) && /位置数组|生成点/.test(joined))) {
         return 'recall';
-    }
-    // 写提示词：要求真实注入段【构图标签】+ 生图内容（示例里的 "slotid": 1 不算）
-    if (/【构图标签】/.test(joined) && /生图内容/.test(joined)) {
-        return 'prompt';
     }
     if (/slotid|构图标签/.test(joined) && /生图内容/.test(joined)
         && !/【示例|示例输出 JSON/.test(joined)) {

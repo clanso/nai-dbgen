@@ -8,6 +8,27 @@ import { Ok, Err, isOk, isErr } from '../../src/infra/result.js';
 import { domainError, hostError } from '../../src/infra/errors.js';
 import { createGenerateFloorUseCase } from '../../src/application/generate-floor.usecase.js';
 
+it('悬浮球首次轻提示，第二次重生成，下一轮仍先提示', async () => {
+    const f = createFakes({ records: [makeRecord({ images: [{ imageRef: 'old' }] })] });
+    const useCase = createGenerateFloorUseCase(f);
+    assert.equal((await useCase.execute(5, { manual: true })).value.confirmationRequired, true);
+    assert.equal(f.renderSlot.callCount, 0);
+    assert.equal((await useCase.execute(5, { manual: true })).ok, true);
+    assert.equal(f.renderSlot.callCount, 1);
+    assert.equal(f.generateSlots.callCount, 0);
+    assert.equal((await useCase.execute(5, { manual: true })).value.confirmationRequired, true);
+    assert.equal(f.renderSlot.callCount, 1);
+});
+
+it('manual first warning is scoped to the originating chat', async () => {
+    const f = createFakes({ records: [makeRecord({ images: [{ imageRef: 'old' }] })] });
+    const useCase = createGenerateFloorUseCase(f);
+    await useCase.execute(5, { manual: true });
+    f.host.setChatId('another-chat');
+    assert.equal((await useCase.execute(5, { manual: true })).value.confirmationRequired, true);
+    assert.equal(f.renderSlot.callCount, 0);
+});
+
 /**
  * @param {object} [opts]
  */
@@ -39,6 +60,8 @@ function createFakes(opts = {}) {
 
     let generateCalls = 0;
     let renderCalls = 0;
+    /** @type {boolean[]} */
+    const forceFlags = [];
     /** @type {number[]} */
     const renderedSlotIds = [];
 
@@ -56,11 +79,23 @@ function createFakes(opts = {}) {
         isSystem: false,
     }];
 
+    /** @type {string[]} */
+    const replacedTexts = [];
+    let removedMessageId = /** @type {number|null} */ (null);
+
     const host = {
         getCurrentChatId: () => chatId,
         setChatId: (id) => { chatId = id; },
         getRecentAiMessages: (n) => aiMessages.slice(0, n),
         getMessage: (id) => aiMessages.find((m) => m.messageId === id) ?? null,
+        async replaceMessageText(id, text) {
+            const mes = aiMessages.find((m) => m.messageId === id);
+            if (mes) {
+                mes.text = text;
+            }
+            replacedTexts.push(text);
+            return Ok(undefined);
+        },
     };
 
     const slotRepo = {
@@ -81,6 +116,11 @@ function createFakes(opts = {}) {
         },
         setGetByMessageErr(err) {
             getByMessageErr = err;
+        },
+        async removeByMessage(messageId) {
+            removedMessageId = messageId;
+            records = (records || []).filter((r) => r.messageId !== messageId);
+            return Ok(undefined);
         },
     };
 
@@ -177,6 +217,7 @@ function createFakes(opts = {}) {
                 }
                 renderCalls += 1;
                 renderedSlotIds.push(slotId);
+                forceFlags.push(ropts?.force === true);
                 if (ropts?.signal?.aborted) {
                     return Err(domainError({
                         code: 'UPSTREAM_ABORTED',
@@ -234,6 +275,9 @@ function createFakes(opts = {}) {
         get renderedSlotIds() {
             return renderedSlotIds.slice();
         },
+        get forceFlags() {
+            return forceFlags.slice();
+        },
         failSlot(slotId, err) {
             renderFailBySlot.set(slotId, err);
         },
@@ -262,6 +306,12 @@ function createFakes(opts = {}) {
         },
         setNewRecords(recs) {
             optsNewRecords = recs;
+        },
+        get removedMessageId() {
+            return removedMessageId;
+        },
+        get replacedTexts() {
+            return replacedTexts.slice();
         },
         get generateCalls() {
             return generateCalls;
@@ -312,8 +362,15 @@ describe('generateFloor — no records then write + render', () => {
 });
 
 describe('generateFloor — already rendered', () => {
-    it('all already-rendered → 0 LLM, 0 NAI, skipped already-rendered', async () => {
+    it('已有图的当前楼再点：清掉后从提示词重跑再出图', async () => {
         const f = createFakes({
+            aiMessages: [{
+                messageId: 5,
+                name: 'Bot',
+                text: 'hello<IMG>\n1\n</IMG>',
+                isUser: false,
+                isSystem: false,
+            }],
             records: [
                 makeRecord({
                     slotId: 1,
@@ -325,18 +382,23 @@ describe('generateFloor — already rendered', () => {
                 }),
             ],
         });
+        f.setNewRecords([
+            makeRecord({ messageId: 5, slotId: 3 }),
+            makeRecord({ messageId: 5, slotId: 4 }),
+        ]);
         const uc = createGenerateFloorUseCase(f);
         const r = await uc.execute(5);
         assert.equal(isOk(r), true);
-        assert.equal(r.value.wroteSlots, false);
-        assert.deepEqual(r.value.rendered, []);
-        assert.equal(f.generateCalls, 0);
-        assert.equal(f.renderCalls, 0);
-        assert.equal(r.value.skipped.length, 2);
-        assert.ok(r.value.skipped.every((s) => s.reason === 'already-rendered'));
+        assert.equal(r.value.wroteSlots, true);
+        assert.deepEqual(r.value.rendered, [3, 4]);
+        assert.equal(f.generateCalls, 1);
+        assert.equal(f.renderCalls, 2);
+        assert.equal(f.removedMessageId, 5);
+        assert.equal(f.host.getMessage(5).text, 'hello');
+        assert.equal(r.value.skipped.length, 0);
     });
 
-    it('partially rendered → only renders missing', async () => {
+    it('部分已出图再点：整楼从提示词重跑', async () => {
         const f = createFakes({
             records: [
                 makeRecord({
@@ -347,14 +409,18 @@ describe('generateFloor — already rendered', () => {
                 makeRecord({ slotId: 3, images: [] }),
             ],
         });
+        f.setNewRecords([
+            makeRecord({ messageId: 5, slotId: 1 }),
+            makeRecord({ messageId: 5, slotId: 2 }),
+        ]);
         const uc = createGenerateFloorUseCase(f);
         const r = await uc.execute(5);
         assert.equal(isOk(r), true);
-        assert.equal(r.value.wroteSlots, false);
-        assert.equal(f.generateCalls, 0);
+        assert.equal(r.value.wroteSlots, true);
+        assert.equal(f.generateCalls, 1);
         assert.equal(f.renderCalls, 2);
-        assert.deepEqual(r.value.rendered, [2, 3]);
-        assert.deepEqual(r.value.skipped, [{ slotId: 1, reason: 'already-rendered' }]);
+        assert.deepEqual(r.value.rendered, [1, 2]);
+        assert.equal(f.removedMessageId, 5);
     });
 });
 
@@ -402,6 +468,11 @@ describe('generateFloor — chat switch / abort', () => {
             ],
         });
         let rendersStarted = 0;
+        f.setNewRecords([
+            makeRecord({ slotId: 1, images: [] }),
+            makeRecord({ slotId: 2, images: [] }),
+            makeRecord({ slotId: 3, images: [] }),
+        ]);
         f.renderSlot.setOnBeforeRender(() => {
             rendersStarted += 1;
             if (rendersStarted === 1) {
@@ -477,6 +548,11 @@ describe('generateFloor — no AI floor / partial fail / isRunning', () => {
                 makeRecord({ slotId: 3, images: [] }),
             ],
         });
+        f.setNewRecords([
+            makeRecord({ slotId: 1, images: [] }),
+            makeRecord({ slotId: 2, images: [] }),
+            makeRecord({ slotId: 3, images: [] }),
+        ]);
         f.renderSlot.failSlot(2, domainError({
             code: 'NAI_FAIL',
             message: '上游失败',
@@ -491,7 +567,7 @@ describe('generateFloor — no AI floor / partial fail / isRunning', () => {
         assert.match(r.value.failed[0].message, /上游失败/);
         assert.match(r.value.failed[0].message, /检查 NAI 配置/);
         assert.equal(f.renderCalls, 3);
-        assert.equal(f.generateCalls, 0);
+        assert.equal(f.generateCalls, 1);
     });
 
     it('isRunning true while executing, false after', async () => {
@@ -522,6 +598,7 @@ describe('generateFloor — no AI floor / partial fail / isRunning', () => {
             }],
             records: [makeRecord({ messageId: 9, slotId: 1, images: [] })],
         });
+        f.setNewRecords([makeRecord({ messageId: 9, slotId: 1, images: [] })]);
         const uc = createGenerateFloorUseCase(f);
         const r = await uc.execute();
         assert.equal(isOk(r), true);

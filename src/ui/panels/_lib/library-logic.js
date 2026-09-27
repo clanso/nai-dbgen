@@ -270,6 +270,7 @@ export function mergePresetPrompt(original, formFields) {
         role: formFields.role,
         content: formFields.content,
         enabled: formFields.enabled,
+        workbenchOnly: formFields.workbenchOnly === true,
     });
 }
 

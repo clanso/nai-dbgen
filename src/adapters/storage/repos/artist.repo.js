@@ -1,6 +1,6 @@
 /**
  * L2 适配器 · ArtistString 仓库（需求 4.2）。
- * 导入导出为裸数组五字段；示例图只写本机 IndexedDB；名单 JSON 批量写一次。
+ * 导入导出为裸数组五字段；示例图只写本机，路径由名称算出，不进公共图片缓存。
  */
 
 import { Ok, Err } from '../../../infra/result.js';
@@ -26,21 +26,22 @@ import {
     pickArtistImportFields,
     toImageDataUrl,
 } from '../artist-io.js';
-import { blobToBase64 } from '../artist-preview-files.js';
+import { artistLocalImageId, blobToBase64 } from '../artist-preview-files.js';
 import { dataUrlToBlob } from '../image-scale.js';
 
 /**
  * @param {{ put: Function, remove?: Function, getBlob: Function }|null} imageRepo
  * @param {Blob} blob
+ * @param {string} id 固定路径，再次导入覆盖同一条
  */
-async function saveLocalArtistBlob(imageRepo, blob) {
+async function saveLocalArtistBlob(imageRepo, blob, id) {
     if (!imageRepo || typeof imageRepo.put !== 'function') {
         return Err(configError({
             code: 'ARTIST_PREVIEW_NO_LOCAL_STORE',
             message: '示例图存储不可用',
         }));
     }
-    return imageRepo.put(blob, { pinned: true });
+    return imageRepo.put(blob, { id });
 }
 
 /**
@@ -375,22 +376,26 @@ export function createArtistRepo(deps) {
                     try {
                         if (row.referenceImage) {
                             const blob = await dataUrlToBlob(row.referenceImage);
-                            const up = await saveLocalArtistBlob(imageRepo, blob);
+                            referenceImageRef = artistLocalImageId(name, 'ref');
+                            cardImageRef = artistLocalImageId(name, 'card');
+                            const up = await saveLocalArtistBlob(imageRepo, blob, referenceImageRef);
                             if (!up.ok) {
                                 throw new Error(up.error.message || '原图保存失败');
                             }
-                            referenceImageRef = up.value;
                             if (!makeCardImage) {
                                 throw new Error('卡片图处理不可用');
                             }
                             const cardBlob = await makeCardImage(blob);
-                            const cardUp = await saveLocalArtistBlob(imageRepo, cardBlob);
+                            const cardUp = await saveLocalArtistBlob(imageRepo, cardBlob, cardImageRef);
                             if (!cardUp.ok) {
                                 throw new Error(cardUp.error.message || '卡片图保存失败');
                             }
-                            cardImageRef = cardUp.value;
-                            await dropLocalArtistBlob(imageRepo, oldRef);
-                            await dropLocalArtistBlob(imageRepo, oldCard);
+                            if (oldRef && oldRef !== referenceImageRef) {
+                                await dropLocalArtistBlob(imageRepo, oldRef);
+                            }
+                            if (oldCard && oldCard !== cardImageRef) {
+                                await dropLocalArtistBlob(imageRepo, oldCard);
+                            }
                             oldRef = null;
                             oldCard = null;
                             row.referenceImage = null;

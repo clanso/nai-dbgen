@@ -39,6 +39,7 @@ function llmConfig(overrides = {}) {
         name: 'test',
         baseUrl: 'https://api.example.com/v1',
         secretId: 'sec-test',
+        apiKey: 'sk-test',
         model: 'gpt-test',
         createdAt: 't',
         updatedAt: 't',
@@ -269,7 +270,7 @@ describe('createLlmGateway', () => {
             calls += 1;
             return { content: '{}' };
         });
-        const cfg = llmConfig({ name: '默认 LLM', secretId: null });
+        const cfg = llmConfig({ name: '默认 LLM', secretId: null, apiKey: '' });
         const result = await gw.complete({
             messages: [{ role: 'user', content: 'hi' }],
             config: cfg,
@@ -284,7 +285,7 @@ describe('createLlmGateway', () => {
         assert.equal(calls, 0);
     });
 
-    it('st-backend uses ChatCompletionService with custom source + secret_id', async () => {
+    it('st-backend passes the API key on the OpenAI proxy and does not send secret_id', async () => {
         /** @type {object|null} */
         let seenData = null;
         const getContext = () => ({
@@ -310,16 +311,17 @@ describe('createLlmGateway', () => {
             config: llmConfig({
                 baseUrl: 'https://llm.example.com/v1',
                 secretId: 'sec-abc',
+                apiKey: 'sk-test',
             }),
             jsonSchema: { name: 'keys', value: { type: 'object' } },
         });
         assert.equal(isOk(result), true);
         assert.equal(seenData.chat_completion_source, 'custom');
         assert.equal(seenData.custom_url, 'https://llm.example.com/v1');
-        assert.equal(seenData.secret_id, 'sec-abc');
+        assert.equal(seenData.custom_include_headers, 'Authorization: "Bearer sk-test"');
+        assert.equal('secret_id' in seenData, false);
         assert.equal(seenData.stream, false);
         assert.equal('json_schema' in seenData, false);
-        assert.equal('proxy_password' in seenData, false);
         assert.equal('reverse_proxy' in seenData, false);
         assert.deepEqual(result.value.json, { keys: ['a'] });
         assert.equal(JSON.stringify(result).includes('sk-secret'), false);

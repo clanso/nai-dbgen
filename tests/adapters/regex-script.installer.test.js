@@ -32,8 +32,10 @@ describe('regex-script.installer pure helpers', () => {
         assert.equal(widget.findRegex, toFindRegexLiteral(SLOT_TOKEN_PATTERN_SOURCE, 'gi'));
         assert.equal(strip.findRegex, widget.findRegex);
         assert.equal(widget.replaceString, slotWidgetReplaceTemplate());
-        assert.equal(widget.replaceString.startsWith('```'), false);
-        assert.equal(widget.replaceString.endsWith('```'), false);
+        assert.equal(widget.replaceString.startsWith('```html\n<!DOCTYPE html>'), true);
+        assert.equal(widget.replaceString.endsWith('</html>\n\n```'), true);
+        assert.equal(widget.replaceString.includes('<html'), true);
+        assert.equal(widget.replaceString.includes('</html>'), true);
         assert.equal(strip.replaceString, '');
         assert.equal(widget.markdownOnly, true);
         assert.equal(widget.promptOnly, false);

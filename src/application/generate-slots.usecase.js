@@ -262,6 +262,7 @@ export function createGenerateSlotsUseCase(deps) {
 
             const messages = renderPreset(presetR.value, blocks, {
                 runHostMacros: deps.runHostMacros,
+                omitWorkbenchOnly: true,
             });
 
             const aborted2 = abortErrIfNeeded(signal, traceId);
@@ -507,6 +508,9 @@ export function createGenerateSlotsUseCase(deps) {
          * @param {GenerateSlotsOptions} [opts]
          */
         execute(messageId, opts) {
+            if (deps.isEditing?.(messageId)) return Promise.resolve(Err(domainError({
+                code: 'SLOT_EDITOR_BUSY', message: '本楼提示词正在保存，请稍后再试',
+            })));
             const key = currentWriteKey(messageId);
             const existing = inflight.get(key);
             if (existing) {

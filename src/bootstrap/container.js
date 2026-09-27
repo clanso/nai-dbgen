@@ -59,6 +59,8 @@ import { createWorkbenchService } from '../application/workbench.service.js';
 import { createAutoTriggerService } from '../application/auto-trigger.service.js';
 import { createStorageCleanupService } from '../application/storage-cleanup.service.js';
 import { createImageCacheTrimService } from '../application/image-cache-trim.service.js';
+import { createSlotEditorService } from '../application/slot-editor.service.js';
+import { APP_EVENTS } from '../application/_helpers.js';
 import { scaleImageToCard } from '../adapters/storage/image-scale.js';
 
 /**
@@ -257,13 +259,6 @@ export async function createContainer(opts = {}) {
         nowIso,
     });
 
-    /** @type {import('../ports/llm.port.js').LlmPort} */
-    const llm = opts.llm ?? createLlmGateway({
-        transports: {
-            'st-backend': createStBackendLlmTransport({ getContext, yaml }),
-        },
-    });
-
     const llmSecrets = opts.llmSecrets ?? createLlmSecretsStore({
         getRequestHeaders: () => {
             const ctx = getContext();
@@ -271,6 +266,13 @@ export async function createContainer(opts = {}) {
                 throw new Error('getContext().getRequestHeaders 不可用');
             }
             return ctx.getRequestHeaders();
+        },
+    });
+
+    /** @type {import('../ports/llm.port.js').LlmPort} */
+    const llm = opts.llm ?? createLlmGateway({
+        transports: {
+            'st-backend': createStBackendLlmTransport({ getContext, yaml }),
         },
     });
 
@@ -347,7 +349,9 @@ export async function createContainer(opts = {}) {
     const imageGen = factories.createImageGenService(imageGenDeps);
 
     // ── 同实例 #1+#2+#3：llm / tagRecall / bus 进 generateSlots ──
+    let slotEditor;
     const generateSlotsDeps = {
+        isEditing: (mid) => slotEditor?.isSaving(mid) === true,
         host,
         llm,
         characterRepo,
@@ -371,6 +375,7 @@ export async function createContainer(opts = {}) {
 
     // ── 同实例 #3：bus；D36：host ────────────────────────────────
     const renderSlotDeps = {
+        isEditing: (mid) => slotEditor?.isSaving(mid) === true,
         imageGen,
         slotRepo,
         imageRepo,
@@ -437,6 +442,17 @@ export async function createContainer(opts = {}) {
     };
     assertRequiredDeps('createGenerateFloorUseCase', generateFloorDeps, REQUIRED_APP_DEPS.createGenerateFloorUseCase);
     const generateFloor = factories.createGenerateFloorUseCase(generateFloorDeps);
+    slotEditor = createSlotEditorService({
+        host, slotRepo, imageRepo,
+        isBusy: (mid, records) => generateSlots.isWriting(mid) || generateFloor.isRunning(mid)
+            || records.some((row) => renderSlot.isRendering(mid, row.slotId)
+                || renderSlot.hasPendingWrite?.(mid, row.slotId)),
+        onSaved: (messageId, records, snapshot) => bus.emit(APP_EVENTS.SLOTS_EDITED, {
+            messageId, records, chatId: snapshot.chatId,
+            removedIds: snapshot.records.filter((row) => !records.some((record) => record.slotId === row.slotId))
+                .map((row) => row.slotId),
+        }),
+    });
 
     const storageCleanup = createStorageCleanupService({
         host,
@@ -482,6 +498,7 @@ export async function createContainer(opts = {}) {
             image: imageRepo,
         },
         services: {
+            slotEditor,
             contextCollector,
             worldInfoResolver,
             tagRecall,
@@ -506,6 +523,7 @@ export async function createContainer(opts = {}) {
                 return;
             }
             disposed = true;
+            imageGen.dispose?.();
             try {
                 autoTrigger.stop();
             } catch {

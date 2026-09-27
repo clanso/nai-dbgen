@@ -28,7 +28,14 @@ export function renderMessageHtml(text) {
         .replace(/>/g, '&gt;')
         .replace(
             /&lt;IMG&gt;\s*(\d+)\s*&lt;\/IMG&gt;/gi,
-            (_m, id) => template.replace(/\$1/g, String(id)),
+            (_m, id) => {
+                const page = template
+                    .replace(/^```html\s*/, '')
+                    .replace(/\s*```\s*$/, '')
+                    .replace(/\$1/g, String(id));
+                const body = page.match(/<body[^>]*>([\s\S]*)<\/body>/i);
+                return body ? body[1] : page;
+            },
         )
         .replace(/\n/g, '<br>');
 }

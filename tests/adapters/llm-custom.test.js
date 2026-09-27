@@ -14,6 +14,7 @@ import {
 } from '../../src/domain/model/api-config.js';
 import {
     buildCustomChatCompletionRequest,
+    buildCustomStatusRequest,
     buildIncludeBody,
     extractModelIdsFromStatus,
 } from '../../src/adapters/llm/request-data.js';
@@ -43,6 +44,7 @@ describe('LLM request-data', () => {
         const cfg = baseLlm({
             temperature: 0.7,
             maxTokens: 1024,
+            apiKey: 'sk-test',
         });
         const body = buildCustomChatCompletionRequest(cfg, {
             messages: [{ role: 'user', content: 'hi' }],
@@ -50,7 +52,10 @@ describe('LLM request-data', () => {
         });
         assert.equal(body.chat_completion_source, 'custom');
         assert.equal(body.custom_url, 'https://api.example.com/v1');
-        assert.equal(body.secret_id, 'sec-1');
+        assert.equal(body.custom_include_headers, 'Authorization: "Bearer sk-test"');
+        assert.equal('secret_id' in body, false);
+        assert.equal('reverse_proxy' in body, false);
+        assert.equal('proxy_password' in body, false);
         assert.equal(body.model, 'gpt-test');
         assert.equal(body.temperature, 0.7);
         assert.equal(body.max_tokens, 1024);
@@ -58,11 +63,11 @@ describe('LLM request-data', () => {
         assert.equal('custom_include_body' in body, false);
         assert.deepEqual(Object.keys(body).sort(), [
             'chat_completion_source',
+            'custom_include_headers',
             'custom_url',
             'max_tokens',
             'messages',
             'model',
-            'secret_id',
             'stream',
             'temperature',
             'use_sysprompt',
@@ -124,6 +129,35 @@ describe('LLM request-data', () => {
         assert.equal(body.custom_include_headers, 'X-Test: "1"');
         assert.equal(body.custom_exclude_body, '- temperature');
         assert.equal(body.custom_prompt_post_processing, 'merge');
+    });
+
+    it('拉模型把密钥放进 Authorization，地址原样交给 custom', () => {
+        const body = buildCustomStatusRequest({
+            baseUrl: 'https://api.deepseek.com',
+            apiKey: 'sk-test',
+            secretId: 'sec-1',
+            customIncludeHeaders: 'X-Test: "1"',
+        });
+        assert.equal(body.chat_completion_source, 'custom');
+        assert.equal(body.custom_url, 'https://api.deepseek.com');
+        assert.equal(body.custom_include_headers, 'Authorization: "Bearer sk-test"\nX-Test: "1"');
+        assert.equal('secret_id' in body, false);
+        assert.equal('reverse_proxy' in body, false);
+    });
+
+    it('官方地址不加 /v1，末尾斜杠去掉', () => {
+        const body = buildCustomChatCompletionRequest(baseLlm({
+            baseUrl: 'https://api.deepseek.com/',
+            apiKey: 'sk-test',
+            customIncludeBody: 'reasoning_effort: high',
+        }), {
+            messages: [{ role: 'user', content: 'hi' }],
+            yaml,
+        });
+        assert.equal(body.custom_url, 'https://api.deepseek.com');
+        assert.equal(body.chat_completion_source, 'custom');
+        assert.equal(body.custom_include_body, 'reasoning_effort: high');
+        assert.equal(body.custom_include_headers, 'Authorization: "Bearer sk-test"');
     });
 });
 
@@ -297,6 +331,8 @@ describe('LLM secrets store', () => {
 
 describe('LLM listModels / probe', () => {
     it('拉模型成功与失败', async () => {
+        /** @type {Record<string, unknown>|null} */
+        let seen = null;
         const transport = createStBackendLlmTransport({
             yaml,
             getContext: () => ({
@@ -306,13 +342,20 @@ describe('LLM listModels / probe', () => {
                     sendRequest: async () => ({ content: 'ok' }),
                 },
             }),
-            fetch: async () => new Response(JSON.stringify({
-                data: [{ id: 'a' }, { id: 'b' }, { id: 'c' }],
-            }), { status: 200 }),
+            fetch: async (_url, init) => {
+                seen = JSON.parse(String(init?.body || '{}'));
+                return new Response(JSON.stringify({
+                    data: [{ id: 'a' }, { id: 'b' }, { id: 'c' }],
+                }), { status: 200 });
+            },
         });
-        const ok = await transport.listModels(baseLlm());
+        const ok = await transport.listModels(baseLlm({ apiKey: 'sk-test' }));
         assert.equal(ok.ok, true);
         assert.equal(ok.value.count, 3);
+        assert.equal(seen?.chat_completion_source, 'custom');
+        assert.equal(seen?.custom_url, 'https://api.example.com/v1');
+        assert.equal(seen?.custom_include_headers, 'Authorization: "Bearer sk-test"');
+        assert.equal('secret_id' in (seen || {}), false);
 
         const badTransport = createStBackendLlmTransport({
             yaml,
@@ -323,7 +366,7 @@ describe('LLM listModels / probe', () => {
                 error: { message: 'invalid api key' },
             }), { status: 401 }),
         });
-        const bad = await badTransport.listModels(baseLlm());
+        const bad = await badTransport.listModels(baseLlm({ apiKey: 'sk-test' }));
         assert.equal(bad.ok, false);
         assert.match(bad.error.message, /拉取模型|鉴权|密钥/i);
 
@@ -331,7 +374,7 @@ describe('LLM listModels / probe', () => {
             transports: { 'st-backend': transport },
             sleep: async () => {},
         });
-        const probe = await gw.probe(baseLlm());
+        const probe = await gw.probe(baseLlm({ apiKey: 'sk-test' }));
         assert.equal(probe.ok, true);
         assert.match(probe.detail, /3 个模型/);
     });
