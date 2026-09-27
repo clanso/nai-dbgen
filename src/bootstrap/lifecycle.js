@@ -25,6 +25,7 @@ import { openPanelShell } from '../ui/panels/shell.js';
 import { mountWorkbench } from '../ui/workbench/workbench.js';
 import { mountSlotWidget } from '../ui/slot-widget/slot-widget.js';
 import { openModal } from '../ui/common/modal.js';
+import { openSlotEditor, bindSlotEditorGesture, removeDeletedSlotElements } from '../ui/slot-editor/slot-editor.js';
 
 const log = createLogger('bootstrap/lifecycle');
 
@@ -89,6 +90,7 @@ const FLOOR_BUSY_POLL_MS = 200;
 
 /** @type {RuntimeState} */
 const runtime = {
+    editorCleanup: null,
     container: null,
     drawerHandle: null,
     floatingBallHandle: null,
@@ -393,8 +395,10 @@ async function openWorkbenchUi(container) {
         workbenchService: container.services.workbench,
         tagRepo: container.repos.tag,
         artistRepo: container.repos.artist,
+        artistFileUrl: container.artistFileUrl,
         loadSettings: container.loadSettings,
         saveSettings: (s) => container.settingsStore.save(s),
+        subscribeSettings: (fn) => container.settingsStore.onChange(fn),
         imageRepo: container.repos.image,
     });
     const modal = await openModal(
@@ -407,8 +411,12 @@ async function openWorkbenchUi(container) {
             allowVerticalScrolling: true,
         },
     );
+    const dialog = root.closest('dialog');
+    const onClose = () => handle.destroy();
+    dialog?.addEventListener('close', onClose, { once: true });
     runtime.workbenchModal = {
         destroy() {
+            dialog?.removeEventListener('close', onClose);
             try {
                 handle.destroy();
             } catch {
@@ -717,7 +725,7 @@ function mountFloatingBallUi() {
                     },
                 });
             }
-            return c.useCases.generateFloor.execute();
+            return c.useCases.generateFloor.execute(undefined, { manual: true });
         },
         isFloorBusy: () => {
             try {
@@ -1213,6 +1221,7 @@ export async function activate(opts = {}) {
         }
 
         runtime.unsubSlotRenderedCache = container.bus.on(APP_EVENTS.SLOT_RENDERED, (payload) => {
+            if (payload?.chatId != null && payload.chatId !== container.host.getCurrentChatId()) return;
             if (payload?.record && payload.messageId != null && payload.slotId != null) {
                 recordCache.set(recordKey(payload.messageId, payload.slotId), payload.record);
             }
@@ -1236,6 +1245,42 @@ export async function activate(opts = {}) {
                 }
             }
         });
+        let editor = null;
+        let openingEditor = false;
+        let editorDisposed = false;
+        const offEditorGesture = bindSlotEditorGesture(document, async (messageId) => {
+            if (openingEditor || editorDisposed) return;
+            openingEditor = true;
+            try {
+                editor?.destroy();
+                editor = await openSlotEditor({ service: container.services.slotEditor, host: container.host }, messageId);
+                if (editorDisposed) editor?.destroy();
+            } catch (error) {
+                safeToast(container.host, 'error', error.message || '无法打开提示词编辑器');
+            } finally {
+                openingEditor = false;
+            }
+        });
+        const offEdited = container.bus.on(APP_EVENTS.SLOTS_EDITED, (payload) => {
+            if (payload.chatId !== container.host.getCurrentChatId()) return;
+            const prefix = `${payload.messageId}::`;
+            for (const key of recordCache.keys()) if (key.startsWith(prefix)) recordCache.delete(key);
+            for (const key of slotMetaCache.keys()) if (key.startsWith(prefix)) slotMetaCache.delete(key);
+            for (const [key, widget] of runtime.slotWidgets) {
+                if (!key.startsWith(prefix)) continue;
+                widget.destroy();
+                runtime.slotWidgets.delete(key);
+            }
+            for (const record of payload.records) recordCache.set(recordKey(record.messageId, record.slotId), record);
+            removeDeletedSlotElements(document, payload.messageId, payload.removedIds || []);
+            container.host.rerenderMessage?.(payload.messageId);
+        });
+        runtime.editorCleanup = () => {
+            editorDisposed = true;
+            offEditorGesture();
+            offEdited();
+            editor?.destroy();
+        };
         rollback.push(() => {
             try {
                 runtime.unsubSlotsWrittenCache?.();
@@ -1366,6 +1411,8 @@ export async function activate(opts = {}) {
  */
 async function disposeInternal() {
     stopFloorBusyWatch();
+    runtime.editorCleanup?.();
+    runtime.editorCleanup = null;
 
     try {
         runtime.workbenchModal?.destroy();

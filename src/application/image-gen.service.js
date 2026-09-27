@@ -9,7 +9,8 @@
  */
 
 import { Ok, Err } from '../infra/result.js';
-import { configError } from '../infra/errors.js';
+import { configError, domainError } from '../infra/errors.js';
+import { createNaiRequestPool, selectNaiPoolConfigs } from './nai-request-pool.js';
 import { assembleNaiPayload } from '../domain/nai/payload-assembler.js';
 import { mergeNaiParamsForGenerate } from '../domain/nai/param-options.js';
 import {
@@ -39,6 +40,7 @@ import {
  *   - `null`：不拼接任何画师串
  *   - `ArtistString` 对象：用该对象覆盖（需求 4.2 手填预览须传「正在编辑的那一条」）
  * @property {AbortSignal} [signal]
+ * @property {() => boolean} [shouldStart] Recheck chat ownership when a queued request gets a key.
  * @property {string} [traceId] 出图链路 trace；缺省由服务生成
  */
 
@@ -63,6 +65,7 @@ import {
  * @returns {ImageGenService}
  */
 export function createImageGenService(deps) {
+    const pool = createNaiRequestPool();
     /**
      * @returns {Promise<ArtistString|null>}
      */
@@ -80,6 +83,7 @@ export function createImageGenService(deps) {
 
     return {
         getActiveArtist,
+        dispose: () => pool.dispose(),
 
         /**
          * @param {ImageGenRequest} req
@@ -182,11 +186,23 @@ export function createImageGenService(deps) {
                 return aborted2;
             }
 
-            const genR = await deps.imageGenPort.generate(payload, {
-                signal: req.signal,
-                config: naiCfgR.value,
-                traceId,
-            });
+            let configs = [];
+            if (settings.naiParallel && typeof deps.naiConfigRepo.list === 'function') {
+                const listed = await deps.naiConfigRepo.list();
+                if (!listed.ok) return attachTraceId(listed, traceId);
+                configs = listed.value;
+            }
+            const candidates = selectNaiPoolConfigs(naiCfgR.value, configs, settings.naiParallel);
+            const genR = await pool.run(candidates, (config, signal) => {
+                if (typeof req.shouldStart === 'function' && !req.shouldStart()) {
+                    return Err(domainError({
+                        code: 'CHAT_CHANGED',
+                        message: '会话已切换，取消尚未发送的生图请求',
+                        traceId,
+                    }));
+                }
+                return deps.imageGenPort.generate(payload, { signal, config, traceId });
+            }, { signal: req.signal, parallel: settings.naiParallel === true });
             return attachTraceId(genR, traceId);
         },
     };

@@ -426,9 +426,17 @@ export function mountSlotWidget(rootEl, messageId, deps) {
         if (destroyed || !currentImageUrl) {
             return;
         }
+        const history = (deps.getRecord(messageId, slotId)?.images || [])
+            .filter((item) => item?.imageRef);
         void openSlotImageViewer(
             { host: deps.host },
-            { url: currentImageUrl, title: `Slot #${slotId}` },
+            {
+                url: currentImageUrl,
+                title: `图片 #${slotId} 历史`,
+                images: history,
+                initialIndex: history.length - 1,
+                getImageUrl: deps.getImageUrl,
+            },
         );
     }
 

@@ -177,6 +177,53 @@ describe('bootstrap/lifecycle', () => {
         assert.ok(ctx._slashRegistry.includes('naiwb'));
     });
 
+    it('/naiwb wires the shared artist picker and releases it when the dialog closes', async () => {
+        const ctx = makeFakeContext();
+        await boot(ctx);
+        const container = _runtimeForTest().container;
+        let unsubscribeCount = 0;
+        let coverCalls = 0;
+        const originalOnChange = container.settingsStore.onChange;
+        container.settingsStore.onChange = (fn) => {
+            const unsubscribe = originalOnChange(fn);
+            return () => {
+                unsubscribeCount += 1;
+                unsubscribe();
+            };
+        };
+        container.repos.artist.list = async () => Ok([
+            { id: 'a1', name: 'Alpha' },
+            { id: 'a2', name: 'Beta' },
+        ]);
+        container.artistFileUrl.cardUrl = (item) => {
+            coverCalls += 1;
+            return item ? `/user/files/nai-dbgen_${item.id}.webp` : null;
+        };
+        container.settingsStore.set('activeArtistId', 'a1');
+        const command = ctx._slashCommands.find((cmd) => cmd.name === 'naiwb');
+        await command.callback({}, '');
+        await new Promise((resolve) => setImmediate(resolve));
+
+        const workbench = fakeDom.document.body.querySelector('.nd-workbench');
+        assert.ok(workbench);
+        const picker = workbench.querySelector('.nd-wb-artist');
+        assert.equal(picker.querySelector('input').value, 'Alpha');
+        assert.ok(coverCalls > 0);
+        container.settingsStore.set('activeArtistId', 'a2');
+        await new Promise((resolve) => setImmediate(resolve));
+        assert.equal(picker.querySelector('input').value, 'Beta');
+
+        const dialog = workbench.closest('dialog');
+        assert.ok(dialog);
+        for (const listener of [...dialog._listeners].filter((item) => item.type === 'close')) {
+            listener.fn({ target: dialog });
+        }
+        assert.equal(unsubscribeCount, 1);
+        assert.equal(fakeDom.document.body.querySelector('.nd-workbench'), null);
+        _runtimeForTest().workbenchModal.destroy();
+        assert.equal(unsubscribeCount, 1);
+    });
+
     it('activate 后触发图片缓存裁剪；失败只记日志不抛', async () => {
         const ctx = makeFakeContext();
         const getContext = () => ctx;

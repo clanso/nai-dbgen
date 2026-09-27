@@ -132,6 +132,26 @@ function makeSlotRepo(opts = {}) {
 }
 
 describe('session slot repo', () => {
+    it('parallel history appends do not lose records; editor conflicts preserve the newer history', async () => {
+        const { slots } = makeSlotRepo();
+        await slots.put(7, [sampleSlot({ messageId: 7 })]);
+        const original = (await slots.getByMessage(7)).value;
+        await Promise.all(['one', 'two', 'three'].map((ref) => slots.recordImage(7, 1, ref)));
+        assert.equal((await slots.get(7, 1)).value.images.length, 3);
+        const conflict = await slots.replaceMessageRecords(7, [], { expectedRecords: original });
+        assert.equal(conflict.ok, false);
+        assert.equal((await slots.get(7, 1)).value.images.length, 3);
+    });
+
+    it('deleting one message keeps records on other messages', async () => {
+        const { slots } = makeSlotRepo();
+        await slots.put(6, [sampleSlot({ slotId: 1, messageId: 6 })]);
+        await slots.put(7, [sampleSlot({ slotId: 2, messageId: 7 })]);
+        const original = (await slots.getByMessage(7)).value;
+        assert.equal((await slots.replaceMessageRecords(7, [], { expectedRecords: original })).ok, true);
+        assert.equal((await slots.getByMessage(7)).value.length, 0);
+        assert.equal((await slots.getByMessage(6)).value.length, 1);
+    });
     it('put/get/recordImage 写服务器会话文件；404=空', async () => {
         const { slots, serverFiles } = makeSlotRepo();
         assert.equal(isOk(assertSlotRepository(slots)), true);

@@ -94,6 +94,7 @@ export function createAutoTriggerService(deps) {
      * @returns {Promise<void>}
      */
     async function renderPending(messageId) {
+        const chatIdAtStart = deps.host.getCurrentChatId();
         const listR = await deps.slotRepo.getByMessage(messageId);
         if (!listR.ok) {
             // D39
@@ -128,6 +129,7 @@ export function createAutoTriggerService(deps) {
          * @param {import('../domain/model/slot.js').SlotRecord} record
          */
         async function renderOne(record) {
+            if (deps.host.getCurrentChatId() !== chatIdAtStart) return;
             const r = await deps.renderSlot.execute(messageId, record.slotId, { deferPersist: true });
             if (r.ok && r.value?.deferred) {
                 deferred.push(r.value.deferred);

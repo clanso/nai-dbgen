@@ -193,6 +193,12 @@ export function createImageRepo(deps) {
          * @param {string} sessionId
          * @param {number} slotId
          */
+        async unlinkSlot(sessionId, slotId) {
+            return catchToResult(async () => {
+                await db.delete(IDB_STORES.SLOT_IMAGE_CACHE, [String(sessionId), Number(slotId)]);
+            }, mapErr, Ok, Err);
+        },
+
         async clearSlot(sessionId, slotId) {
             const sid = String(sessionId ?? '');
             const id = Number(slotId);
