@@ -322,7 +322,7 @@
 
 /* textarea：不定死 height，保留 resize:vertical 可拖大 */
 :is(#nai-dbgen-root, .nd-root) .nd-textarea {
-    height: auto !important;
+    height: auto;
     min-height: 88px !important;
     padding: 10px 12px !important;
     line-height: 1.55 !important;
@@ -456,20 +456,33 @@
     box-sizing: border-box !important;
     width: 35px !important;
     height: 19px !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    transform: none;
     border-radius: var(--nd-radius-pill);
     background: var(--nd-toggle-track);
     border: 1px solid var(--nd-line);
     transition: 0.2s;
 }
 
+:is(#nai-dbgen-root, .nd-root) .nd-toggle-row i::before {
+    content: none;
+    display: none;
+}
+
 :is(#nai-dbgen-root, .nd-root) .nd-toggle-row i::after {
     content: "";
-    position: absolute;
+    display: block;
+    position: absolute !important;
     box-sizing: border-box !important;
-    top: 2px;
-    left: 2px;
+    inset: 2px auto auto 2px !important;
     width: 13px !important;
     height: 13px !important;
+    margin: 0 !important;
+    border: 0 !important;
+    transform: none;
+    translate: none;
+    box-shadow: none !important;
     border-radius: 50%;
     background: var(--nd-toggle-knob);
     transition: 0.2s;
@@ -486,7 +499,7 @@
 }
 
 :is(#nai-dbgen-root, .nd-root) .nd-toggle-row input:checked + i::after {
-    left: 18px;
+    inset: 2px auto auto 18px !important;
     background: var(--nd-on-accent);
 }
 

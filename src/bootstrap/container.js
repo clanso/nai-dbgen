@@ -19,6 +19,7 @@ import { createStMacroBridge } from '../adapters/host/st-macro.bridge.js';
 
 import { openIdb } from '../adapters/storage/idb.js';
 import { createServerFiles } from '../adapters/storage/server-files.js';
+import { createMarketCatalogStore } from '../adapters/storage/market-catalog.store.js';
 import { createMemoryServerFiles } from '../adapters/storage/memory-server-files.js';
 import { createArtistFileUrlResolver } from '../adapters/storage/artist-preview-files.js';
 import {
@@ -56,6 +57,7 @@ import { createImageGenService } from '../application/image-gen.service.js';
 import { createRenderSlotUseCase } from '../application/render-slot.usecase.js';
 import { createArtistPreviewService } from '../application/artist-preview.service.js';
 import { createWorkbenchService } from '../application/workbench.service.js';
+import { createWorkbenchArtistDraftService } from '../application/workbench-artist-draft.service.js';
 import { createAutoTriggerService } from '../application/auto-trigger.service.js';
 import { createStorageCleanupService } from '../application/storage-cleanup.service.js';
 import { createImageCacheTrimService } from '../application/image-cache-trim.service.js';
@@ -401,6 +403,19 @@ export async function createContainer(opts = {}) {
     };
     assertRequiredDeps('createArtistPreviewService', artistPreviewDeps, REQUIRED_APP_DEPS.createArtistPreviewService);
     const artistPreview = factories.createArtistPreviewService(artistPreviewDeps);
+    const workbenchArtistDraft = createWorkbenchArtistDraftService({
+        artistRepo,
+        makeCardImage,
+        saveCoverPair: (storageKey, referenceBlob, cardBlob) => putArtistPreviewPair(
+            { imageRepo },
+            storageKey,
+            referenceBlob,
+            cardBlob,
+        ),
+        removeCoverImage: (ref) => imageRepo.remove(ref),
+        newId,
+        nowIso,
+    });
 
     // ── 同实例 #2：tagRecall（D33）────────────────────────────────
     const workbenchDeps = {
@@ -478,6 +493,7 @@ export async function createContainer(opts = {}) {
         loadSettings,
         runHostMacros,
         serverFiles,
+        marketCatalogStore: createMarketCatalogStore(serverFiles),
         /** 画师串示例图展示 URL（卡片/原图；UI 只经此注入，不直连存储适配器） */
         artistFileUrl: createArtistFileUrlResolver(imageRepo),
         /** 库/配置文档库健康状况（服务器加载失败时 ready=false，禁止种子写入） */
@@ -505,6 +521,7 @@ export async function createContainer(opts = {}) {
             imageGen,
             artistPreview,
             workbench,
+            workbenchArtistDraft,
             autoTrigger,
             viewpointBlocks,
             storageCleanup,

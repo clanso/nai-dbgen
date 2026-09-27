@@ -57,7 +57,7 @@ function setText(node, text) {
 
 /**
  * @param {import('../../domain/model/nai-params.js').NaiParams|object} [initial]
- * @param {{ onChange?: (params: import('../../domain/model/nai-params.js').NaiParams) => void }} [opts]
+ * @param {{ onChange?: (params: import('../../domain/model/nai-params.js').NaiParams) => void, presentation?: 'workbench' }} [opts]
  * @returns {{
  *   el: HTMLElement,
  *   getValue: () => import('../../domain/model/nai-params.js').NaiParams,
@@ -73,6 +73,7 @@ export function createNaiParamsForm(initial, opts) {
     let pendingNotices = [];
     /** @type {(params: import('../../domain/model/nai-params.js').NaiParams) => void} */
     const onChange = typeof opts?.onChange === 'function' ? opts.onChange : () => {};
+    const workbenchPresentation = opts?.presentation === 'workbench';
 
     const root = el('div', 'nd-nai-params');
     root.style.containerType = 'inline-size';
@@ -208,7 +209,7 @@ export function createNaiParamsForm(initial, opts) {
     });
 
     const modelSizeGroup = createFieldGroup({
-        title: '模型与尺寸',
+        title: workbenchPresentation ? '' : '模型与尺寸',
         children: [
             model.el,
             sizePreset.el,
@@ -219,7 +220,7 @@ export function createNaiParamsForm(initial, opts) {
         ],
     });
     const sampleGroup = createFieldGroup({
-        title: '采样',
+        title: workbenchPresentation ? '' : '采样',
         children: [
             steps.el,
             scale.el,
@@ -229,8 +230,15 @@ export function createNaiParamsForm(initial, opts) {
         ],
     });
     const presetGroup = createFieldGroup({
-        title: '官方预设与开关',
-        children: [
+        title: workbenchPresentation ? '' : '官方预设与开关',
+        children: workbenchPresentation ? [
+            ucPreset.el,
+            quality.el,
+            cfgRescale.el,
+            variety.el,
+            smea.el,
+            transparent.el,
+        ] : [
             quality.el,
             ucPreset.el,
             cfgRescale.el,

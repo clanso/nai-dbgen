@@ -47,6 +47,7 @@ describe('workbench artist picker and inline status', () => {
         const repositoryListeners = new Set();
         let settingsSubscriptions = 0;
         const generatedWith = [];
+        const generatedArtists = [];
         const store = createSettingsStore({
             host: {
                 loadSettings: () => settings,
@@ -85,6 +86,7 @@ describe('workbench artist picker and inline status', () => {
                 },
                 async generateImage(req) {
                     generatedWith.push(req.artist === null ? null : req.artist?.id ?? store.load().activeArtistId);
+                    generatedArtists.push(req.artist);
                     return { ok: true, value: [] };
                 },
             },
@@ -98,7 +100,7 @@ describe('workbench artist picker and inline status', () => {
         handles.push(handle);
         const field = root.querySelector('.nd-wb-artist');
         return {
-            root, field, handle, deps, store, generatedWith,
+            root, field, handle, deps, store, generatedWith, generatedArtists,
             input: field.querySelector('input'),
             subscriptions: () => ({
                 settings: settingsSubscriptions,
@@ -119,6 +121,61 @@ describe('workbench artist picker and inline status', () => {
         const image = ctx.field.querySelector('.nd-picker__cover').querySelector('img');
         assert.equal(image.src, '/user/files/nai-dbgen_a1_card.webp?v=1');
         assert.equal(ctx.field.querySelector('.nd-field__label').textContent, '当前画师串');
+    });
+
+    it('hydrates prompt drafts from the selected artist and generates from unsaved workbench text', async () => {
+        const ctx = setup({ items: [
+            { id: 'a1', name: 'Alpha', positivePrompt: 'saved positive', negativePrompt: 'saved negative' },
+            { id: 'a2', name: 'Beta', positivePrompt: 'beta positive', negativePrompt: 'beta negative' },
+        ] });
+        await flush();
+        const promptFields = ctx.root.querySelector('.nd-wb-artist-prompts').querySelectorAll('.nd-field');
+        const positive = promptFields[0].querySelector('textarea');
+        const negative = promptFields[1].querySelector('textarea');
+        assert.equal(promptFields[0].querySelector('.nd-field__label').textContent, '画师串 · 正面');
+        assert.equal(promptFields[1].querySelector('.nd-field__label').textContent, '画师串 · 负面');
+        assert.ok(positive && negative);
+        assert.equal(positive.value, 'saved positive');
+        assert.equal(negative.value, 'saved negative');
+
+        fire(ctx.input, 'focus');
+        const betaOption = ctx.field.querySelectorAll('.nd-picker-option')
+            .find((option) => option.querySelector('strong')?.textContent === 'Beta');
+        assert.ok(betaOption);
+        fire(betaOption, 'click');
+        await flush();
+        assert.equal(positive.value, 'beta positive');
+        assert.equal(negative.value, 'beta negative');
+
+        const shell = ctx.root.querySelector('.nd-workbench');
+        const input = (target) => {
+            for (const listener of shell._listeners.filter((item) => item.type === 'input')) {
+                listener.fn({ target });
+            }
+        };
+        positive.value = 'edited positive';
+        negative.value = 'edited negative';
+        input(positive);
+        input(negative);
+        fire(button(ctx.root, '出图'), 'click');
+        await flush();
+        assert.equal(ctx.generatedArtists[0].id, 'a2');
+        assert.equal(ctx.generatedArtists[0].positivePrompt, 'edited positive');
+        assert.equal(ctx.generatedArtists[0].negativePrompt, 'edited negative');
+        assert.equal(ctx.store.load().activeArtistId, 'a1');
+
+        fire(ctx.field.querySelector('.nd-picker__clear'), 'click');
+        await flush();
+        positive.value = 'temporary positive';
+        negative.value = 'temporary negative';
+        input(positive);
+        input(negative);
+        fire(button(ctx.root, '出图'), 'click');
+        await flush();
+        assert.equal(ctx.generatedArtists[1].name, '工作台临时画师串');
+        assert.equal(ctx.generatedArtists[1].positivePrompt, 'temporary positive');
+        assert.equal(ctx.generatedArtists[1].negativePrompt, 'temporary negative');
+        assert.equal(ctx.store.load().activeArtistId, 'a1');
     });
 
     it('keeps workbench artist selection separate from the drawer and global settings', async () => {
@@ -183,41 +240,12 @@ describe('workbench artist picker and inline status', () => {
         assert.ok(ctx.field.querySelector('.nd-empty-lab'));
     });
 
-    it('updates the picker immediately when pasted prompts match an artist', async () => {
-        const descriptor = Object.getOwnPropertyDescriptor(globalThis, 'navigator');
-        Object.defineProperty(globalThis, 'navigator', {
-            configurable: true,
-            value: {
-                clipboard: {
-                    readText: async () => [
-                        '画师串',
-                        '正面：artist:beta',
-                        '负面：beta-negative',
-                        '',
-                        '场景',
-                        '正面：landscape',
-                        '负面：',
-                    ].join('\n'),
-                },
-            },
-        });
-        try {
-            const ctx = setup({
-                subscribe: false,
-                items: [
-                    { id: 'a1', name: 'Alpha', positivePrompt: 'artist:alpha' },
-                    { id: 'a2', name: 'Beta', positivePrompt: 'artist:beta', negativePrompt: 'beta-negative' },
-                ],
-            });
-            await flush();
-            fire(button(ctx.root, '粘贴提示词'), 'click');
-            await flush();
-            assert.equal(ctx.store.load().activeArtistId, 'a1');
-            assert.equal(ctx.input.value, 'Beta');
-        } finally {
-            if (descriptor) Object.defineProperty(globalThis, 'navigator', descriptor);
-            else delete globalThis.navigator;
-        }
+    it('omits the removed paste prompt button without hiding the artist picker', async () => {
+        const ctx = setup();
+        await flush();
+        assert.equal(button(ctx.root, '粘贴提示词'), undefined);
+        assert.ok(ctx.field.querySelector('.nd-picker'));
+        assert.equal(ctx.input.value, 'Alpha');
     });
 
     it('supports an empty artist library and rejects unsafe cover URLs', async () => {

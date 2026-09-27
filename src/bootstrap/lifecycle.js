@@ -393,7 +393,9 @@ async function openWorkbenchUi(container) {
     const handle = mountWorkbench(root, {
         host: container.host,
         workbenchService: container.services.workbench,
+        artistDraftService: container.services.workbenchArtistDraft,
         tagRepo: container.repos.tag,
+        marketCatalogStore: container.marketCatalogStore,
         artistRepo: container.repos.artist,
         artistFileUrl: container.artistFileUrl,
         loadSettings: container.loadSettings,
