@@ -267,6 +267,7 @@ describe('workbench', () => {
         const promptMsg = p.llmCalls[0].messages.map((m) => m.content).join('\n');
         assert.ok(promptMsg.includes('flower garden') || promptMsg.includes('garden'));
         assert.ok(promptMsg.includes('silver hair feature ref') || promptMsg.includes('Alice'));
+        assert.ok(promptMsg.includes('U=Alice in a garden'));
     });
 
     it('writePrompt entryIds sends only the checked entries', async () => {

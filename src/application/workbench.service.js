@@ -399,6 +399,7 @@ export function createWorkbenchService(deps) {
                     let blocks = createBlockSet();
                     blocks = setBlock(blocks, VARIABLE_NAMES.WORLDINFO, '');
                     blocks = setBlock(blocks, VARIABLE_NAMES.CONTEXT, nl);
+                    blocks = setBlock(blocks, VARIABLE_NAMES.USER_DESC, nl);
                     blocks = setBlock(blocks, VARIABLE_NAMES.CHARACTER, characterText);
                     blocks = setBlock(blocks, VARIABLE_NAMES.COMPOSITION, compositionText);
                     blocks = setBlock(blocks, VARIABLE_NAMES.FEATURE, featureText);
