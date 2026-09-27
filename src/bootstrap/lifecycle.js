@@ -29,7 +29,7 @@ import { openModal } from '../ui/common/modal.js';
 const log = createLogger('bootstrap/lifecycle');
 
 /** @type {string} */
-export const PLUGIN_VERSION = '0.2.0';
+export const PLUGIN_VERSION = '0.2.1';
 
 /** @type {string} */
 export const PUBLIC_API_NAME = 'NaiDbGen';
