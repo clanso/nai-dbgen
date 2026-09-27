@@ -55,6 +55,7 @@ describe('workbench artist picker and inline status', () => {
         });
         const artistRepo = {
             list: async () => ({ ok: true, value: items }),
+            get: async (id) => ({ ok: true, value: items.find((item) => item.id === id) ?? null }),
             onChanged(fn) {
                 repositoryListeners.add(fn);
                 return () => repositoryListeners.delete(fn);
@@ -82,8 +83,8 @@ describe('workbench artist picker and inline status', () => {
                 async writePrompt() {
                     return { ok: true, value: { caption: emptyNaiCaption(), unmatchedKeys: [] } };
                 },
-                async generateImage() {
-                    generatedWith.push(store.load().activeArtistId);
+                async generateImage(req) {
+                    generatedWith.push(req.artist === null ? null : req.artist?.id ?? store.load().activeArtistId);
                     return { ok: true, value: [] };
                 },
             },
@@ -110,17 +111,17 @@ describe('workbench artist picker and inline status', () => {
         };
     }
 
-    it('shows the active artist and safe thumbnail beside the generation buttons', async () => {
+    it('shows the active artist and safe thumbnail above the current caption', async () => {
         const ctx = setup();
         await flush();
-        assert.equal(ctx.field.parentNode, button(ctx.root, '出图').parentNode);
+        assert.ok(ctx.field.parentNode.className.includes('nd-wb-artist-slot'));
         assert.equal(ctx.input.value, 'Alpha');
         const image = ctx.field.querySelector('.nd-picker__cover').querySelector('img');
         assert.equal(image.src, '/user/files/nai-dbgen_a1_card.webp?v=1');
         assert.equal(ctx.field.querySelector('.nd-field__label').textContent, '当前画师串');
     });
 
-    it('searches, selects and clears through the same global setting as the drawer', async () => {
+    it('keeps workbench artist selection separate from the drawer and global settings', async () => {
         const ctx = setup();
         const drawerRoot = document.createElement('div');
         document.body.appendChild(drawerRoot);
@@ -140,9 +141,9 @@ describe('workbench artist picker and inline status', () => {
         assert.equal(options[0].querySelector('strong').textContent, 'Beta');
         fire(options[0], 'click');
         await flush();
-        assert.equal(ctx.store.load().activeArtistId, 'a2');
+        assert.equal(ctx.store.load().activeArtistId, 'a1');
         assert.equal(ctx.input.value, 'Beta');
-        assert.equal(drawerInput.value, 'Beta');
+        assert.equal(drawerInput.value, 'Alpha');
         assert.equal(ctx.store.load().activeNaiConfigId, 'nai-existing');
 
         fire(button(ctx.root, '出图'), 'click');
@@ -152,13 +153,16 @@ describe('workbench artist picker and inline status', () => {
         fire(drawerInput, 'focus');
         fire(drawerRoot.querySelectorAll('.nd-picker-option')[0], 'click');
         await flush();
-        assert.equal(ctx.input.value, 'Alpha');
+        assert.equal(ctx.input.value, 'Beta');
 
         fire(ctx.field.querySelector('.nd-picker__clear'), 'click');
         await flush();
-        assert.equal(ctx.store.load().activeArtistId, null);
+        assert.equal(ctx.store.load().activeArtistId, 'a1');
         assert.equal(ctx.input.value, '');
-        assert.equal(drawerInput.value, '');
+        assert.equal(drawerInput.value, 'Alpha');
+        fire(button(ctx.root, '出图'), 'click');
+        await flush();
+        assert.deepEqual(ctx.generatedWith, ['a2', null]);
     });
 
     it('refreshes names and search results after artist-library changes', async () => {
@@ -208,7 +212,7 @@ describe('workbench artist picker and inline status', () => {
             await flush();
             fire(button(ctx.root, '粘贴提示词'), 'click');
             await flush();
-            assert.equal(ctx.store.load().activeArtistId, 'a2');
+            assert.equal(ctx.store.load().activeArtistId, 'a1');
             assert.equal(ctx.input.value, 'Beta');
         } finally {
             if (descriptor) Object.defineProperty(globalThis, 'navigator', descriptor);

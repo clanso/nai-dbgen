@@ -397,7 +397,6 @@ async function openWorkbenchUi(container) {
         artistRepo: container.repos.artist,
         artistFileUrl: container.artistFileUrl,
         loadSettings: container.loadSettings,
-        saveSettings: (s) => container.settingsStore.save(s),
         subscribeSettings: (fn) => container.settingsStore.onChange(fn),
         imageRepo: container.repos.image,
     });
@@ -412,6 +411,7 @@ async function openWorkbenchUi(container) {
         },
     );
     const dialog = root.closest('dialog');
+    dialog?.classList.add('nd-workbench-popup');
     const onClose = () => handle.destroy();
     dialog?.addEventListener('close', onClose, { once: true });
     runtime.workbenchModal = {

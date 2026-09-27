@@ -29,7 +29,6 @@ import { openSlotImageViewer } from '../common/image-viewer.js';
 import { emptyNaiCaption } from '../../domain/model/nai-params.js';
 import { normalizeTagLibraryKind } from '../../domain/model/tag.js';
 import { parseCompositionKey } from '../../domain/model/composition-key.js';
-import { mergePluginSettings } from '../../domain/model/plugin-settings.js';
 import { mountCaptionEditor } from './caption-editor.js';
 import {
     WORKBENCH_MAX_CHARACTERS,
@@ -138,11 +137,6 @@ export function mountWorkbench(root, deps) {
     const loadSettings = typeof deps?.loadSettings === 'function'
         ? deps.loadSettings
         : () => (host && typeof host.loadSettings === 'function' ? host.loadSettings() : {});
-    const saveSettings = typeof deps?.saveSettings === 'function'
-        ? deps.saveSettings
-        : (s) => {
-            if (host && typeof host.saveSettings === 'function') host.saveSettings(s);
-        };
     const artistRepo = deps?.artistRepo
         || deps?.repos?.artist
         || null;
@@ -151,6 +145,15 @@ export function mountWorkbench(root, deps) {
     const artistCleanups = [];
 
     const draft = readWorkbenchDraft();
+    // undefined follows global until the workbench chooses; null explicitly disables artist tags.
+    let artistOverrideId = typeof draft?.artistOverrideId === 'string'
+        ? draft.artistOverrideId : draft?.artistOverrideId === null ? null : undefined;
+    const manualTags = new Map(Array.isArray(draft?.manualTags)
+        ? draft.manualTags.filter((item) => item?.id && item?.target && item?.value && item?.fragment)
+            .map((item) => [String(item.id), item]) : []);
+    const marketData = [];
+    let marketLibraryId = null;
+    let marketCategory = null;
     const sessionParams = resolveSessionParams(
         draft?.naiParams ? { naiParams: draft.naiParams } : loadSettings(),
     );
@@ -272,6 +275,7 @@ export function mountWorkbench(root, deps) {
                 row.control.setValue(picked.get(row.id) === true);
             }
         }
+        renderMarket();
     }
 
     /**
@@ -279,7 +283,10 @@ export function mountWorkbench(root, deps) {
      * @param {boolean} on
      */
     function setPicked(ids, on) {
-        for (const id of ids) picked.set(id, on);
+        for (const id of ids) {
+            picked.set(id, on);
+            if (!on) removeManualTag(id);
+        }
         syncGroupChecks();
         if (onlyPicked) applyEntryFilter();
     }
@@ -359,6 +366,7 @@ export function mountWorkbench(root, deps) {
                 checked: picked.get(id) === true,
                 onChange: (on) => {
                     picked.set(id, on);
+                    if (!on) removeManualTag(id);
                     syncGroupChecks();
                     if (onlyPicked) applyEntryFilter();
                 },
@@ -403,6 +411,10 @@ export function mountWorkbench(root, deps) {
                     entries = [];
                 }
             }
+            marketData.push({ id: String(lib.id), name: String(lib.name || lib.id),
+                groups: groupEntries(entries, kind).map((group) => ({
+                    title: group.title || '未分类', entries: group.entries, kind,
+                })) });
             for (const entry of entries) picked.set(String(entry.id), false);
 
             const entryIds = entries.map((entry) => String(entry.id));
@@ -512,6 +524,7 @@ export function mountWorkbench(root, deps) {
             setPicked(draft.entryIds.map((id) => String(id)), true);
         }
         applyEntryFilter();
+        renderMarket();
     }
 
     /**
@@ -628,6 +641,144 @@ export function mountWorkbench(root, deps) {
             : emptyNaiCaption(),
     });
 
+    const artistSlot = el('div', 'nd-wb-artist-slot');
+    const market = el('section', 'nd-wb-market');
+    const marketTitle = el('h4');
+    setText(marketTitle, '标签超市');
+    const marketSearch = /** @type {HTMLInputElement} */ (el('input', 'nd-input'));
+    marketSearch.type = 'search';
+    marketSearch.placeholder = '搜索标签名称或内容';
+    marketSearch.setAttribute('aria-label', '搜索标签');
+    const marketLibraries = el('div', 'nd-wb-market__tabs');
+    const marketCategories = el('div', 'nd-wb-market__tabs nd-wb-market__tabs--categories');
+    const marketGrid = el('div', 'nd-wb-market__grid');
+    market.append(marketTitle, marketSearch, marketLibraries, marketCategories, marketGrid);
+    // Keep focus/caret in the caption when a tag is clicked; other inputs cannot receive tags.
+    marketGrid.addEventListener('pointerdown', (event) => {
+        if (event.target.closest?.('.nd-wb-market__tag')) event.preventDefault();
+    });
+    marketSearch.addEventListener('input', renderMarket);
+
+    function removeManualTag(id) {
+        const record = manualTags.get(String(id));
+        if (!record) return;
+        manualTags.delete(String(id));
+        const input = captionEditor.getInputForTarget(record.target);
+        if (!input) return;
+        const first = input.value.indexOf(record.fragment);
+        if (first < 0 || input.value.indexOf(record.fragment, first + 1) >= 0) return;
+        input.value = input.value.slice(0, first) + input.value.slice(first + record.fragment.length);
+        input.dispatchEvent(new Event('input', { bubbles: true }));
+    }
+
+    function insertManualTag(entry, input, target) {
+        const value = String(entry.value ?? '').trim();
+        if (!value) return false;
+        const start = input.selectionStart ?? input.value.length;
+        const end = input.selectionEnd ?? start;
+        const before = input.value.slice(0, start);
+        const after = input.value.slice(end);
+        const prefix = before && !/[\s,]$/.test(before) ? ', ' : '';
+        const suffix = after && !/^[\s,]/.test(after) ? ', ' : '';
+        const fragment = prefix + value + suffix;
+        input.setRangeText(fragment, start, end, 'end');
+        input.dispatchEvent(new Event('input', { bubbles: true }));
+        manualTags.set(String(entry.id), { id: String(entry.id), target, value, fragment });
+        return true;
+    }
+
+    function renderMarket() {
+        if (!marketGrid) return;
+        marketLibraries.replaceChildren();
+        marketCategories.replaceChildren();
+        marketGrid.replaceChildren();
+        if (!marketData.length) {
+            setText(marketGrid, '标签库暂无条目');
+            return;
+        }
+        if (!marketData.some((lib) => lib.id === marketLibraryId)) marketLibraryId = marketData[0].id;
+        for (const lib of marketData) {
+            const tab = el('button', 'nd-wb-market__tab');
+            tab.type = 'button';
+            setText(tab, lib.name);
+            tab.classList.toggle('is-active', lib.id === marketLibraryId);
+            tab.addEventListener('click', () => { marketLibraryId = lib.id; marketCategory = null; renderMarket(); });
+            marketLibraries.appendChild(tab);
+        }
+        const lib = marketData.find((item) => item.id === marketLibraryId);
+        if (!lib) return;
+        if (!lib.groups.some((group) => group.title === marketCategory)) marketCategory = lib.groups[0]?.title ?? null;
+        for (const group of lib.groups) {
+            const tab = el('button', 'nd-wb-market__tab');
+            tab.type = 'button';
+            setText(tab, group.title);
+            tab.classList.toggle('is-active', group.title === marketCategory);
+            tab.addEventListener('click', () => { marketCategory = group.title; renderMarket(); });
+            marketCategories.appendChild(tab);
+        }
+        const group = lib.groups.find((item) => item.title === marketCategory);
+        const query = marketSearch.value.trim().toLowerCase();
+        for (const entry of group?.entries ?? []) {
+            if (!entry || entry.id == null) continue;
+            if (query && !entryHaystack(entry, group.kind).includes(query)) continue;
+            const label = entryLabel(entry, group.kind);
+            const value = String(entry.value ?? '').trim();
+            const tag = el('button', 'nd-wb-market__tag');
+            tag.type = 'button';
+            tag.title = value;
+            tag.setAttribute('aria-pressed', picked.get(String(entry.id)) === true ? 'true' : 'false');
+            tag.classList.toggle('is-selected', picked.get(String(entry.id)) === true);
+            const title = el('strong');
+            const subtitle = el('small');
+            setText(title, label);
+            setText(subtitle, value);
+            tag.append(title, subtitle);
+            tag.addEventListener('click', () => {
+                const input = document.activeElement;
+                const target = captionEditor.getTargetForInput(input);
+                if (!target) {
+                    toast(host, 'warning', '先将光标放入场景或角色提示词框');
+                    return;
+                }
+                const id = String(entry.id);
+                if (picked.get(id) === true && manualTags.has(id)) {
+                    removeManualTag(id);
+                    picked.set(id, false);
+                } else if (insertManualTag(entry, input, target)) {
+                    picked.set(id, true);
+                }
+                syncGroupChecks();
+                persistWorkbenchDraft();
+            });
+            marketGrid.appendChild(tag);
+        }
+        if (!marketGrid.childNodes.length) setText(marketGrid, '没有匹配的标签');
+    }
+
+    function reapplyManualTags(previousCharacterCount) {
+        for (const [id, record] of manualTags) {
+            if (picked.get(id) !== true) continue;
+            if (record.target.startsWith('character.')
+                && previousCharacterCount !== captionEditor.getCharacterCount()) {
+                toast(host, 'warning', '角色数量已变化，手动标签未自动改投其他角色');
+                manualTags.delete(id);
+                continue;
+            }
+            const input = captionEditor.getInputForTarget(record.target);
+            if (!input) {
+                manualTags.delete(id);
+                toast(host, 'warning', '原角色已不存在，请重新选择标签目标');
+                continue;
+            }
+            if (input.value.includes(record.value)) {
+                manualTags.delete(id); // Do not claim ownership of LLM-generated text.
+                continue;
+            }
+            input.setSelectionRange(input.value.length, input.value.length);
+            insertManualTag({ id, value: record.value }, input, record.target);
+        }
+    }
+
     const captionToolbar = el('div', 'nd-wb-caption-toolbar');
     const pasteBtn = createButton({
         label: '粘贴提示词',
@@ -729,6 +880,7 @@ export function mountWorkbench(root, deps) {
             return;
         }
         captionEditor.setCaption(parsed.value.caption);
+        manualTags.clear();
 
         const artists = await listArtists();
         const side = resolvePasteArtistAction(parsed.value, artists);
@@ -739,10 +891,8 @@ export function mountWorkbench(root, deps) {
         persistWorkbenchDraft();
 
         if (side.artistAction === 'matched' && side.matchedArtist) {
-            const next = mergePluginSettings(loadSettings(), {
-                activeArtistId: side.matchedArtist.id,
-            });
-            saveSettings(next);
+            artistOverrideId = String(side.matchedArtist.id);
+            persistWorkbenchDraft();
             void artistPicker?.refresh();
             toast(host, 'success', `已切换画师串：${side.matchedArtist.name}`);
         } else if (side.artistAction === 'missing') {
@@ -790,8 +940,8 @@ export function mountWorkbench(root, deps) {
         : savedImageRefs.slice(-1);
 
     const previewBox = el('div', 'nd-wb-preview');
-    const previewHint = el('p', 'nd-muted');
-    setText(previewHint, '出图结果将显示在这里');
+    const previewHint = el('p', 'nd-muted nd-wb-preview__empty');
+    setText(previewHint, '生成预览');
     previewBox.appendChild(previewHint);
 
     const genBtn = createButton({
@@ -807,6 +957,20 @@ export function mountWorkbench(root, deps) {
         },
     });
     genCancelBtn.disabled = true;
+    const clearBtn = createButton({
+        label: '清空',
+        variant: 'ghost',
+        onClick: () => {
+            captionEditor.setCaption(emptyNaiCaption());
+            manualTags.clear();
+            for (const id of picked.keys()) picked.set(id, false);
+            syncGroupChecks();
+            previewImageRefs = [];
+            clearPreviews();
+            genErr.clear();
+            persistWorkbenchDraft();
+        },
+    });
 
     function setUnmatched(keys) {
         const text = formatUnmatchedKeys(keys);
@@ -826,7 +990,7 @@ export function mountWorkbench(root, deps) {
         }
         previewBox.replaceChildren();
         previewBox.appendChild(previewHint);
-        setText(previewHint, '出图结果将显示在这里');
+        setText(previewHint, '生成预览');
         previewHint.hidden = false;
     }
 
@@ -960,7 +1124,9 @@ export function mountWorkbench(root, deps) {
                 toast(host, 'error', msg);
                 return;
             }
+            const previousCharacterCount = captionEditor.getCharacterCount();
             captionEditor.setCaption(result.value.caption);
+            reapplyManualTags(previousCharacterCount);
             if (result.value.width != null && result.value.height != null) {
                 const cur = paramsForm.getValue();
                 paramsForm.setValue({
@@ -996,8 +1162,19 @@ export function mountWorkbench(root, deps) {
         try {
             await restoreReady;
             // replaceCharacterKeywords 只读开关；与提示词来源无关
+            let artist;
+            if (artistOverrideId === null) artist = null;
+            else if (artistOverrideId !== undefined) {
+                const result = await artistRepo?.get(artistOverrideId);
+                if (!result?.ok || !result.value) {
+                    toast(host, 'warning', '工作台画师串已不存在，请重新选择');
+                    return;
+                }
+                artist = result.value;
+            }
             const input = buildGenerateImageInput({
                 caption: captionEditor.getCaption(),
+                artist,
                 replaceCharacterKeywords: replaceToggle.getValue(),
                 params: readParams(),
                 signal: genAbort?.signal,
@@ -1047,12 +1224,12 @@ export function mountWorkbench(root, deps) {
 
     const paramsDetails = createDetails({
         summary: '本次出图参数',
-        open: false,
+        open: true,
         body: [paramsForm.el],
     });
 
     const genActions = el('div', 'nd-wb-actions nd-wb-actions--generate');
-    genActions.append(genBtn, genCancelBtn);
+    genActions.append(genBtn, genCancelBtn, clearBtn);
 
     /** @type {ReturnType<typeof mountCurrentPicker>|null} */
     let artistPicker = null;
@@ -1062,12 +1239,14 @@ export function mountWorkbench(root, deps) {
         setText(artistLabel, '当前画师串');
         const artistMount = el('div');
         artistField.append(artistLabel, artistMount);
-        genActions.appendChild(artistField);
+        artistSlot.appendChild(artistField);
         artistPicker = mountCurrentPicker(artistMount, {
             list: listArtists,
-            getActiveId: () => loadSettings().activeArtistId ?? null,
+            getActiveId: () => artistOverrideId === undefined
+                ? loadSettings().activeArtistId ?? null : artistOverrideId,
             setActiveId: (id) => {
-                saveSettings(mergePluginSettings(loadSettings(), { activeArtistId: id }));
+                artistOverrideId = id;
+                persistWorkbenchDraft();
             },
             cover: true,
             resolveCover: (item) => deps.artistFileUrl?.cardUrl?.(item) ?? null,
@@ -1098,17 +1277,17 @@ export function mountWorkbench(root, deps) {
     }
 
     const genSection = createFieldGroup({
-        title: '用当前提示词出图',
-        children: [
-            replaceToggle.el,
-            paramsDetails.el,
-            genActions,
-            genErr.el,
-            previewBox,
-        ],
+        title: '生成结果',
+        children: [previewBox, replaceToggle.el, genActions, genErr.el],
     });
 
-    shell.append(writeSection.el, captionSection.el, genSection.el);
+    const leftColumn = el('div', 'nd-wb-column nd-wb-column--left');
+    const middleColumn = el('div', 'nd-wb-column nd-wb-column--middle');
+    const rightColumn = el('div', 'nd-wb-column nd-wb-column--right');
+    leftColumn.append(paramsDetails.el, writeSection.el);
+    middleColumn.append(artistSlot, captionSection.el, market);
+    rightColumn.append(genSection.el);
+    shell.append(leftColumn, middleColumn, rightColumn);
     root.appendChild(shell);
 
     function persistWorkbenchDraft() {
@@ -1128,6 +1307,8 @@ export function mountWorkbench(root, deps) {
             naiParams: paramsForm.getValue(),
             imageRefs: savedImageRefs,
             previewImageRefs,
+            artistOverrideId,
+            manualTags: [...manualTags.values()],
         });
     }
 

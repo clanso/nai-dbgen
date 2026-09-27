@@ -222,6 +222,7 @@ async function writeFloorPrompt(deps, input, traceId) {
 /**
  * @typedef {import('../domain/model/nai-params.js').NaiCaption} NaiCaption
  * @typedef {import('../domain/model/nai-params.js').NaiParams} NaiParams
+ * @typedef {import('../domain/model/artist.js').ArtistString} ArtistString
  * @typedef {import('../domain/model/plugin-settings.js').PluginSettings} PluginSettings
  * @typedef {import('../ports/image-gen.port.js').GeneratedImage} GeneratedImage
  * @typedef {import('../domain/model/tag.js').TagEntry} TagEntry
@@ -268,6 +269,7 @@ async function writeFloorPrompt(deps, input, traceId) {
 /**
  * @typedef {object} WorkbenchGenerateInput
  * @property {NaiCaption} caption 当前工作台结构化提示词（裁决 D13）
+ * @property {ArtistString|null|undefined} [artist] 本次覆盖，不修改全局当前画师串
  * @property {boolean} replaceCharacterKeywords 页面拨档，程序不自判
  * @property {Partial<NaiParams>} [params]
  * @property {AbortSignal} [signal]
@@ -514,6 +516,7 @@ export function createWorkbenchService(deps) {
             return deps.imageGen.generate({
                 caption: input.caption,
                 params: input.params,
+                artist: input.artist,
                 replaceCharacterKeywords: input.replaceCharacterKeywords,
                 signal: input.signal,
                 traceId,

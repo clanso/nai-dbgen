@@ -545,6 +545,9 @@ describe('ui/workbench mountWorkbench', () => {
                     }),
                     saveSettings: (s) => { saved.push(s); },
                     artistRepo: {
+                        async get(id) {
+                            return { ok: true, value: { id, name: '命中串', positivePrompt: 'artist:match', negativePrompt: 'neg-match' } };
+                        },
                         async list() {
                             return {
                                 ok: true,
@@ -576,7 +579,10 @@ describe('ui/workbench mountWorkbench', () => {
             );
             assert.ok(ctx.toasts.some((t) => t[0] === 'success' && t[1] === '已粘贴'));
             assert.ok(ctx.toasts.some((t) => t[0] === 'success' && String(t[1]).includes('已切换画师串：命中串')));
-            assert.equal(saved[0]?.activeArtistId, 'art-hit');
+            assert.equal(saved.length, 0, '工作台选择画师串不可改全局设置');
+            await clickButton(ctx.root, '出图');
+            await new Promise((r) => setTimeout(r, 0));
+            assert.equal(ctx.genCalls[0].artist.id, 'art-hit');
             ctx.handle.destroy();
         } finally {
             if (navDesc) {
@@ -678,7 +684,7 @@ describe('ui/workbench mountWorkbench', () => {
          */
         function rowByLabel(text) {
             /** @type {any[]} */
-            const stack = [ctx.root];
+            const stack = [ctx.root.querySelector('.nd-wb-libraries')];
             while (stack.length) {
                 const node = stack.pop();
                 if (!node) continue;
@@ -758,7 +764,7 @@ describe('ui/workbench mountWorkbench', () => {
          */
         function rowByLabel(text) {
             /** @type {any[]} */
-            const stack = [ctx.root];
+            const stack = [ctx.root.querySelector('.nd-wb-libraries')];
             while (stack.length) {
                 const node = stack.pop();
                 if (!node) continue;
@@ -830,6 +836,47 @@ describe('ui/workbench mountWorkbench', () => {
         setChecked(rowByLabel('只看已勾选'), false);
         assert.equal(apple.parentNode.hidden, false);
         assert.equal(camera.parentNode.hidden, false);
+        ctx.handle.destroy();
+    });
+    it('uses repository libraries/categories and inserts only into the focused caption field', async () => {
+        const ctx = mount({ deps: { tagRepo: {
+            async listLibraries() { return { ok: true, value: [{ id: 'library', name: '真实库', kind: 'composition' }] }; },
+            async listEntries() { return { ok: true, value: [{ id: 'tag-1', key: '性格：温柔', value: 'gentle expression' }] }; },
+        } } });
+        await new Promise((r) => setTimeout(r, 0));
+        const market = ctx.root.querySelector('.nd-wb-market');
+        assert.ok(market.querySelectorAll('.nd-wb-market__tab').some((tab) => tab.textContent === '真实库'));
+        assert.ok(market.querySelectorAll('.nd-wb-market__tab').some((tab) => tab.textContent === '性格'));
+        let tag = market.querySelector('.nd-wb-market__tag');
+        assert.equal(tag.childNodes[0].textContent, '温柔');
+        assert.equal(tag.childNodes[1].textContent, 'gentle expression');
+        for (const l of tag._listeners.filter((item) => item.type === 'click')) l.fn();
+        assert.ok(ctx.toasts.some((entry) => entry[1].includes('先将光标')));
+        await clickButton(ctx.root, '写提示词');
+        await new Promise((r) => setTimeout(r, 0));
+        assert.deepEqual(ctx.writeCalls[0].entryIds, []);
+        const scene = ctx.root.querySelectorAll('textarea').find((ta) => ta.parentNode?.childNodes[0]?.textContent === '场景 · 正面');
+        scene.value = 'base';
+        scene.selectionStart = scene.selectionEnd = 4;
+        scene.setRangeText = (value, start, end) => { scene.value = scene.value.slice(0, start) + value + scene.value.slice(end); };
+        scene.setSelectionRange = (start, end) => { scene.selectionStart = start; scene.selectionEnd = end; };
+        scene.dispatchEvent = () => {};
+        document.activeElement = scene;
+        tag = market.querySelector('.nd-wb-market__tag');
+        for (const l of tag._listeners.filter((item) => item.type === 'click')) l.fn();
+        assert.equal(scene.value, 'base, gentle expression');
+        await clickButton(ctx.root, '写提示词');
+        await new Promise((r) => setTimeout(r, 0));
+        assert.deepEqual(ctx.writeCalls.at(-1).entryIds, ['tag-1']);
+        assert.ok(scene.value.includes('gentle expression'), 'LLM rewrite retains selected manual tag');
+        tag = market.querySelector('.nd-wb-market__tag');
+        for (const l of tag._listeners.filter((item) => item.type === 'click')) l.fn();
+        assert.equal(scene.value, 'llm-base', 'deselect removes only its untouched inserted fragment');
+        await clickButton(ctx.root, '清空');
+        assert.equal(scene.value, '');
+        await clickButton(ctx.root, '写提示词');
+        await new Promise((r) => setTimeout(r, 0));
+        assert.deepEqual(ctx.writeCalls.at(-1).entryIds, []);
         ctx.handle.destroy();
     });
 });

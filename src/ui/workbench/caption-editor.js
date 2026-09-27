@@ -57,6 +57,7 @@ function createTextarea(opts) {
     root.append(labelEl, ta);
     return {
         el: root,
+        input: ta,
         getValue: () => ta.value,
         setValue: (v) => {
             ta.value = v == null ? '' : String(v);
@@ -233,6 +234,23 @@ export function mountCaptionEditor(root, opts) {
     return {
         el: shell,
         getCaption: () => cloneCaption(editorStateToCaption(readState())),
+        getTargetForInput(input) {
+            if (input === posBase.input) return 'scene.positive';
+            if (input === negBase.input) return 'scene.negative';
+            for (let i = 0; i < rows.length; i += 1) {
+                if (input === rows[i].positive.input) return `character.${i}.positive`;
+                if (input === rows[i].negative.input) return `character.${i}.negative`;
+            }
+            return null;
+        },
+        getInputForTarget(target) {
+            if (target === 'scene.positive') return posBase.input;
+            if (target === 'scene.negative') return negBase.input;
+            const match = /^character\.(\d+)\.(positive|negative)$/.exec(String(target));
+            const row = match && rows[Number(match[1])];
+            return row ? row[match[2]].input : null;
+        },
+        getCharacterCount: () => rows.length,
         setCaption,
         destroy() {
             if (destroyed) return;
