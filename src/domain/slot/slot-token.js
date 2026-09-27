@@ -87,10 +87,8 @@ export function slotWidgetReplaceTemplate() {
         'box-shadow:none !important',
         'cursor:pointer !important',
     ].join(';');
-    return '```html\n'
-        + '<div class="nai-slot" data-slot="$1">'
+    return '<div class="nai-slot" data-slot="$1">'
         + `<button type="button" class="nai-slot-btn" style="${buttonStyle}" onclick="top.postMessage({source:'nai-dbgen',action:'generate',slot:'$1'},'*')">生成</button>`
         + '<div class="nai-slot-img"></div>'
-        + '</div>\n'
-        + '```';
+        + '</div>';
 }
