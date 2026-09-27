@@ -456,11 +456,11 @@ export function mountWorkbench(root, deps) {
                     onClick: () => {
                         catState.userOpen = catState.body.hidden;
                         if (catState.userOpen) paintCategory(catState);
-                        if (String(searchInput.value || '').trim()) {
-                            setSectionOpen(catState.body, catState.toggle, catState.userOpen);
+                        if (onlyPicked || !String(searchInput.value || '').trim()) {
+                            applyEntryFilter();
                             return;
                         }
-                        applyEntryFilter();
+                        setSectionOpen(catState.body, catState.toggle, catState.userOpen);
                     },
                 });
                 catState.toggle = toggle;
@@ -475,11 +475,11 @@ export function mountWorkbench(root, deps) {
                     const group = libGroups.find((item) => item.body === body);
                     if (!group) return;
                     group.userOpen = group.body.hidden;
-                    if (String(searchInput.value || '').trim()) {
-                        setSectionOpen(group.body, group.toggle, group.userOpen);
+                    if (onlyPicked || !String(searchInput.value || '').trim()) {
+                        applyEntryFilter();
                         return;
                     }
-                    applyEntryFilter();
+                    setSectionOpen(group.body, group.toggle, group.userOpen);
                 },
             });
             head.appendChild(libToggle);
@@ -547,11 +547,12 @@ export function mountWorkbench(root, deps) {
     }
 
     /**
-     * 搜索或「只看已勾选」时展开命中的库和分类。两个条件都空时回到原先的展开状态。
+     * 搜索会展开命中的库和分类。「只看已勾选」只藏未勾选的条目，展开状态保持原样，可以再收起。
      */
     function applyEntryFilter() {
         const q = String(searchInput.value || '').trim().toLowerCase();
         const filtering = Boolean(q) || onlyPicked;
+        const forceOpen = Boolean(q) && !onlyPicked;
         let anyVisible = !filtering;
         for (const group of libGroups) {
             const libHit = Boolean(q) && group.haystack.includes(q);
@@ -563,15 +564,15 @@ export function mountWorkbench(root, deps) {
             }
             for (const cat of group.categories) {
                 const titleHit = Boolean(q) && cat.title.toLowerCase().includes(q);
-                const wantPaint = filtering && cat.entries.some((entry) => rowShown(
+                const hasMatch = cat.entries.some((entry) => rowShown(
                     String(entry.id),
                     entryHaystack(entry, cat.kind),
                     q,
                     libHit,
                     titleHit,
                 ));
-                if (wantPaint) paintCategory(cat);
-                let catVisible = !filtering;
+                if (hasMatch && (forceOpen || cat.userOpen)) paintCategory(cat);
+                let catVisible = hasMatch || !filtering;
                 if (cat.painted) {
                     catVisible = false;
                     for (const row of cat.rows) {
@@ -581,13 +582,11 @@ export function mountWorkbench(root, deps) {
                     }
                 }
                 if (cat.head) cat.head.hidden = filtering && !catVisible;
-                if (filtering) setSectionOpen(cat.body, cat.toggle, catVisible);
-                else setSectionOpen(cat.body, cat.toggle, cat.userOpen);
+                setSectionOpen(cat.body, cat.toggle, forceOpen ? catVisible : cat.userOpen);
                 if (catVisible) groupVisible = true;
             }
             group.block.hidden = filtering && !groupVisible;
-            if (filtering) setSectionOpen(group.body, group.toggle, groupVisible);
-            else setSectionOpen(group.body, group.toggle, group.userOpen);
+            setSectionOpen(group.body, group.toggle, forceOpen ? groupVisible : group.userOpen);
             if (groupVisible) anyVisible = true;
         }
         setText(searchEmpty, onlyPicked && !q ? '没有已勾选的条目' : '没有匹配的条目');

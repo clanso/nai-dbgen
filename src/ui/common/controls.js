@@ -408,8 +408,11 @@ export function createCombobox(opts) {
     }
 
     function positionList() {
-        const rect = input.getBoundingClientRect();
-        const vh = window.innerHeight || 600;
+        const rect = typeof input.getBoundingClientRect === 'function'
+            ? input.getBoundingClientRect()
+            : { top: 0, bottom: 32, left: 0, right: 200, width: 200, height: 32 };
+        const view = typeof window !== 'undefined' ? window : null;
+        const vh = view?.innerHeight || 600;
         const spaceBelow = vh - rect.bottom;
         const maxH = Math.min(280, Math.max(120, spaceBelow > 160 ? spaceBelow - 8 : rect.top - 8));
         list.style.position = 'fixed';
@@ -535,12 +538,15 @@ export function createCombobox(opts) {
         if (open) positionList();
     };
 
+    const view = typeof window !== 'undefined' ? window : null;
     input.addEventListener('input', onInput);
     input.addEventListener('focus', onFocus);
     input.addEventListener('keydown', onKeyDown);
     document.addEventListener('mousedown', onDocPointer, true);
-    window.addEventListener('resize', onScrollOrResize);
-    window.addEventListener('scroll', onScrollOrResize, true);
+    if (view) {
+        view.addEventListener('resize', onScrollOrResize);
+        view.addEventListener('scroll', onScrollOrResize, true);
+    }
 
     return {
         el: root,
@@ -567,8 +573,10 @@ export function createCombobox(opts) {
             input.removeEventListener('focus', onFocus);
             input.removeEventListener('keydown', onKeyDown);
             document.removeEventListener('mousedown', onDocPointer, true);
-            window.removeEventListener('resize', onScrollOrResize);
-            window.removeEventListener('scroll', onScrollOrResize, true);
+            if (view) {
+                view.removeEventListener('resize', onScrollOrResize);
+                view.removeEventListener('scroll', onScrollOrResize, true);
+            }
             list.remove();
             root.remove();
         },

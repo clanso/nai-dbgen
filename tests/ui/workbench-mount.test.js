@@ -266,6 +266,20 @@ describe('ui/workbench mountWorkbench', () => {
      * @param {string} label
      * @param {string} value
      */
+    function findTag(root, tag) {
+        /** @type {any[]} */
+        const stack = [root];
+        while (stack.length) {
+            const node = stack.pop();
+            if (!node) continue;
+            if (String(node.tagName || '').toUpperCase() === tag) return node;
+            if (Array.isArray(node.childNodes)) {
+                for (const c of node.childNodes) stack.push(c);
+            }
+        }
+        return null;
+    }
+
     function setSelectByLabel(root, label, value) {
         /** @type {any[]} */
         const stack = [root];
@@ -280,9 +294,16 @@ describe('ui/workbench mountWorkbench', () => {
                     const select = (node.childNodes || []).find(
                         (c) => c && String(c.tagName).toUpperCase() === 'SELECT',
                     );
-                    assert.ok(select, `select missing for ${label}`);
-                    select.value = String(value);
-                    const handler = (select._listeners || []).find((l) => l.type === 'change');
+                    if (select) {
+                        select.value = String(value);
+                        const handler = (select._listeners || []).find((l) => l.type === 'change');
+                        handler?.fn();
+                        return;
+                    }
+                    const input = findTag(node, 'INPUT');
+                    assert.ok(input, `control missing for ${label}`);
+                    input.value = String(value);
+                    const handler = (input._listeners || []).find((l) => l.type === 'input');
                     handler?.fn();
                     return;
                 }
@@ -791,6 +812,20 @@ describe('ui/workbench mountWorkbench', () => {
         assert.equal(melon.parentNode.hidden, false);
         assert.equal(apple.parentNode.hidden, true);
         assert.equal(camera.parentNode.hidden, true);
+
+        const dietHead = rowByLabel('饮食').parentNode;
+        const collapse = (dietHead.childNodes || []).find((node) => node.tagName === 'BUTTON');
+        assert.equal(collapse.textContent, '收起');
+        for (const listener of collapse._listeners || []) {
+            if (listener.type === 'click') {
+                listener.fn({ preventDefault() {}, stopPropagation() {} });
+            }
+        }
+        const dietBody = dietHead.parentNode.childNodes[
+            dietHead.parentNode.childNodes.indexOf(dietHead) + 1
+        ];
+        assert.equal(dietBody.hidden, true);
+        assert.equal(collapse.textContent, '展开');
 
         setChecked(rowByLabel('只看已勾选'), false);
         assert.equal(apple.parentNode.hidden, false);

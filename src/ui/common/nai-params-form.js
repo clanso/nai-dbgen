@@ -4,6 +4,7 @@
  */
 
 import {
+    createCombobox,
     createNumberField,
     createSelect,
     createToggle,
@@ -12,6 +13,9 @@ import {
 import { defaultNaiParams, normalizeNaiParams } from '../../domain/model/nai-params.js';
 import {
     NAI_MODEL_OPTIONS,
+    formatNaiModelInput,
+    formatNaiModelOption,
+    resolveNaiModelInput,
     NAI_SIZE_PRESETS,
     SMEA_MODE_OPTIONS,
     UC_PRESET_NONE,
@@ -76,10 +80,11 @@ export function createNaiParamsForm(initial, opts) {
     const noticeEl = el('p', 'nd-nai-params__notice');
     noticeEl.hidden = true;
 
-    const model = createSelect({
+    const model = createCombobox({
         label: '模型',
-        value: state.model,
-        options: [...NAI_MODEL_OPTIONS],
+        value: formatNaiModelInput(state.model),
+        placeholder: '选择或填写模型编号',
+        options: NAI_MODEL_OPTIONS.map((option) => formatNaiModelOption(option)),
         onChange: () => onModelChange(),
     });
 
@@ -268,7 +273,7 @@ export function createNaiParamsForm(initial, opts) {
         const transparentOn = transparent.getValue();
 
         return normalizeNaiParams({
-            model: model.getValue(),
+            model: resolveNaiModelInput(model.getValue()) || state.model,
             width: Number.isFinite(w) ? w : defaults.width,
             height: Number.isFinite(h) ? h : defaults.height,
             steps: Number(steps.getValue()),
@@ -295,7 +300,8 @@ export function createNaiParamsForm(initial, opts) {
     }
 
     function onModelChange() {
-        const nextModel = model.getValue();
+        const nextModel = resolveNaiModelInput(model.getValue());
+        if (!nextModel || nextModel === state.model) return;
         // 用切模型前的意图做回退：先按旧 model 读表单，再 reconcile 到新模型
         const draft = readRaw();
         draft.model = state.model;
@@ -377,7 +383,7 @@ export function createNaiParamsForm(initial, opts) {
      */
     function applyState(params, flags) {
         state = coerceNaiParams(params);
-        model.setValue(state.model);
+        model.setValue(formatNaiModelInput(state.model));
         applyCapabilityUi(state.model);
         width.setValue(state.width);
         height.setValue(state.height);

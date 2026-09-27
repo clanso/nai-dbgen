@@ -16,27 +16,44 @@ import { domainError } from '../../infra/errors.js';
  */
 
 /**
- * 插件能正确组装的模型（assembler 固定写 v4_prompt 结构；V3 及更早无对应分支 → 不列）。
+ * 预设里列出的 V4 及以上模型。assembler 固定写 v4_prompt，V3 及更早不放进预设；
+ * 表单仍可手填任意编号。
  *
- * 出处：
- * - `nai-diffusion-4-5-full` / `nai-diffusion-5-full`：`app/public/model-version.js` VERSIONS
- * - curated / V4：`ref/SillyTavern/.../stable-diffusion/index.js` loadNovelModels ~2457
- * - 显示名风格：需求 4.13 示例「NAI Diffusion V4.5 Full」；V5 对齐 app 的「NAI V5 Full」
+ * 文生图编号出处：docs.novelai.net 的 V5 Curated / V5 Full，以及既有 V4 / V4.5 编号。
+ * 局部重绘：V5 发布说明只上了 V5 Full Inpainting，没有 V5 Curated Inpainting。
+ * V4 / V4.5 的重绘编号与官方客户端一致。
  *
  * @type {readonly NamedOption[]}
  */
 export const NAI_MODEL_OPTIONS = Object.freeze([
+    Object.freeze({ value: 'nai-diffusion-5-curated', label: 'NAI Diffusion V5 Curated' }),
+    Object.freeze({ value: 'nai-diffusion-5-full', label: 'NAI Diffusion V5 Full' }),
     Object.freeze({
         value: 'nai-diffusion-5-full-inpainting',
         label: 'NAI Diffusion V5 Full Inpainting',
     }),
-    Object.freeze({ value: 'nai-diffusion-5-full', label: 'NAI Diffusion V5 Full' }),
-    Object.freeze({ value: 'nai-diffusion-4-5-full', label: 'NAI Diffusion V4.5 Full' }),
     Object.freeze({ value: 'nai-diffusion-4-5-curated', label: 'NAI Diffusion V4.5 Curated' }),
-    Object.freeze({ value: 'nai-diffusion-4-full', label: 'NAI Diffusion V4 Full' }),
+    Object.freeze({ value: 'nai-diffusion-4-5-full', label: 'NAI Diffusion V4.5 Full' }),
+    Object.freeze({
+        value: 'nai-diffusion-4-5-curated-inpainting',
+        label: 'NAI Diffusion V4.5 Curated Inpainting',
+    }),
+    Object.freeze({
+        value: 'nai-diffusion-4-5-full-inpainting',
+        label: 'NAI Diffusion V4.5 Full Inpainting',
+    }),
     Object.freeze({
         value: 'nai-diffusion-4-curated-preview',
         label: 'NAI Diffusion V4 Curated',
+    }),
+    Object.freeze({ value: 'nai-diffusion-4-full', label: 'NAI Diffusion V4 Full' }),
+    Object.freeze({
+        value: 'nai-diffusion-4-curated-inpainting',
+        label: 'NAI Diffusion V4 Curated Inpainting',
+    }),
+    Object.freeze({
+        value: 'nai-diffusion-4-full-inpainting',
+        label: 'NAI Diffusion V4 Full Inpainting',
     }),
 ]);
 
@@ -112,6 +129,50 @@ const VARIETY_SIGMA_MAGIC = 58;
  */
 export function isKnownNaiModel(model) {
     return MODEL_ID_SET.has(String(model || ''));
+}
+
+/**
+ * 列表里显示「完整名（编号）」。手填时直接写编号。
+ * @param {NamedOption} option
+ * @returns {string}
+ */
+export function formatNaiModelOption(option) {
+    return `${option.label}（${option.value}）`;
+}
+
+/**
+ * 把下拉显示名或手填文本收成要发给接口的模型编号。
+ * 预设名、预设编号、带括号的显示名都能认；其余非空文本原样保留。
+ * @param {unknown} raw
+ * @returns {string}
+ */
+export function resolveNaiModelInput(raw) {
+    const text = String(raw ?? '').trim();
+    if (!text) return '';
+    const byValue = NAI_MODEL_OPTIONS.find((option) => option.value === text);
+    if (byValue) return byValue.value;
+    const byLabel = NAI_MODEL_OPTIONS.find((option) => option.label === text);
+    if (byLabel) return byLabel.value;
+    const byDisplay = NAI_MODEL_OPTIONS.find((option) => formatNaiModelOption(option) === text);
+    if (byDisplay) return byDisplay.value;
+    const wrapped = /^(.+?)（([a-z0-9][a-z0-9._-]*)）$/.exec(text);
+    if (wrapped) {
+        const id = wrapped[2];
+        const known = NAI_MODEL_OPTIONS.find((option) => option.value === id);
+        if (known) return known.value;
+    }
+    return text;
+}
+
+/**
+ * 已知模型显示完整名，手填编号原样显示。
+ * @param {unknown} model
+ * @returns {string}
+ */
+export function formatNaiModelInput(model) {
+    const id = String(model ?? '').trim();
+    const hit = NAI_MODEL_OPTIONS.find((option) => option.value === id);
+    return hit ? formatNaiModelOption(hit) : id;
 }
 
 /**
@@ -283,8 +344,8 @@ export function reconcileParamsForModel(params, model) {
     const notices = [];
     const next = { ...base, model: String(model || defaults.model) };
 
-    if (!isKnownNaiModel(next.model)) {
-        notices.push(`该模型不受支持，已改为「${labelOfModel(defaults.model)}」`);
+    if (!String(next.model || '').trim()) {
+        notices.push(`未填写模型，已改为「${labelOfModel(defaults.model)}」`);
         next.model = defaults.model;
     }
 
@@ -413,17 +474,17 @@ export function mergeNaiParamsForGenerate(base, overrides) {
     // —— 模型 ——
     let model;
     if (has('model')) {
-        model = String(explicit.model ?? '');
-        if (!isKnownNaiModel(model)) {
+        model = resolveNaiModelInput(explicit.model);
+        if (!model) {
             return Err(paramValidationError({
                 field: 'model',
                 value: model,
-                message: `模型「${model || '(空)'}」不受支持，可选：${allowedModelLabels()}`,
+                message: '请填写模型编号',
                 allowed: NAI_MODEL_OPTIONS.map((o) => o.value),
             }));
         }
     } else {
-        model = isKnownNaiModel(baseN.model) ? baseN.model : defaults.model;
+        model = resolveNaiModelInput(baseN.model) || defaults.model;
     }
 
     /** @type {import('../model/nai-params.js').NaiParams} */
@@ -670,13 +731,6 @@ function paramValidationError(init) {
             ...(init.model ? { model: init.model } : {}),
         },
     });
-}
-
-/**
- * @returns {string}
- */
-function allowedModelLabels() {
-    return NAI_MODEL_OPTIONS.map((o) => o.label).join('、');
 }
 
 /**

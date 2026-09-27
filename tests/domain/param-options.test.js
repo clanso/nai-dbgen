@@ -14,7 +14,9 @@ import {
     coerceNaiParams,
     computeVarietySigma,
     expandNaiParamFields,
+    formatNaiModelInput,
     isKnownNaiModel,
+    resolveNaiModelInput,
     isMultipleOf64,
     matchSizePresetId,
     mergeNaiParamsForGenerate,
@@ -36,15 +38,40 @@ import { ERROR_CATEGORY } from '../../src/infra/errors.js';
 describe('param-options catalog', () => {
     it('lists only V4+ models the assembler can shape', () => {
         const ids = NAI_MODEL_OPTIONS.map((o) => o.value);
+        assert.ok(ids.includes('nai-diffusion-5-curated'));
         assert.ok(ids.includes('nai-diffusion-4-5-full'));
         assert.ok(ids.includes('nai-diffusion-5-full'));
         assert.ok(ids.includes('nai-diffusion-5-full-inpainting'));
-        assert.equal(NAI_MODEL_OPTIONS[0].value, 'nai-diffusion-5-full-inpainting');
-        assert.equal(NAI_MODEL_OPTIONS[0].label, 'NAI Diffusion V5 Full Inpainting');
+        assert.ok(ids.includes('nai-diffusion-4-5-curated-inpainting'));
+        assert.ok(ids.includes('nai-diffusion-4-5-full-inpainting'));
+        assert.ok(ids.includes('nai-diffusion-4-curated-inpainting'));
+        assert.ok(ids.includes('nai-diffusion-4-full-inpainting'));
+        assert.equal(ids.includes('nai-diffusion-5-curated-inpainting'), false);
+        assert.equal(NAI_MODEL_OPTIONS[0].value, 'nai-diffusion-5-curated');
+        assert.equal(NAI_MODEL_OPTIONS[0].label, 'NAI Diffusion V5 Curated');
         assert.equal(ids.some((id) => id.includes('diffusion-3')), false);
         assert.equal(ids.some((id) => id.includes('diffusion-2')), false);
         assert.ok(isKnownNaiModel('nai-diffusion-4-5-full'));
         assert.equal(isKnownNaiModel('nai-diffusion-3'), false);
+    });
+
+    it('resolves a preset label, a display string, or a hand-typed id', () => {
+        assert.equal(
+            resolveNaiModelInput('NAI Diffusion V5 Curated'),
+            'nai-diffusion-5-curated',
+        );
+        assert.equal(
+            resolveNaiModelInput('NAI Diffusion V5 Curated（nai-diffusion-5-curated）'),
+            'nai-diffusion-5-curated',
+        );
+        assert.equal(resolveNaiModelInput('nai-diffusion-5-curated'), 'nai-diffusion-5-curated');
+        assert.equal(resolveNaiModelInput('  nai-diffusion-6-full  '), 'nai-diffusion-6-full');
+        assert.equal(resolveNaiModelInput(''), '');
+        assert.equal(
+            formatNaiModelInput('nai-diffusion-5-curated'),
+            'NAI Diffusion V5 Curated（nai-diffusion-5-curated）',
+        );
+        assert.equal(formatNaiModelInput('nai-diffusion-6-full'), 'nai-diffusion-6-full');
     });
 
     it('samplers / noise / uc / size presets match sources', () => {
@@ -76,6 +103,7 @@ describe('param-options catalog', () => {
     });
 
     it('model capabilities follow app behavior', () => {
+        assert.equal(classifyNaiModel('nai-diffusion-5-curated'), 'v5');
         assert.equal(classifyNaiModel('nai-diffusion-5-full'), 'v5');
         assert.equal(classifyNaiModel('nai-diffusion-5-full-inpainting'), 'v5');
         assert.equal(classifyNaiModel('nai-diffusion-4-5-full'), 'v45');
@@ -132,13 +160,19 @@ describe('reconcile / coerce on model change', () => {
         assert.ok(notices.some((n) => n.includes('Variety')));
     });
 
-    it('unknown model falls back to default', () => {
+    it('hand-typed model id is kept', () => {
         const { params, notices } = reconcileParamsForModel(
             defaultNaiParams(),
-            'nai-diffusion-3',
+            'nai-diffusion-6-full',
         );
+        assert.equal(params.model, 'nai-diffusion-6-full');
+        assert.equal(notices.some((n) => n.includes('不受支持')), false);
+    });
+
+    it('empty model falls back to default', () => {
+        const { params, notices } = reconcileParamsForModel(defaultNaiParams(), '  ');
         assert.equal(params.model, defaultNaiParams().model);
-        assert.ok(notices[0].includes('不受支持'));
+        assert.ok(notices[0].includes('未填写模型'));
     });
 });
 
@@ -221,6 +255,20 @@ describe('paired field expand + assemble', () => {
 });
 
 describe('mergeNaiParamsForGenerate (4.14)', () => {
+    it('explicit hand-typed model is accepted', () => {
+        const r = mergeNaiParamsForGenerate(defaultNaiParams(), {
+            model: 'NAI Diffusion V5 Curated（nai-diffusion-5-curated）',
+        });
+        assert.equal(r.ok, true);
+        assert.equal(r.value.params.model, 'nai-diffusion-5-curated');
+    });
+
+    it('explicit empty model → Err', () => {
+        const r = mergeNaiParamsForGenerate(defaultNaiParams(), { model: '  ' });
+        assert.equal(r.ok, false);
+        assert.equal(r.error.context.field, 'model');
+    });
+
     it('explicit illegal sampler → Err with field / allowed context', () => {
         const r = mergeNaiParamsForGenerate(defaultNaiParams(), {
             sampler: 'not-a-sampler',
