@@ -4,7 +4,7 @@
  *
  * 裁决：
  * - D36：闸门键 chatId:messageId；切聊天停止后续出图
- * - D38：已有 slot 记录不重跑 LLM
+ * - D38：自动触发仍跳过已有记录。手点本楼生图则清掉这一楼后从提示词重跑
  * - D39：getByMessage Err → 直接返回，零计费
  * - D54 / D57：同键并发共享同一 Promise（合计只写一次、每 slot 只出一次）
  *
@@ -17,7 +17,7 @@
 import { Ok, Err } from '../infra/result.js';
 import { domainError } from '../infra/errors.js';
 import { createLogger } from '../infra/logger.js';
-import { latestSlotImage } from '../domain/model/slot.js';
+import { stripSlotTokens } from '../domain/slot/slot-token.js';
 import { abortErrIfNeeded } from './_helpers.js';
 import { writeGateKey } from './_gate-key.js';
 
@@ -92,6 +92,38 @@ function formatFailMessage(err) {
 }
 
 /**
+ * 清掉这一楼的出图标记和记录，下一轮从提示词重新生成。
+ * @param {GenerateFloorDeps} deps
+ * @param {number} messageId
+ * @param {AbortSignal} [signal]
+ */
+async function clearFloorForRerun(deps, messageId, signal) {
+    const aborted = abortErrIfNeeded(signal);
+    if (aborted) {
+        return aborted;
+    }
+    const mes = typeof deps.host.getMessage === 'function'
+        ? deps.host.getMessage(messageId)
+        : null;
+    if (mes && typeof deps.host.replaceMessageText === 'function') {
+        const next = stripSlotTokens(mes.text ?? '');
+        if (next !== (mes.text ?? '')) {
+            const replaced = await deps.host.replaceMessageText(messageId, next);
+            if (!replaced.ok) {
+                return replaced;
+            }
+        }
+    }
+    if (typeof deps.slotRepo.removeByMessage === 'function') {
+        const removed = await deps.slotRepo.removeByMessage(messageId);
+        if (!removed.ok) {
+            return removed;
+        }
+    }
+    return Ok(undefined);
+}
+
+/**
  * @param {GenerateFloorDeps} deps
  * @returns {{
  *   execute: (messageId?: number, opts?: GenerateFloorOptions) => Promise<
@@ -159,15 +191,19 @@ export function createGenerateFloorUseCase(deps) {
         /** @type {import('../domain/model/slot.js').SlotRecord[]} */
         let records = listR.value;
 
-        if (records.length === 0) {
-            // D38：确实没有 → 写 slot（闸门在 generateSlots）
-            const genR = await deps.generateSlots.execute(messageId, { signal });
-            if (!genR.ok) {
-                return genR;
+        if (records.length > 0) {
+            const cleared = await clearFloorForRerun(deps, messageId, signal);
+            if (!cleared.ok) {
+                return cleared;
             }
-            summary.wroteSlots = true;
-            records = genR.value.records ?? [];
         }
+
+        const genR = await deps.generateSlots.execute(messageId, { signal });
+        if (!genR.ok) {
+            return genR;
+        }
+        summary.wroteSlots = true;
+        records = genR.value.records ?? [];
 
         /** @type {Array<{ slotId: number, imageRef: string, writeOpts?: object, traceId?: string, chatId?: string|null }>} */
         const deferred = [];
@@ -188,7 +224,10 @@ export function createGenerateFloorUseCase(deps) {
                     total: records.length,
                 });
             }
-            const r = await deps.renderSlot.execute(messageId, slotId, { signal, deferPersist: true });
+            const r = await deps.renderSlot.execute(messageId, slotId, {
+                signal,
+                deferPersist: true,
+            });
             if (r.ok && r.value?.deferred) {
                 deferred.push(r.value.deferred);
             } else if (r.ok) {
@@ -220,11 +259,6 @@ export function createGenerateFloorUseCase(deps) {
             const record = records[i];
             const slotId = record.slotId;
 
-            if (latestSlotImage(record) != null) {
-                summary.skipped.push({ slotId, reason: 'already-rendered' });
-                continue;
-            }
-
             if (parallel) {
                 continue;
             }
@@ -235,9 +269,6 @@ export function createGenerateFloorUseCase(deps) {
             const jobs = [];
             for (let i = 0; i < records.length; i += 1) {
                 const record = records[i];
-                if (latestSlotImage(record) != null) {
-                    continue;
-                }
                 jobs.push(renderOne(record, i));
             }
             await Promise.all(jobs);

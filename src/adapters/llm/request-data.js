@@ -24,8 +24,7 @@ export function buildCustomChatCompletionRequest(config, opts) {
         messages: opts.messages,
         model: config.model,
         chat_completion_source: 'custom',
-        custom_url: config.baseUrl,
-        secret_id: config.secretId,
+        custom_url: customApiUrl(config.baseUrl),
         use_sysprompt: true,
     };
 
@@ -47,8 +46,9 @@ export function buildCustomChatCompletionRequest(config, opts) {
     if (config.customExcludeBody) {
         data.custom_exclude_body = config.customExcludeBody;
     }
-    if (config.customIncludeHeaders) {
-        data.custom_include_headers = config.customIncludeHeaders;
+    const includeHeaders = buildBearerHeaders(config.apiKey, config.customIncludeHeaders);
+    if (includeHeaders) {
+        data.custom_include_headers = includeHeaders;
     }
     if (config.customPromptPostProcessing) {
         data.custom_prompt_post_processing = config.customPromptPostProcessing;
@@ -66,19 +66,49 @@ export function buildCustomChatCompletionRequest(config, opts) {
 }
 
 /**
- * 拉模型列表请求体（POST /api/backends/chat-completions/status）。
- * @param {{ baseUrl: string, secretId: string, customIncludeHeaders?: string }} config
+ * 去掉末尾斜杠。酒馆 custom 来源按 `地址/chat/completions` 拼接。
+ * @param {string} baseUrl
+ * @returns {string}
+ */
+export function customApiUrl(baseUrl) {
+    return String(baseUrl || '').trim().replace(/\/+$/, '');
+}
+
+/**
+ * 密钥放进 Authorization，盖过酒馆按密钥编号取出的那一把。
+ * 用户自己的附加请求头写在后面，同名时以用户的为准。
+ * @param {unknown} apiKey
+ * @param {unknown} [extraHeaders]
+ * @returns {string}
+ */
+export function buildBearerHeaders(apiKey, extraHeaders) {
+    const key = String(apiKey || '').trim();
+    /** @type {string[]} */
+    const lines = [];
+    if (key) {
+        lines.push(`Authorization: ${JSON.stringify(`Bearer ${key}`)}`);
+    }
+    const extra = String(extraHeaders || '').trim();
+    if (extra) {
+        lines.push(extra);
+    }
+    return lines.join('\n');
+}
+
+/**
+ * 拉模型请求体。custom 来源会合并 custom_include_headers，其中的 Authorization 覆盖密钥库。
+ * @param {{ baseUrl: string, apiKey: string, customIncludeHeaders?: string }} config
  * @returns {Record<string, unknown>}
  */
 export function buildCustomStatusRequest(config) {
     /** @type {Record<string, unknown>} */
     const data = {
         chat_completion_source: 'custom',
-        custom_url: config.baseUrl,
-        secret_id: config.secretId,
+        custom_url: customApiUrl(config.baseUrl),
     };
-    if (config.customIncludeHeaders) {
-        data.custom_include_headers = config.customIncludeHeaders;
+    const includeHeaders = buildBearerHeaders(config.apiKey, config.customIncludeHeaders);
+    if (includeHeaders) {
+        data.custom_include_headers = includeHeaders;
     }
     return data;
 }

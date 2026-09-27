@@ -113,7 +113,7 @@ export function createArtistPreviewService(deps) {
             }
 
             const putR = await deps.savePreviewPair(
-                artist.id,
+                artist.name,
                 image.blob,
                 cardBlob,
                 {

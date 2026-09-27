@@ -538,6 +538,56 @@ export function createSlotRepo(deps) {
             return Ok(undefined);
         },
 
+        /**
+         * 删掉这一楼的全部生图记录，并清掉对应图片。
+         * @param {number} messageId
+         */
+        async removeByMessage(messageId) {
+            return catchToResult(async () => {
+                const ready = await ensureLoaded();
+                if (isErr(ready)) {
+                    throw ready.error;
+                }
+                if (loadError) {
+                    throw loadError;
+                }
+                const sid = sessionId;
+                if (!sid) {
+                    throw hostError({
+                        code: 'SESSION_ID_MISSING',
+                        message: '当前没有可用的会话 id',
+                    });
+                }
+                const genAtStart = loadGeneration;
+                const mid = Number(messageId);
+                const nextMap = await baseMapForSession(sid);
+                /** @type {SlotRecord[]} */
+                const removed = [];
+                for (const [slotId, rec] of nextMap) {
+                    if (rec && rec.messageId === mid) {
+                        removed.push(rec);
+                        nextMap.delete(slotId);
+                    }
+                }
+                const trimmed = applyTrim(
+                    [...nextMap.values()].sort((a, b) => a.slotId - b.slotId),
+                    null,
+                );
+                await persist(sid, trimmed, null);
+                applyCacheIfCurrent(sid, trimmed, genAtStart);
+                for (const rec of removed) {
+                    await clearReusedSlotCache(rec.slotId, sid);
+                    const images = Array.isArray(rec.images) ? rec.images : [];
+                    for (const entry of images) {
+                        if (entry?.imageRef && imageRepo && typeof imageRepo.remove === 'function') {
+                            await imageRepo.remove(entry.imageRef);
+                        }
+                    }
+                }
+                changes.emit({ type: 'remove', messageId: mid, sessionId: sid });
+            }, mapErr, Ok, Err);
+        },
+
         async getByMessage(messageId) {
             return catchToResult(async () => {
                 const ready = await ensureLoaded();

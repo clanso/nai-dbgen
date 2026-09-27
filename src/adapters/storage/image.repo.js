@@ -96,7 +96,10 @@ export function createImageRepo(deps) {
                 }));
             }
             return catchToResult(async () => {
-                const id = newId('img');
+                const stableId = opts?.id != null && String(opts.id) !== ''
+                    ? String(opts.id)
+                    : '';
+                const id = stableId || newId('img');
                 const record = {
                     id,
                     blob,
@@ -105,7 +108,10 @@ export function createImageRepo(deps) {
                     createdAt: nowIso(),
                     pinned: opts?.pinned === true,
                 };
-                await db.put(IDB_STORES.IMAGES, record);
+                await db.put(
+                    stableId ? IDB_STORES.ARTIST_IMAGES : IDB_STORES.IMAGES,
+                    record,
+                );
                 return id;
             }, mapErr, Ok, Err);
         },
@@ -117,6 +123,7 @@ export function createImageRepo(deps) {
             const key = String(ref);
             return catchToResult(async () => {
                 await db.delete(IDB_STORES.IMAGES, key);
+                await db.delete(IDB_STORES.ARTIST_IMAGES, key);
                 revokeCached(key);
             }, mapErr, Ok, Err);
         },
@@ -127,7 +134,8 @@ export function createImageRepo(deps) {
             }
             const key = String(ref);
             return catchToResult(async () => {
-                const row = await db.get(IDB_STORES.IMAGES, key);
+                const row = await db.get(IDB_STORES.IMAGES, key)
+                    || await db.get(IDB_STORES.ARTIST_IMAGES, key);
                 return row?.blob || null;
             }, mapErr, Ok, Err);
         },
@@ -141,7 +149,8 @@ export function createImageRepo(deps) {
                 if (urlCache.has(key)) {
                     return urlCache.get(key) || null;
                 }
-                const row = await db.get(IDB_STORES.IMAGES, key);
+                const row = await db.get(IDB_STORES.IMAGES, key)
+                    || await db.get(IDB_STORES.ARTIST_IMAGES, key);
                 if (!row || !row.blob) {
                     return null;
                 }

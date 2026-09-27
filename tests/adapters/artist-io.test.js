@@ -1,5 +1,5 @@
 /**
- * 画师串导入导出（五字段裸数组 + presets 格式、按 name 判重、原图/卡片图服务器文件）。
+ * 画师串导入导出（五字段裸数组 + presets 格式、按 name 判重、示例图在本机固定路径）。
  */
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
@@ -26,6 +26,7 @@ import {
 } from '../../src/adapters/storage/artist-io.js';
 import {
     artistCardFileName,
+    artistLocalImageId,
     artistPreviewDisplayUrl,
     artistPreviewFileName,
     removeArtistPreviewFiles,
@@ -134,8 +135,7 @@ describe('artist import/export', () => {
 
         const list = await repo.list();
         const alpha = list.value.find((a) => a.name === 'fixture-alpha');
-        assert.ok(alpha.cardImageRef);
-        assert.match(String(alpha.cardImageRef), /^img_/);
+        assert.equal(alpha.cardImageRef, artistLocalImageId('fixture-alpha', 'card'));
     });
 
     it('duplicate by name: skip / overwrite / rename', async () => {
@@ -195,14 +195,14 @@ describe('artist import/export', () => {
         assert.ok(r.value.errors.some((e) => /fixture-/.test(e)));
     });
 
-    it('overwrite deletes old reference and card files', async () => {
+    it('再次导入同一名称，示例图路径不变', async () => {
         const { repo, imageRepo } = makeRepo();
         await repo.importJson([FIXTURE[0]], { strategy: 'skip' });
         const list1 = await repo.list();
         const a = list1.value[0];
-        const oldRef = a.referenceImageRef;
-        const oldCard = a.cardImageRef;
-        assert.ok(oldRef && oldCard);
+        const name = FIXTURE[0].name;
+        assert.equal(a.referenceImageRef, artistLocalImageId(name, 'ref'));
+        assert.equal(a.cardImageRef, artistLocalImageId(name, 'card'));
 
         await repo.importJson([{
             ...FIXTURE[0],
@@ -210,12 +210,13 @@ describe('artist import/export', () => {
         }], { strategy: 'overwrite' });
         const list2 = await repo.list();
         const b = list2.value[0];
-        assert.notEqual(b.referenceImageRef, oldRef);
-        assert.notEqual(b.cardImageRef, oldCard);
-        const oldBlob = await imageRepo.getBlob(oldRef);
-        const newBlob = await imageRepo.getBlob(b.referenceImageRef);
-        assert.equal(oldBlob.value, null);
-        assert.ok(newBlob.value);
+        assert.equal(b.referenceImageRef, a.referenceImageRef);
+        assert.equal(b.cardImageRef, a.cardImageRef);
+        const blob = await imageRepo.getBlob(b.referenceImageRef);
+        assert.ok(blob.value);
+        const cached = await imageRepo.listMeta();
+        assert.equal(cached.ok, true);
+        assert.equal(cached.value.some((row) => row.id === b.referenceImageRef), false);
     });
 
     it('export errors when referenced image file is missing', async () => {

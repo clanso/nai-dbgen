@@ -112,12 +112,12 @@ export function llmSecretLabel(configName) {
 }
 
 /**
- * 是否已填 Key（有密钥库编号）。
+ * 是否已填明文密钥。密钥编号不算。
  * @param {unknown} config
  * @returns {boolean}
  */
 export function llmConfigHasKey(config) {
-    return isNonEmptyString(config?.secretId);
+    return isNonEmptyString(/** @type {{ apiKey?: unknown }} */ (config)?.apiKey);
 }
 
 /**
@@ -136,6 +136,7 @@ export function naiConfigHasKey(config) {
  * @property {string} name
  * @property {string} baseUrl 填到 /v1 这一级
  * @property {string|null} secretId 酒馆密钥库编号；无 Key 时 null
+ * @property {string} [apiKey] 交给酒馆代理的密钥原文；导出时去掉
  * @property {string} model
  * @property {number} [temperature]
  * @property {number} [topP]
@@ -230,6 +231,10 @@ export function createLlmApiConfig(input, deps) {
         updatedAt: deps.now,
         ...gen,
     };
+    const apiKey = input.apiKey == null ? '' : String(input.apiKey).trim();
+    if (apiKey) {
+        cfg.apiKey = apiKey;
+    }
     assignOptionalYamlString(cfg, 'customIncludeBody', input.customIncludeBody);
     assignOptionalYamlString(cfg, 'customExcludeBody', input.customExcludeBody);
     assignOptionalYamlString(cfg, 'customIncludeHeaders', input.customIncludeHeaders);
@@ -269,7 +274,7 @@ export function createNaiApiConfig(input, deps) {
 }
 
 /**
- * 导出用：去掉 secretId（及任何残留明文 Key）。
+ * 导出用：去掉 secretId 和明文密钥。
  * @param {LlmApiConfig} config
  * @returns {object}
  */
@@ -277,6 +282,7 @@ export function llmConfigForExport(config) {
     const normalized = normalizeLlmApiConfig(config);
     const {
         secretId: _sid,
+        apiKey: _key,
         ...rest
     } = normalized;
     return rest;
@@ -312,6 +318,9 @@ export function validateLlmApiConfig(obj, opts = {}) {
     }
     if (obj.secretId != null && obj.secretId !== '' && typeof obj.secretId !== 'string') {
         return validationErr('LLM_CONFIG_SECRET', '密钥编号格式无效');
+    }
+    if (obj.apiKey != null && typeof obj.apiKey !== 'string') {
+        return validationErr('LLM_CONFIG_KEY', 'API 密钥格式无效');
     }
     if (obj.model != null && typeof obj.model !== 'string') {
         return validationErr('LLM_CONFIG_MODEL', '模型名格式无效');
@@ -420,6 +429,10 @@ export function normalizeLlmApiConfig(obj) {
         updatedAt: String(obj.updatedAt ?? ''),
         ...gen,
     };
+    const apiKey = obj.apiKey == null ? '' : String(obj.apiKey).trim();
+    if (apiKey) {
+        cfg.apiKey = apiKey;
+    }
     assignOptionalYamlString(cfg, 'customIncludeBody', obj.customIncludeBody);
     assignOptionalYamlString(cfg, 'customExcludeBody', obj.customExcludeBody);
     assignOptionalYamlString(cfg, 'customIncludeHeaders', obj.customIncludeHeaders);

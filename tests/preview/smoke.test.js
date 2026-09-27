@@ -178,9 +178,9 @@ describe('preview smoke · same assembly as demo page', () => {
         assert.ok(Array.isArray(gen.value) && gen.value.length >= 1);
     });
 
-    it('画师串手填预览写入服务器文件', async () => {
+    it('画师串手填预览写入本机固定路径', async () => {
         assert.ok(rt);
-        const { container, serverFiles } = rt;
+        const { container } = rt;
 
         const r = await container.services.artistPreview.preview({
             artistId: IDS.artist,
@@ -197,13 +197,15 @@ describe('preview smoke · same assembly as demo page', () => {
         assert.equal(artist.value.referenceImageRef, r.value.referenceImageRef);
         assert.equal(artist.value.cardImageRef, r.value.cardImageRef);
 
-        const exists = await serverFiles.exists([
-            String(r.value.referenceImageRef),
-            String(r.value.cardImageRef),
-        ]);
-        assert.equal(isOk(exists), true);
-        assert.equal(exists.value[String(r.value.referenceImageRef)], true);
-        assert.equal(exists.value[String(r.value.cardImageRef)], true);
+        const refBlob = await container.repos.image.getBlob(String(r.value.referenceImageRef));
+        const cardBlob = await container.repos.image.getBlob(String(r.value.cardImageRef));
+        assert.equal(isOk(refBlob), true);
+        assert.ok(refBlob.value);
+        assert.equal(isOk(cardBlob), true);
+        assert.ok(cardBlob.value);
+        const cached = await container.repos.image.listMeta();
+        assert.equal(cached.ok, true);
+        assert.equal(cached.value.some((row) => row.id === r.value.referenceImageRef), false);
     });
 
     it('存储清理：孤儿会话删除，存活会话保留', async () => {

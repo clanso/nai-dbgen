@@ -29,7 +29,7 @@ import { openModal } from '../ui/common/modal.js';
 const log = createLogger('bootstrap/lifecycle');
 
 /** @type {string} */
-export const PLUGIN_VERSION = '0.2.1';
+export const PLUGIN_VERSION = '0.2.11';
 
 /** @type {string} */
 export const PUBLIC_API_NAME = 'NaiDbGen';
@@ -252,7 +252,7 @@ function exposePublicApi(container) {
         },
         /**
          * 对外单图提示词：当前楼的召回预设和生图预设。用户输入只替换 {{用户描述}}。
-         * 只返回 caption，不出图、不写 slot。
+         * 算工作台调用：工作台专用段会带上。只返回 caption，不出图、不写 slot。
          * @param {{ description: string, messageId?: number, signal?: AbortSignal }} req
          */
         async generateSinglePrompt(req) {
@@ -265,6 +265,7 @@ function exposePublicApi(container) {
             }
             return c.services.workbench.writePrompt({
                 mode: 'floor',
+                includeWorkbenchOnly: true,
                 naturalLanguage: req.description,
                 messageId: req.messageId,
                 signal: req.signal,

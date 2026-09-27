@@ -257,13 +257,6 @@ export async function createContainer(opts = {}) {
         nowIso,
     });
 
-    /** @type {import('../ports/llm.port.js').LlmPort} */
-    const llm = opts.llm ?? createLlmGateway({
-        transports: {
-            'st-backend': createStBackendLlmTransport({ getContext, yaml }),
-        },
-    });
-
     const llmSecrets = opts.llmSecrets ?? createLlmSecretsStore({
         getRequestHeaders: () => {
             const ctx = getContext();
@@ -271,6 +264,13 @@ export async function createContainer(opts = {}) {
                 throw new Error('getContext().getRequestHeaders 不可用');
             }
             return ctx.getRequestHeaders();
+        },
+    });
+
+    /** @type {import('../ports/llm.port.js').LlmPort} */
+    const llm = opts.llm ?? createLlmGateway({
+        transports: {
+            'st-backend': createStBackendLlmTransport({ getContext, yaml }),
         },
     });
 

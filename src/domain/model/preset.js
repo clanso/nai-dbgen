@@ -22,6 +22,7 @@ export const PRESET_SCHEMA_VERSION = 1;
  * @property {'system'|'user'|'assistant'} role
  * @property {string} content
  * @property {boolean} enabled
+ * @property {boolean} workbenchOnly 勾选后只在工作台生图出现，楼内双击生图不带上
  * @property {0|1} injection_position RELATIVE=0 / ABSOLUTE=1
  * @property {number} injection_depth
  * @property {number} injection_order
@@ -141,6 +142,7 @@ function normalizePrompts(raw) {
         role: p.role === 'user' || p.role === 'assistant' ? p.role : 'system',
         content: String(p.content ?? ''),
         enabled: p.enabled !== false,
+        workbenchOnly: p.workbenchOnly === true,
         injection_position: p.injection_position === 1 ? 1 : 0,
         injection_depth: Number.isFinite(p.injection_depth) ? Number(p.injection_depth) : 0,
         injection_order: Number.isFinite(p.injection_order) ? Number(p.injection_order) : 100,

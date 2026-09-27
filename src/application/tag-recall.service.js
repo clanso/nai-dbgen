@@ -54,6 +54,7 @@ const log = createLogger('application/tag-recall');
  * @property {string} targetFloorText 目标楼正文（校验生成点；与 placeSlots 同源）
  * @property {string[]} [libraryIds] 工作台可覆盖本次勾选的库；缺省用全局已激活构图库
  * @property {string} [userDesc] 楼内流程的用户输入，替换预设里的 {{用户描述}}
+ * @property {boolean} [omitWorkbenchOnly] 缺省跳过工作台专用段；对外接口传 false 则带上
  * @property {string} [traceId]
  * @property {AbortSignal} [signal]
  */
@@ -204,6 +205,7 @@ export function createTagRecallService(deps) {
 
             const messages = renderPreset(presetR.value, blocks, {
                 runHostMacros: deps.runHostMacros,
+                omitWorkbenchOnly: input?.omitWorkbenchOnly !== false,
             });
 
             const aborted2 = abortErrIfNeeded(input?.signal, traceId);

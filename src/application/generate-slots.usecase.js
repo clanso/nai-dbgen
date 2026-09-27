@@ -262,6 +262,7 @@ export function createGenerateSlotsUseCase(deps) {
 
             const messages = renderPreset(presetR.value, blocks, {
                 runHostMacros: deps.runHostMacros,
+                omitWorkbenchOnly: true,
             });
 
             const aborted2 = abortErrIfNeeded(signal, traceId);

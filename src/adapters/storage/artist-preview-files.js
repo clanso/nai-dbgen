@@ -1,6 +1,6 @@
 /**
- * L2 适配器 · 画师串示例图（服务器文件，配置非缓存）。
- * 原图 / 卡片图各一文件；文件名由画师串 id 算出；非法字符安全化且保证不撞名。
+ * L2 适配器 · 画师串示例图。
+ * 导入和预览写本机固定路径，按名称计算，不进会清理的公共图片缓存。
  */
 
 import {
@@ -24,6 +24,16 @@ export function fnv1aHex(str) {
         h = Math.imul(h, 0x01000193);
     }
     return (h >>> 0).toString(16).padStart(8, '0');
+}
+
+/**
+ * 画师串示例图的本机路径。按名称计算，手机和电脑导入同一条时路径相同。
+ * @param {string} name
+ * @param {'ref'|'card'} kind
+ * @returns {string}
+ */
+export function artistLocalImageId(name, kind) {
+    return `artist-${kind}:${sanitizeArtistIdForFile(name)}`;
 }
 
 /**
@@ -249,9 +259,11 @@ export async function putArtistPreviewPair(deps, artistId, referenceBlob, cardBl
             message: '示例图存储不可用',
         }));
     }
-    const refR = await imageRepo.put(referenceBlob, { pinned: true });
+    const refId = artistLocalImageId(artistId, 'ref');
+    const cardId = artistLocalImageId(artistId, 'card');
+    const refR = await imageRepo.put(referenceBlob, { id: refId });
     if (!refR.ok) return refR;
-    const cardR = await imageRepo.put(cardBlob, { pinned: true });
+    const cardR = await imageRepo.put(cardBlob, { id: cardId });
     if (!cardR.ok) {
         if (typeof imageRepo.remove === 'function') {
             await imageRepo.remove(refR.value);
@@ -259,8 +271,12 @@ export async function putArtistPreviewPair(deps, artistId, referenceBlob, cardBl
         return cardR;
     }
     if (typeof imageRepo.remove === 'function') {
-        await imageRepo.remove(oldRefs?.referenceImageRef);
-        await imageRepo.remove(oldRefs?.cardImageRef);
+        if (oldRefs?.referenceImageRef && oldRefs.referenceImageRef !== refId) {
+            await imageRepo.remove(oldRefs.referenceImageRef);
+        }
+        if (oldRefs?.cardImageRef && oldRefs.cardImageRef !== cardId) {
+            await imageRepo.remove(oldRefs.cardImageRef);
+        }
     }
     return Ok({
         referenceImageRef: refR.value,

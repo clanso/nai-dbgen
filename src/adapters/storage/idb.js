@@ -12,9 +12,10 @@ export const IDB_NAME = 'nai-dbgen';
 
 /**
  * 版本 2：图片按 (sessionId, slotId) 建缓存索引（slot_image_cache）。
+ * 版本 3：画师串示例图单独存放，不进会清理的公共图片缓存。
  * @type {number}
  */
-export const IDB_VERSION = 2;
+export const IDB_VERSION = 3;
 
 /**
  * @readonly
@@ -29,6 +30,8 @@ export const IDB_STORES = Object.freeze({
     LLM_CONFIGS: 'llm_configs',
     NAI_CONFIGS: 'nai_configs',
     IMAGES: 'images',
+    /** 画师串示例图。不参与图片缓存清理。 */
+    ARTIST_IMAGES: 'artist_images',
     /** 会话内 slot → 最新 imageRef（记录被修剪后仍可展示缓存图） */
     SLOT_IMAGE_CACHE: 'slot_image_cache',
 });
@@ -148,6 +151,7 @@ function runUpgrade(db, tx, oldVersion) {
         [IDB_STORES.LLM_CONFIGS, { keyPath: 'id' }],
         [IDB_STORES.NAI_CONFIGS, { keyPath: 'id' }],
         [IDB_STORES.IMAGES, { keyPath: 'id' }],
+        [IDB_STORES.ARTIST_IMAGES, { keyPath: 'id' }],
         [IDB_STORES.SLOT_IMAGE_CACHE, { keyPath: ['sessionId', 'slotId'] }],
     ];
     for (const [name, params] of specs) {

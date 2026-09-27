@@ -141,4 +141,26 @@ describe('renderPreset', () => {
         });
         assert.deepEqual(msgs.map((m) => m.content), ['A']);
     });
+
+    it('楼内生图跳过工作台专用段，工作台仍带上', () => {
+        const preset = {
+            prompts: [
+                { identifier: 'a', role: 'system', content: '公共', enabled: true },
+                { identifier: 'b', role: 'system', content: '工作台提示', enabled: true, workbenchOnly: true },
+            ],
+            prompt_order: [
+                { identifier: 'a', enabled: true },
+                { identifier: 'b', enabled: true },
+            ],
+        };
+        const floor = renderPreset(preset, createBlockSet(), {
+            runHostMacros: (t) => t,
+            omitWorkbenchOnly: true,
+        });
+        const bench = renderPreset(preset, createBlockSet(), {
+            runHostMacros: (t) => t,
+        });
+        assert.deepEqual(floor.map((m) => m.content), ['公共']);
+        assert.deepEqual(bench.map((m) => m.content), ['公共', '工作台提示']);
+    });
 });

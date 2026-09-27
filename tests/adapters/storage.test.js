@@ -405,7 +405,7 @@ describe('image repo D22 / slot cache', () => {
 describe('idb schema constants', () => {
     it('exports stable db name/version/stores', () => {
         assert.equal(IDB_NAME, 'nai-dbgen');
-        assert.equal(IDB_VERSION, 2);
+        assert.equal(IDB_VERSION, 3);
         assert.ok(IDB_STORES.CHARACTERS);
         assert.ok(IDB_STORES.IMAGES);
         assert.ok(IDB_STORES.SLOT_IMAGE_CACHE);
