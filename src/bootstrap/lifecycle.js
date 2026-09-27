@@ -251,7 +251,7 @@ function exposePublicApi(container) {
             return c.services.imageGen.generate(req);
         },
         /**
-         * 对外单图提示词：当前楼的召回预设和生图预设，末尾带上拍摄要求，只要这一帧。
+         * 对外单图提示词：当前楼的召回预设和生图预设。用户输入只替换 {{用户描述}}。
          * 只返回 caption，不出图、不写 slot。
          * @param {{ description: string, messageId?: number, signal?: AbortSignal }} req
          */

@@ -4,7 +4,7 @@
  *
  * 裁决 D13：工作台提示词为结构化 NaiCaption（base_caption + char_captions）。
  * 勾选条目：不跑召回，只把勾中条目交给生图预设。
- * 楼内流程：召回预设末尾带上生成内容并只要一张图，再把这一张交给生图预设，结果回填工作台。
+ * 楼内流程：用户输入只通过 {{用户描述}} 进入召回预设和生图预设，再只要一张图回填工作台。
  * 只传 libraryIds、不传 entryIds 时仍按整库已启用条目注入（旧调用）。
  */
 
@@ -39,33 +39,7 @@ import {
 const log = createLogger('application/workbench');
 
 /**
- * 召回预设渲染完之后追加的用户消息。不改预设文件。
- * @param {string} userText
- * @returns {string}
- */
-function floorRecallTrailing(userText) {
-    return [
-        `用户对这一张的拍摄要求：\n${userText}`,
-        '基于前面的规则，从当前这一楼的剧情里只选一帧来画。'
-            + '用户这句话只说明画这一楼里的哪一帧、用什么镜头，剧情仍是当前楼层，不要另起一场戏。'
-            + 'positions 只返回这一个位置。',
-    ].join('\n\n');
-}
-
-/**
- * 生图预设渲染完之后追加：这一张是当前楼的绘制，用户要求只决定镜头。
- * @param {string} userText
- * @returns {string}
- */
-function floorImagegenTrailing(userText) {
-    return [
-        `这一张是当前楼层剧情的一次绘制。用户的拍摄要求是：\n${userText}`,
-        '按这个要求画当前剧情里的这一帧，不要另起一场戏。只输出这一张的提示词。',
-    ].join('\n\n');
-}
-
-/**
- * 楼内流程：视点块与楼内生图相同，召回末尾带上生成内容，只要一张，再交给生图预设。
+ * 楼内流程：视点块与楼内生图相同。用户输入写入 {{用户描述}}，由预设自己决定放在哪。
  * 不写 slot，不出图。
  * @param {WorkbenchDeps} deps
  * @param {WorkbenchWritePromptInput} input
@@ -105,7 +79,7 @@ async function writeFloorPrompt(deps, input, traceId) {
         targetFloorText,
         traceId,
         signal: input.signal,
-        trailingUserText: floorRecallTrailing(nl),
+        userDesc: nl,
     });
     if (!tagR.ok) {
         return attachTraceId(tagR, traceId);
@@ -130,6 +104,7 @@ async function writeFloorPrompt(deps, input, traceId) {
     blocks = setBlock(blocks, VARIABLE_NAMES.FEATURE, vpR.value.featureText);
     blocks = setBlock(blocks, VARIABLE_NAMES.CONSTANT, vpR.value.constantText);
     blocks = setBlock(blocks, VARIABLE_NAMES.RECENT_SLOTS, recentSlotsText);
+    blocks = setBlock(blocks, VARIABLE_NAMES.USER_DESC, nl);
 
     const settings = deps.loadSettings();
     if (!settings.promptGenLlmConfigId) {
@@ -175,7 +150,6 @@ async function writeFloorPrompt(deps, input, traceId) {
     const messages = renderPreset(presetR.value, blocks, {
         runHostMacros: deps.runHostMacros,
     });
-    messages.push({ role: 'user', content: floorImagegenTrailing(nl) });
     const aborted = abortErrIfNeeded(input?.signal, traceId);
     if (aborted) {
         return aborted;

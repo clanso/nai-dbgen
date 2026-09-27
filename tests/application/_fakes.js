@@ -431,11 +431,11 @@ export function buildPipeline(overrides = {}) {
     ];
 
     const presetRepo = createMemoryRepo([
-        makePreset('preset-recall', 'recall', 'ctx={{当前上下文}}\nkeys={{候选 key}}'),
+        makePreset('preset-recall', 'recall', 'ctx={{当前上下文}}\nkeys={{候选 key}}\nuser={{用户描述}}'),
         makePreset(
             'preset-imagegen',
             'imagegen',
-            'W={{世界书}} C={{当前上下文}} R={{角色库}} T={{构图标签}} F={{特征参考}} K={{常驻标签}} Recent={{近期生图记录}}',
+            'W={{世界书}} C={{当前上下文}} R={{角色库}} T={{构图标签}} F={{特征参考}} K={{常驻标签}} Recent={{近期生图记录}} U={{用户描述}}',
         ),
     ]);
     const llmConfigRepo = createMemoryRepo([

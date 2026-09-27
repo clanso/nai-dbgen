@@ -33,7 +33,7 @@
           "identifier": "payload",
           "name": "上下文与候选",
           "role": "user",
-          "content": "【最后一楼】\n{{最后一楼}}\n\n【当前上下文】\n{{当前上下文}}\n\n【候选 key】\n{{候选 key}}\n\nanchor 只从「最后一楼」逐字复制。请输出 {\"positions\":[...]} 这一个 JSON 对象。",
+          "content": "【最后一楼】\n{{最后一楼}}\n\n【当前上下文】\n{{当前上下文}}\n\n【用户描述】\n{{用户描述}}\n\n【候选 key】\n{{候选 key}}\n\nanchor 只从「最后一楼」逐字复制。请输出 {\"positions\":[...]} 这一个 JSON 对象。",
           "enabled": true,
           "injection_position": 0,
           "injection_depth": 0,

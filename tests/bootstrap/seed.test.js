@@ -186,8 +186,10 @@ describe('assets/seed envelopes', () => {
         assert.ok(igText.includes('TAG_SAMPLE'));
         assert.ok(igText.includes('CONSTANT_SAMPLE'));
         assert.ok(igText.includes('RECENT_SLOTS_SAMPLE'));
+        assert.ok(igText.includes('USER_DESC_SAMPLE'));
         const rcText = smokeRc.messages.map((m) => m.content).join('\n');
         assert.ok(rcText.includes('CONTEXT_SAMPLE'));
+        assert.ok(rcText.includes('USER_DESC_SAMPLE'));
         assert.ok(rcText.includes('key_a'));
         const siText = smokeSi.messages.map((m) => m.content).join('\n');
         assert.ok(siText.includes('USER_DESC_SAMPLE'));

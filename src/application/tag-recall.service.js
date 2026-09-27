@@ -53,7 +53,7 @@ const log = createLogger('application/tag-recall');
  * @property {string} contextText 当前上下文
  * @property {string} targetFloorText 目标楼正文（校验生成点；与 placeSlots 同源）
  * @property {string[]} [libraryIds] 工作台可覆盖本次勾选的库；缺省用全局已激活构图库
- * @property {string} [trailingUserText] 渲染完召回预设后再追加的用户消息（不改预设文件）
+ * @property {string} [userDesc] 楼内流程的用户输入，替换预设里的 {{用户描述}}
  * @property {string} [traceId]
  * @property {AbortSignal} [signal]
  */
@@ -199,15 +199,12 @@ export function createTagRecallService(deps) {
             let blocks = createBlockSet();
             blocks = setBlock(blocks, VARIABLE_NAMES.CONTEXT, String(input.contextText ?? ''));
             blocks = setBlock(blocks, '最后一楼', String(input.targetFloorText ?? ''));
+            blocks = setBlock(blocks, VARIABLE_NAMES.USER_DESC, String(input.userDesc ?? ''));
             blocks = setBlock(blocks, RECALL_CANDIDATE_KEYS_VAR, candidateLines.join('\n'));
 
             const messages = renderPreset(presetR.value, blocks, {
                 runHostMacros: deps.runHostMacros,
             });
-            const trailing = String(input?.trailingUserText ?? '').trim();
-            if (trailing) {
-                messages.push({ role: 'user', content: trailing });
-            }
 
             const aborted2 = abortErrIfNeeded(input?.signal, traceId);
             if (aborted2) {

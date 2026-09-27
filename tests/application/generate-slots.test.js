@@ -287,11 +287,11 @@ describe('workbench', () => {
         assert.equal(promptMsg.includes('silver hair feature ref'), false);
     });
 
-    it('floor mode appends user text to recall and fills one caption', async () => {
+    it('floor mode puts the user text in {{用户描述}} for both presets', async () => {
         const p = buildPipeline({
             llmComplete: async (req) => {
                 const joined = req.messages.map((m) => m.content).join('\n');
-                if (joined.includes('用户对这一张的拍摄要求')) {
+                if (joined.includes('keys=')) {
                     return Ok({
                         text: '',
                         json: {
@@ -316,14 +316,13 @@ describe('workbench', () => {
         assert.equal(p.llmCalls.length, 2);
         assert.equal(p.naiCalls.length, 0);
         const recallJoined = p.llmCalls[0].messages.map((m) => m.content).join('\n');
-        assert.ok(recallJoined.includes('用户对这一张的拍摄要求'));
-        assert.ok(recallJoined.includes('只要花园这一张'));
-        assert.ok(recallJoined.includes('不要另起一场戏'));
-        assert.ok(recallJoined.includes('当前这一楼'));
+        assert.ok(recallJoined.includes('user=只要花园这一张'));
+        assert.equal(recallJoined.includes('用户对这一张的拍摄要求'), false);
+        assert.equal(recallJoined.includes('不要另起一场戏'), false);
         const imageJoined = p.llmCalls[1].messages.map((m) => m.content).join('\n');
         assert.ok(imageJoined.includes('flower garden'));
-        assert.ok(imageJoined.includes('当前楼层剧情的一次绘制'));
-        assert.ok(imageJoined.includes('只要花园这一张'));
+        assert.ok(imageJoined.includes('U=只要花园这一张'));
+        assert.equal(imageJoined.includes('当前楼层剧情的一次绘制'), false);
         assert.equal(r.value.caption.v4_prompt.caption.base_caption, 'one garden shot');
     });
 
