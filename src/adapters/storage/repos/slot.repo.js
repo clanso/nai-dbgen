@@ -81,6 +81,7 @@ export function createSlotRepo(deps) {
     /** 串行化 ensureLoaded，避免 A/B 并行 load 交错写缓存 */
     /** @type {Promise<unknown>} */
     let loadChain = Promise.resolve();
+    let mutationChain = Promise.resolve();
 
     /**
      * @param {unknown} err
@@ -495,7 +496,7 @@ export function createSlotRepo(deps) {
         }, mapErr, Ok, Err);
     }
 
-    return {
+    const repo = {
         ensureLoaded,
         getLoadError() {
             return loadError;
@@ -716,8 +717,51 @@ export function createSlotRepo(deps) {
             return commitSlotImages(messageId, entries, opts);
         },
 
+        async replaceMessageRecords(messageId, records, opts = {}) {
+            return catchToResult(async () => {
+                const sid = String(opts.sessionId || readHostSessionId() || '');
+                if (!sid) throw hostError({ code: 'SESSION_ID_MISSING', message: '当前没有可用的会话 id' });
+                const mid = Number(messageId);
+                const gen = loadGeneration;
+                const nextMap = await baseMapForSession(sid);
+                const previous = [...nextMap.values()].filter((row) => row.messageId === mid)
+                    .sort((a, b) => a.slotId - b.slotId);
+                if (opts.expectedRecords
+                    && JSON.stringify(previous) !== JSON.stringify(opts.expectedRecords)) {
+                    throw hostError({ code: 'SLOT_EDIT_CONFLICT', message: '提示词或图片记录已变化，请重新打开编辑器' });
+                }
+                for (const row of previous) nextMap.delete(row.slotId);
+                const seen = new Set();
+                for (const record of records) {
+                    const checked = validateSlotRecord({ ...record, messageId: mid });
+                    if (!checked.ok) throw checked.error;
+                    const row = checked.value;
+                    if (seen.has(row.slotId) || nextMap.has(row.slotId)) {
+                        throw hostError({ code: 'SLOT_EDIT_ID', message: '图片编号重复或属于其他楼层' });
+                    }
+                    seen.add(row.slotId);
+                    nextMap.set(row.slotId, row);
+                }
+                const next = [...nextMap.values()].sort((a, b) => a.slotId - b.slotId);
+                await persist(sid, next, opts.chatLocation);
+                applyCacheIfCurrent(sid, next, gen);
+                changes.emit({ type: 'edit', messageId: mid, sessionId: sid });
+                return next.filter((row) => row.messageId === mid);
+            }, mapErr, Ok, Err);
+        },
+
         onChanged(fn) {
             return changes.subscribe(fn);
         },
     };
+    // Serialize the whole read-modify-write transaction, not merely the final upload.
+    for (const name of ['put', 'recordImage', 'recordImages', 'replaceMessageRecords', 'removeByMessage', 'deleteSessionFile']) {
+        const method = repo[name];
+        repo[name] = (...args) => {
+            const task = mutationChain.then(() => method(...args));
+            mutationChain = task.then(() => undefined, () => undefined);
+            return task;
+        };
+    }
+    return repo;
 }

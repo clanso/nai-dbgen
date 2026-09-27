@@ -12,13 +12,6 @@
     min-height: 0;
 }
 
-:is(#nai-dbgen-root, .nd-root) .nd-wb-header {
-    display: flex;
-    flex-wrap: wrap;
-    align-items: center;
-    gap: 0.6em 1em;
-}
-
 :is(#nai-dbgen-root, .nd-root) .nd-wb-title {
     margin: 0;
     font-family: inherit;
@@ -27,18 +20,32 @@
     color: var(--nd-text);
 }
 
-:is(#nai-dbgen-root, .nd-root) .nd-wb-header .nd-muted {
-    flex: 1 1 100%;
-    margin: 0;
-    font-size: var(--nd-fs-md);
-    color: var(--nd-muted);
-}
-
 :is(#nai-dbgen-root, .nd-root) .nd-wb-actions {
     display: flex;
     flex-wrap: wrap;
+    align-items: center;
     gap: 0.5em;
     margin-top: 0.4em;
+}
+
+:is(#nai-dbgen-root, .nd-root) .nd-wb-actions--generate {
+    align-items: flex-end;
+    column-gap: 0.75em;
+}
+
+:is(#nai-dbgen-root, .nd-root) .nd-wb-artist {
+    display: grid;
+    gap: 0.35em;
+    flex: 1 1 18em;
+    min-width: 0;
+    max-width: 32em;
+}
+
+/* 底部操作区向上展开，避免候选列表被弹窗滚动容器裁掉。 */
+:is(#nai-dbgen-root, .nd-root) .nd-wb-artist .nd-picker__results {
+    top: auto;
+    bottom: calc(100% + 5px);
+    max-height: min(320px, 40vh);
 }
 
 :is(#nai-dbgen-root, .nd-root) .nd-wb-libraries {

@@ -1,0 +1,32 @@
+.nd-root .nd-slot-editor,
+.nd-root .nd-slot-editor__list {
+    display: grid;
+    gap: 16px;
+    min-width: 0;
+}
+.nd-root .nd-slot-editor__tools,
+.nd-root .nd-slot-editor__actions,
+.nd-root .nd-slot-editor__item-head {
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    flex-wrap: wrap;
+    gap: 8px;
+}
+.nd-root .nd-slot-editor__item-head { justify-content: space-between; }
+.nd-root .nd-slot-editor__item {
+    display: grid;
+    gap: 12px;
+    min-width: 0;
+    padding: 14px;
+    border: 1px solid var(--nd-line);
+    border-radius: var(--nd-radius-sm);
+    background: var(--nd-surface);
+}
+.nd-root .nd-slot-editor textarea { min-width: 0; width: 100%; resize: vertical; }
+.nd-root .nd-slot-editor__actions {
+    position: sticky;
+    bottom: 0;
+    padding: 10px 0;
+    background: var(--nd-surface);
+}

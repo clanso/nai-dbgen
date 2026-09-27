@@ -18,6 +18,7 @@ import { Ok, Err } from '../infra/result.js';
 import { domainError } from '../infra/errors.js';
 import { createLogger } from '../infra/logger.js';
 import { stripSlotTokens } from '../domain/slot/slot-token.js';
+import { latestSlotImage } from '../domain/model/slot.js';
 import { abortErrIfNeeded } from './_helpers.js';
 import { writeGateKey } from './_gate-key.js';
 
@@ -55,6 +56,8 @@ export const FLOOR_EVENTS = Object.freeze({
 /**
  * @typedef {object} GenerateFloorOptions
  * @property {AbortSignal} [signal]
+ * @property {boolean} [manual] Require a warning before manually regenerating existing images.
+ * @property {boolean} [force] Regenerate existing images; automatic callers leave this unset.
  */
 
 /**
@@ -136,6 +139,7 @@ async function clearFloorForRerun(deps, messageId, signal) {
 export function createGenerateFloorUseCase(deps) {
     /** @type {Map<string, Promise<import('../infra/result.js').Ok<GenerateFloorSummary>|import('../infra/result.js').Err<import('../infra/errors.js').AppError>>>} */
     const inflight = new Map();
+    let armed = null;
 
     /**
      * @param {number} [messageId]
@@ -190,20 +194,37 @@ export function createGenerateFloorUseCase(deps) {
 
         /** @type {import('../domain/model/slot.js').SlotRecord[]} */
         let records = listR.value;
+        if (deps.host.getCurrentChatId() !== chatIdAtStart) {
+            return Err(domainError({ code: 'CHAT_CHANGED', message: '会话已切换，请重新启动生图' }));
+        }
+        if (opts?.manual && records.some((record) => latestSlotImage(record) != null)) {
+            const fingerprint = JSON.stringify([chatIdAtStart, messageId, records]);
+            if (armed !== fingerprint) {
+                armed = fingerprint;
+                return Ok({ ...summary, confirmationRequired: true });
+            }
+            armed = null;
+            opts = { ...opts, force: true };
+        } else if (opts?.manual) {
+            armed = null;
+        }
 
-        if (records.length > 0) {
+        if (records.length > 0 && !opts?.manual && !opts?.force) {
             const cleared = await clearFloorForRerun(deps, messageId, signal);
             if (!cleared.ok) {
                 return cleared;
             }
         }
 
-        const genR = await deps.generateSlots.execute(messageId, { signal });
-        if (!genR.ok) {
-            return genR;
+        // Preserve the upstream full-rerun API; the floating-ball entry reuses prompts and history.
+        if (records.length === 0 || (!opts?.manual && !opts?.force)) {
+            const genR = await deps.generateSlots.execute(messageId, { signal });
+            if (!genR.ok) {
+                return genR;
+            }
+            summary.wroteSlots = true;
+            records = genR.value.records ?? [];
         }
-        summary.wroteSlots = true;
-        records = genR.value.records ?? [];
 
         /** @type {Array<{ slotId: number, imageRef: string, writeOpts?: object, traceId?: string, chatId?: string|null }>} */
         const deferred = [];
@@ -224,9 +245,12 @@ export function createGenerateFloorUseCase(deps) {
                     total: records.length,
                 });
             }
+            if (signal?.aborted || deps.host.getCurrentChatId() !== chatIdAtStart) {
+                summary.skipped.push({ slotId, reason: 'chat-switched-or-aborted' });
+                return;
+            }
             const r = await deps.renderSlot.execute(messageId, slotId, {
-                signal,
-                deferPersist: true,
+                signal, force: opts?.force === true, deferPersist: true,
             });
             if (r.ok && r.value?.deferred) {
                 deferred.push(r.value.deferred);
@@ -259,6 +283,11 @@ export function createGenerateFloorUseCase(deps) {
             const record = records[i];
             const slotId = record.slotId;
 
+            if (latestSlotImage(record) != null && opts?.force !== true) {
+                summary.skipped.push({ slotId, reason: 'already-rendered' });
+                continue;
+            }
+
             if (parallel) {
                 continue;
             }
@@ -269,6 +298,9 @@ export function createGenerateFloorUseCase(deps) {
             const jobs = [];
             for (let i = 0; i < records.length; i += 1) {
                 const record = records[i];
+                if (latestSlotImage(record) != null && opts?.force !== true) {
+                    continue;
+                }
                 jobs.push(renderOne(record, i));
             }
             await Promise.all(jobs);

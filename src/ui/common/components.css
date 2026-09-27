@@ -1930,7 +1930,7 @@ dialog.nd-popup.nd-root > .nd-native-dialog__close {
     overflow: hidden;
 }
 
-/* 看图：dialog 进顶层，盖住工作台；里面只有这一张图 */
+/* 图片历史：dialog 进入顶层，正文和工作台共用。 */
 dialog.nd-image-only {
     position: fixed !important;
     inset: 0 !important;
@@ -1939,6 +1939,7 @@ dialog.nd-image-only {
     max-width: none !important;
     max-height: none !important;
     display: flex;
+    flex-direction: column;
     align-items: center;
     justify-content: center;
     margin: 0 !important;
@@ -1972,6 +1973,62 @@ dialog.nd-image-only::backdrop {
     object-fit: contain;
     cursor: zoom-out;
 }
+
+.nd-image-only__toolbar {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 12px;
+    flex: 0 0 44px;
+    color: #fff;
+    font: 14px sans-serif;
+}
+
+.nd-image-only__button {
+    width: 36px;
+    height: 36px;
+    padding: 0;
+    border: 1px solid #999;
+    border-radius: 0;
+    background: #262626;
+    color: #fff;
+    font: 24px sans-serif;
+    cursor: pointer;
+}
+
+.nd-image-only__button:disabled { opacity: 0.4; cursor: default; }
+.nd-image-only__history {
+    display: flex;
+    flex: 0 0 82px;
+    align-items: center;
+    gap: 8px;
+    max-width: calc(100vw - 24px);
+    overflow-x: auto;
+}
+
+.nd-image-only__thumbnail {
+    flex: 0 0 64px;
+    width: 64px;
+    height: 72px;
+    padding: 2px;
+    border: 2px solid transparent;
+    border-radius: 0;
+    background: #262626;
+    cursor: pointer;
+}
+
+.nd-image-only__thumbnail.is-active { border-color: #f47eae; }
+.nd-image-only__thumbnail img { width: 100%; height: 100%; object-fit: contain; }
+dialog.nd-image-only > .nd-image-only__img {
+    min-height: 0;
+    max-height: calc(100dvh - 142px);
+    max-width: calc(100vw - 24px);
+    flex: 1 1 auto;
+    object-fit: contain;
+    cursor: default;
+}
+.nd-image-only__error { color: #fff; }
+.nd-image-only__error[hidden] { display: none; }
 
 /* —— 4.13 出图参数表单（运行配置 / 工作台共用） —— */
 :is(#nai-dbgen-root, .nd-root) .nd-nai-params {

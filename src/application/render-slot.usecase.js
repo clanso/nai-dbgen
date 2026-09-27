@@ -238,6 +238,7 @@ export function createRenderSlotUseCase(deps) {
                 ...(params ? { params } : {}),
                 signal,
                 traceId,
+                shouldStart: () => deps.host.getCurrentChatId() === chatIdAtStart,
             });
             if (!genR.ok) {
                 return attachTraceId(genR, traceId);
@@ -271,6 +272,7 @@ export function createRenderSlotUseCase(deps) {
             : undefined;
 
         if (opts?.deferPersist === true) {
+            rememberPending(key, { imageRef, image, chatId: chatIdAtStart, messageId, slotId });
             return Ok({
                 record: null,
                 image,
@@ -385,6 +387,9 @@ export function createRenderSlotUseCase(deps) {
          * @param {RenderSlotOptions} [opts]
          */
         execute(messageId, slotId, opts) {
+            if (deps.isEditing?.(messageId)) return Promise.resolve(Err(domainError({
+                code: 'SLOT_EDITOR_BUSY', message: '本楼提示词正在保存，请稍后再试',
+            })));
             const chatId = deps.host.getCurrentChatId();
             const key = renderGateKey(chatId, messageId, slotId);
 
@@ -453,6 +458,7 @@ export function createRenderSlotUseCase(deps) {
                 return recR;
             }
             for (const item of list) {
+                pendingWrites.delete(renderGateKey(item.chatId ?? null, messageId, item.slotId));
                 const record = recR.value.find((row) => row.slotId === item.slotId) ?? null;
                 deps.bus.emit(APP_EVENTS.SLOT_RENDERED, {
                     messageId,
