@@ -15,6 +15,7 @@ import {
     cloneCaption,
 } from './workbench-logic.js';
 import { emptyNaiCaption } from '../../domain/model/nai-params.js';
+import { createPromptTextarea, linkTextareaHeights } from '../common/prompt-textarea.js';
 
 /**
  * @param {string} tag
@@ -36,42 +37,11 @@ function setText(node, text) {
 }
 
 /**
- * @param {object} opts
- * @param {string} opts.label
- * @param {string} [opts.value]
- * @param {number} [opts.rows]
- * @param {(v: string) => void} [opts.onChange]
- * @returns {{ el: HTMLElement, getValue: () => string, setValue: (v: string) => void, destroy: () => void }}
- */
-function createTextarea(opts) {
-    const root = el('label', 'nd-field');
-    const labelEl = el('span', 'nd-field__label');
-    setText(labelEl, opts?.label != null ? String(opts.label) : '');
-    /** @type {HTMLTextAreaElement} */
-    const ta = /** @type {HTMLTextAreaElement} */ (el('textarea', 'nd-textarea'));
-    ta.rows = opts?.rows != null ? Number(opts.rows) : 4;
-    ta.value = opts?.value != null ? String(opts.value) : '';
-    const onChange = typeof opts?.onChange === 'function' ? opts.onChange : () => {};
-    const handler = () => onChange(ta.value);
-    ta.addEventListener('input', handler);
-    root.append(labelEl, ta);
-    return {
-        el: root,
-        getValue: () => ta.value,
-        setValue: (v) => {
-            ta.value = v == null ? '' : String(v);
-        },
-        destroy: () => {
-            ta.removeEventListener('input', handler);
-            root.remove();
-        },
-    };
-}
-
-/**
  * @param {Element} root
  * @param {object} [opts]
  * @param {import('../../domain/model/nai-params.js').NaiCaption} [opts.initial]
+ * @param {(index: number) => void} [opts.onCharacterRemove]
+ * @param {(error: unknown) => void} [opts.onCopyError]
  * @returns {{
  *   el: HTMLElement,
  *   getCaption: () => import('../../domain/model/nai-params.js').NaiCaption,
@@ -82,6 +52,10 @@ function createTextarea(opts) {
 export function mountCaptionEditor(root, opts) {
     const shell = el('div', 'nd-wb-caption');
     const initial = captionToEditorState(opts?.initial ?? emptyNaiCaption());
+    const createTextarea = (settings) => createPromptTextarea({
+        ...settings,
+        onCopyError: opts?.onCopyError,
+    });
 
     const posBase = createTextarea({
         label: '场景 · 正面',
@@ -91,7 +65,7 @@ export function mountCaptionEditor(root, opts) {
     const negBase = createTextarea({
         label: '场景 · 负面',
         value: initial.negBase,
-        rows: 4,
+        rows: 5,
     });
 
     const charsHead = el('div', 'nd-wb-caption__chars-head');
@@ -106,6 +80,7 @@ export function mountCaptionEditor(root, opts) {
      *   negative: ReturnType<typeof createTextarea>,
      *   x: ReturnType<typeof createNumberField>,
      *   y: ReturnType<typeof createNumberField>,
+     *   unlinkResize: () => void,
      * }>} */
     const rows = [];
 
@@ -126,7 +101,7 @@ export function mountCaptionEditor(root, opts) {
         const negative = createTextarea({
             label: '负面',
             value: data.negative,
-            rows: 2,
+            rows: 3,
         });
         const x = createNumberField({
             label: '位置 X',
@@ -149,6 +124,7 @@ export function mountCaptionEditor(root, opts) {
                 const idx = rows.findIndex((r) => r.root === card);
                 if (idx < 0) return;
                 const [removed] = rows.splice(idx, 1);
+                removed.unlinkResize();
                 removed.positive.destroy();
                 removed.negative.destroy();
                 removed.x.destroy();
@@ -156,14 +132,18 @@ export function mountCaptionEditor(root, opts) {
                 removed.root.remove();
                 relabel();
                 syncAddEnabled();
+                opts?.onCharacterRemove?.(idx);
             },
         });
         head.append(label, removeBtn);
         const coords = el('div', 'nd-wb-caption__coords');
         coords.append(x.el, y.el);
-        card.append(head, positive.el, negative.el, coords);
+        const prompts = el('div', 'nd-wb-caption__prompt-pair');
+        prompts.append(positive.el, negative.el);
+        card.append(head, prompts, coords);
         charsList.appendChild(card);
-        rows.push({ root: card, positive, negative, x, y });
+        const unlinkResize = linkTextareaHeights(positive.input, negative.input);
+        rows.push({ root: card, positive, negative, x, y, unlinkResize });
         relabel();
         syncAddEnabled();
     }
@@ -191,8 +171,11 @@ export function mountCaptionEditor(root, opts) {
         addRow(row);
     }
 
-    shell.append(posBase.el, negBase.el, charsHead, charsList);
+    const scenePrompts = el('div', 'nd-wb-caption__prompt-pair');
+    scenePrompts.append(posBase.el, negBase.el);
+    shell.append(scenePrompts, charsHead, charsList);
     root.appendChild(shell);
+    const unlinkSceneResize = linkTextareaHeights(posBase.input, negBase.input);
 
     function readState() {
         return {
@@ -217,6 +200,7 @@ export function mountCaptionEditor(root, opts) {
         while (rows.length) {
             const removed = rows.pop();
             if (!removed) break;
+            removed.unlinkResize();
             removed.positive.destroy();
             removed.negative.destroy();
             removed.x.destroy();
@@ -233,15 +217,34 @@ export function mountCaptionEditor(root, opts) {
     return {
         el: shell,
         getCaption: () => cloneCaption(editorStateToCaption(readState())),
+        getTargetForInput(input) {
+            if (input === posBase.input) return 'scene.positive';
+            if (input === negBase.input) return 'scene.negative';
+            for (let i = 0; i < rows.length; i += 1) {
+                if (input === rows[i].positive.input) return `character.${i}.positive`;
+                if (input === rows[i].negative.input) return `character.${i}.negative`;
+            }
+            return null;
+        },
+        getInputForTarget(target) {
+            if (target === 'scene.positive') return posBase.input;
+            if (target === 'scene.negative') return negBase.input;
+            const match = /^character\.(\d+)\.(positive|negative)$/.exec(String(target));
+            const row = match && rows[Number(match[1])];
+            return row ? row[match[2]].input : null;
+        },
+        getCharacterCount: () => rows.length,
         setCaption,
         destroy() {
             if (destroyed) return;
             destroyed = true;
+            unlinkSceneResize();
             posBase.destroy();
             negBase.destroy();
             while (rows.length) {
                 const removed = rows.pop();
                 if (!removed) break;
+                removed.unlinkResize();
                 removed.positive.destroy();
                 removed.negative.destroy();
                 removed.x.destroy();

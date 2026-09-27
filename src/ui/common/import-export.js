@@ -322,7 +322,7 @@ function rowMeta(item) {
  * @param {object|object[]|Blob} data
  * @param {string} filename
  */
-function downloadJson(data, filename) {
+export function downloadJson(data, filename) {
     /** @type {Blob} */
     let blob;
     if (typeof Blob !== 'undefined' && data instanceof Blob) {
@@ -402,9 +402,10 @@ export function mountImportExport(root, deps) {
     const confirmOverwriteCb = typeof deps?.confirmOverwrite === 'function'
         ? deps.confirmOverwrite
         : null;
+    const replaceOnly = deps?.replaceOnly === true;
 
     const shell = document.createElement('div');
-    shell.className = 'nd-import';
+    shell.className = replaceOnly ? 'nd-import nd-import--replace-only' : 'nd-import';
 
     const grid = document.createElement('div');
     grid.className = 'nd-import__grid';
@@ -470,7 +471,8 @@ export function mountImportExport(root, deps) {
     });
     exportPanel.append(exportTitle, exportHint, exportBtn);
 
-    grid.append(drop, exportPanel);
+    if (replaceOnly) grid.appendChild(drop);
+    else grid.append(drop, exportPanel);
 
     const preview = document.createElement('section');
     preview.className = 'nd-import-preview nd-hidden';
@@ -523,14 +525,18 @@ export function mountImportExport(root, deps) {
     statusEl.className = 'nd-import-status';
     statusEl.setAttribute('aria-live', 'polite');
 
-    toolbar.append(toolbarCopy, strategyLabel, exportSelectedBtn, commitBtn, statusEl);
+    if (replaceOnly) commitBtn.textContent = '替换当前超市';
+    toolbar.append(toolbarCopy, ...(replaceOnly ? [] : [strategyLabel, exportSelectedBtn]), commitBtn, statusEl);
 
     const tableWrap = document.createElement('div');
     tableWrap.className = 'nd-table-scroll';
     const table = document.createElement('table');
     const thead = document.createElement('thead');
     const headRow = document.createElement('tr');
-    for (const key of ['import.colSelect', 'import.colName', 'import.colId', 'import.colKind']) {
+    const headerKeys = replaceOnly
+        ? ['import.colName', 'import.colId', 'import.colKind']
+        : ['import.colSelect', 'import.colName', 'import.colId', 'import.colKind'];
+    for (const key of headerKeys) {
         const th = document.createElement('th');
         th.textContent = t(key);
         headRow.appendChild(th);
@@ -598,35 +604,41 @@ export function mountImportExport(root, deps) {
             if (title) {
                 const head = document.createElement('tr');
                 head.className = 'nd-import-group';
-                const tdCheck = document.createElement('td');
-                const groupCheck = document.createElement('input');
-                groupCheck.type = 'checkbox';
-                groupCheck.checked = true;
-                groupCheck.addEventListener('change', () => {
-                    for (const member of members) {
-                        member.checked = groupCheck.checked;
-                        if (member.check) member.check.checked = groupCheck.checked;
-                    }
-                });
-                tdCheck.appendChild(groupCheck);
                 const tdName = document.createElement('td');
                 tdName.colSpan = 3;
                 tdName.textContent = `${title}（${members.length}）`;
-                head.append(tdCheck, tdName);
+                if (!replaceOnly) {
+                    const tdCheck = document.createElement('td');
+                    const groupCheck = document.createElement('input');
+                    groupCheck.type = 'checkbox';
+                    groupCheck.checked = true;
+                    groupCheck.addEventListener('change', () => {
+                        for (const member of members) {
+                            member.checked = groupCheck.checked;
+                            if (member.check) member.check.checked = groupCheck.checked;
+                        }
+                    });
+                    tdCheck.appendChild(groupCheck);
+                    head.append(tdCheck, tdName);
+                } else {
+                    tdName.colSpan = 3;
+                    head.appendChild(tdName);
+                }
                 tbody.appendChild(head);
             }
             for (const row of members) {
                 const tr = document.createElement('tr');
                 if (title) tr.classList.add('nd-import-child');
-                const tdCheck = document.createElement('td');
-                const check = document.createElement('input');
-                check.type = 'checkbox';
-                check.checked = true;
-                row.check = check;
-                check.addEventListener('change', () => {
-                    row.checked = check.checked;
-                });
-                tdCheck.appendChild(check);
+                let tdCheck = null;
+                if (!replaceOnly) {
+                    tdCheck = document.createElement('td');
+                    const check = document.createElement('input');
+                    check.type = 'checkbox';
+                    check.checked = true;
+                    row.check = check;
+                    check.addEventListener('change', () => { row.checked = check.checked; });
+                    tdCheck.appendChild(check);
+                }
                 const meta = rowMeta(row.item);
                 const tdName = document.createElement('td');
                 tdName.textContent = meta.name;
@@ -637,7 +649,8 @@ export function mountImportExport(root, deps) {
                     || meta.kind === `group:${row.item._groupName}`
                     ? ''
                     : meta.kind;
-                tr.append(tdCheck, tdName, tdId, tdKind);
+                if (tdCheck) tr.appendChild(tdCheck);
+                tr.append(tdName, tdId, tdKind);
                 tbody.appendChild(tr);
             }
         }
@@ -696,7 +709,7 @@ export function mountImportExport(root, deps) {
             return;
         }
         const checked = previewRows.map((row) => Boolean(row.checked));
-        const filtered = filterImportPayload(pendingData, checked);
+        const filtered = replaceOnly ? pendingData : filterImportPayload(pendingData, checked);
         if (filtered == null) {
             setError(t('import.empty'));
             return;
@@ -714,14 +727,14 @@ export function mountImportExport(root, deps) {
         if (!importJson || !pendingData || commitBtn.disabled) return;
         setError('');
         const checked = previewRows.map((row) => Boolean(row.checked));
-        const filtered = filterImportPayload(pendingData, checked);
+        const filtered = replaceOnly ? pendingData : filterImportPayload(pendingData, checked);
         if (filtered == null) {
             statusEl.textContent = t('import.empty');
             setError(t('import.empty'));
             return;
         }
 
-        const mode = strategySelect.value || 'overwrite';
+        const mode = replaceOnly ? 'overwrite' : (strategySelect.value || 'overwrite');
         if (mode === 'overwrite') {
             const checkedRows = previewRows.filter((row, i) => checked[i]).map((row) => row.item);
             const incomingIds = collectRecordIds(checkedRows);
@@ -729,13 +742,17 @@ export function mountImportExport(root, deps) {
             if (exportJson) {
                 try {
                     const current = await exportJson();
-                    const existing = collectRecordIds(current);
-                    overlap = [...incomingIds].filter((id) => existing.has(id)).length;
+                    if (replaceOnly) {
+                        overlap = extractPreviewRows(current).length;
+                    } else {
+                        const existing = collectRecordIds(current);
+                        overlap = [...incomingIds].filter((id) => existing.has(id)).length;
+                    }
                 } catch {
                     overlap = checked.filter(Boolean).length;
                 }
             }
-            if (overlap > 0) {
+            if (overlap > 0 || replaceOnly) {
                 const ok = await resolveOverwriteConfirm(overlap, confirmOverwriteCb);
                 if (!ok) {
                     statusEl.textContent = t('import.overwriteCancelled');
@@ -746,8 +763,10 @@ export function mountImportExport(root, deps) {
         }
 
         commitBtn.disabled = true;
-        commitBtn.textContent = '导入中…';
-        statusEl.textContent = `正在导入 ${checked.filter(Boolean).length} 条…`;
+        commitBtn.textContent = replaceOnly ? '替换中…' : '导入中…';
+        statusEl.textContent = replaceOnly
+            ? `正在替换 ${previewRows.length} 条…`
+            : `正在导入 ${checked.filter(Boolean).length} 条…`;
         try {
             const result = await importJson(filtered, mode);
             const line = formatImportResult(result);
@@ -767,7 +786,7 @@ export function mountImportExport(root, deps) {
             setError(message);
         } finally {
             commitBtn.disabled = false;
-            commitBtn.textContent = commitLabel;
+            commitBtn.textContent = replaceOnly ? '替换当前超市' : commitLabel;
         }
     }
 

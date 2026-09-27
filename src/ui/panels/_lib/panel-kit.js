@@ -244,6 +244,7 @@ export async function confirmDanger(deps, message) {
  *   allowBareArray?: boolean,
  *   onCancelIo?: () => void,
  *   autoImport?: { data: object|object[], strategy?: string },
+ *   replaceOnly?: boolean,
  * }} [opts]
  * @returns {Promise<{ destroy: () => void }>}
  */
@@ -317,10 +318,13 @@ export async function openImportExportModal(deps, title, expectedKind, importJso
             }
         },
         importJson: commitImport,
+        replaceOnly: opts?.replaceOnly === true,
         confirmOverwrite: async (count) => confirmAsk(deps, {
-            title: '覆盖导入',
-            message: `将覆盖 ${count} 条已有记录。`,
-            okLabel: '覆盖',
+            title: opts?.replaceOnly ? '替换标签超市' : '覆盖导入',
+            message: opts?.replaceOnly
+                ? `将用预览的完整文件替换当前标签超市（现有 ${count} 条记录）。`
+                : `将覆盖 ${count} 条已有记录。`,
+            okLabel: opts?.replaceOnly ? '确认替换' : '覆盖',
             cancelLabel: '取消',
             okVariant: 'danger',
         }),

@@ -6,6 +6,7 @@ import { describe, it, beforeEach, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
 import { installFakeDom } from './fake-dom.js';
 import { mountWorkbench } from '../../src/ui/workbench/workbench.js';
+import { createNaiParamsForm } from '../../src/ui/common/nai-params-form.js';
 import { defaultNaiParams, emptyNaiCaption } from '../../src/domain/model/nai-params.js';
 
 describe('ui/workbench mountWorkbench', () => {
@@ -382,9 +383,26 @@ describe('ui/workbench mountWorkbench', () => {
         ctx.handle.destroy();
     });
 
+    it('places each current-image download next to 出图 and clears those links with the preview', async () => {
+        const ctx = mount();
+        await clickButton(ctx.root, '出图');
+        await new Promise((r) => setTimeout(r, 0));
+        const actions = ctx.root.querySelector('.nd-wb-actions--generate');
+        const downloads = actions.querySelector('.nd-wb-preview__downloads');
+        assert.equal(actions.childNodes[0].textContent, '出图');
+        assert.equal(actions.childNodes[1], downloads);
+        const links = downloads.querySelectorAll('a');
+        assert.equal(links.length, 1);
+        assert.equal(links[0].textContent, '下载');
+        assert.equal(ctx.root.querySelector('.nd-wb-preview__card').querySelector('a'), null);
+        await clickButton(ctx.root, '清空');
+        assert.equal(downloads.querySelectorAll('a').length, 0);
+        ctx.handle.destroy();
+    });
+
     it('开关拨开后，无论 caption 如何，透传 true', async () => {
         const ctx = mount();
-        setCheckboxByLabel(ctx.root, '替换角色关键字', true);
+        setCheckboxByLabel(ctx.root, '替换角色关键词', true);
 
         await clickButton(ctx.root, '出图');
         await new Promise((r) => setTimeout(r, 0));
@@ -504,149 +522,6 @@ describe('ui/workbench mountWorkbench', () => {
         b.handle.destroy();
     });
 
-    it('粘贴提示词：填充场景/角色/位置，并匹配切换画师串', async () => {
-        /** @type {object[]} */
-        const saved = [];
-        /** @type {string[]} */
-        const clipboard = [[
-            '画师串',
-            '正面：artist:match',
-            '负面：neg-match',
-            '',
-            '场景',
-            '正面：pasted-scene',
-            '负面：pasted-neg',
-            '',
-            '角色1',
-            '正面：char-a',
-            '负面：char-a-n',
-            '位置：0.42, 0.58',
-        ].join('\n')];
-
-        const navDesc = Object.getOwnPropertyDescriptor(globalThis, 'navigator');
-        Object.defineProperty(globalThis, 'navigator', {
-            configurable: true,
-            writable: true,
-            value: {
-                clipboard: {
-                    async readText() {
-                        return clipboard[0];
-                    },
-                },
-            },
-        });
-
-        try {
-            const ctx = mount({
-                deps: {
-                    loadSettings: () => ({
-                        naiParams: defaultNaiParams(),
-                        activeArtistId: 'old',
-                    }),
-                    saveSettings: (s) => { saved.push(s); },
-                    artistRepo: {
-                        async list() {
-                            return {
-                                ok: true,
-                                value: [
-                                    {
-                                        id: 'art-hit',
-                                        name: '命中串',
-                                        positivePrompt: 'artist:match',
-                                        negativePrompt: 'neg-match',
-                                    },
-                                ],
-                            };
-                        },
-                    },
-                },
-            });
-
-            assert.ok(findButton(ctx.root, '粘贴提示词'));
-            await clickButton(ctx.root, '粘贴提示词');
-            await new Promise((r) => setTimeout(r, 0));
-
-            const caption = readCaptionFromEditor(ctx.root);
-            assert.equal(caption.v4_prompt.caption.base_caption, 'pasted-scene');
-            assert.equal(caption.v4_negative_prompt.caption.base_caption, 'pasted-neg');
-            assert.equal(caption.v4_prompt.caption.char_captions[0].char_caption, 'char-a');
-            assert.deepEqual(
-                caption.v4_prompt.caption.char_captions[0].centers,
-                [{ x: 0.42, y: 0.58 }],
-            );
-            assert.ok(ctx.toasts.some((t) => t[0] === 'success' && t[1] === '已粘贴'));
-            assert.ok(ctx.toasts.some((t) => t[0] === 'success' && String(t[1]).includes('已切换画师串：命中串')));
-            assert.equal(saved[0]?.activeArtistId, 'art-hit');
-            ctx.handle.destroy();
-        } finally {
-            if (navDesc) {
-                Object.defineProperty(globalThis, 'navigator', navDesc);
-            } else {
-                delete globalThis.navigator;
-            }
-        }
-    });
-
-    it('粘贴提示词：画师串不匹配时不切换', async () => {
-        /** @type {object[]} */
-        const saved = [];
-        const navDesc = Object.getOwnPropertyDescriptor(globalThis, 'navigator');
-        Object.defineProperty(globalThis, 'navigator', {
-            configurable: true,
-            writable: true,
-            value: {
-                clipboard: {
-                    async readText() {
-                        return [
-                            '画师串',
-                            '正面：unknown',
-                            '负面：x',
-                            '',
-                            '场景',
-                            '正面：only-scene',
-                        ].join('\n');
-                    },
-                },
-            },
-        });
-
-        try {
-            const ctx = mount({
-                deps: {
-                    loadSettings: () => ({
-                        naiParams: defaultNaiParams(),
-                        activeArtistId: 'keep-me',
-                    }),
-                    saveSettings: (s) => { saved.push(s); },
-                    artistRepo: {
-                        async list() {
-                            return {
-                                ok: true,
-                                value: [{
-                                    id: 'a1',
-                                    name: 'A',
-                                    positivePrompt: 'p',
-                                    negativePrompt: 'n',
-                                }],
-                            };
-                        },
-                    },
-                },
-            });
-            await clickButton(ctx.root, '粘贴提示词');
-            await new Promise((r) => setTimeout(r, 0));
-            assert.equal(saved.length, 0);
-            assert.ok(ctx.toasts.some((t) => String(t[1]).includes('画师串库里没有这一串')));
-            ctx.handle.destroy();
-        } finally {
-            if (navDesc) {
-                Object.defineProperty(globalThis, 'navigator', navDesc);
-            } else {
-                delete globalThis.navigator;
-            }
-        }
-    });
-
     it('searches tag entries and hides the ones that do not match', async () => {
         const ctx = mount({
             deps: {
@@ -678,7 +553,7 @@ describe('ui/workbench mountWorkbench', () => {
          */
         function rowByLabel(text) {
             /** @type {any[]} */
-            const stack = [ctx.root];
+            const stack = [ctx.root.querySelector('.nd-wb-libraries')];
             while (stack.length) {
                 const node = stack.pop();
                 if (!node) continue;
@@ -758,7 +633,7 @@ describe('ui/workbench mountWorkbench', () => {
          */
         function rowByLabel(text) {
             /** @type {any[]} */
-            const stack = [ctx.root];
+            const stack = [ctx.root.querySelector('.nd-wb-libraries')];
             while (stack.length) {
                 const node = stack.pop();
                 if (!node) continue;
@@ -832,6 +707,158 @@ describe('ui/workbench mountWorkbench', () => {
         assert.equal(camera.parentNode.hidden, false);
         ctx.handle.destroy();
     });
+    it('uses independent market catalog and inserts only into the focused caption field', async () => {
+        const catalog = {
+            schemaVersion: 1,
+            kind: 'tag',
+            libraries: [{ id: 'lib-1', name: '常用库' }],
+            entries: [{ id: 'market-1', libraryId: 'lib-1', key: '性格·温柔', value: 'gentle expression' }],
+        };
+        const ctx = mount({ deps: { marketCatalogStore: {
+            async load() { return { ok: true, value: catalog }; },
+            async replace(d) { return { ok: true, value: d }; },
+        } } });
+        await new Promise((r) => setTimeout(r, 0));
+        const market = ctx.root.querySelector('.nd-wb-market');
+        const catTab = market.querySelectorAll('.nd-wb-market__tab').find((tab) => tab.textContent === '性格');
+        assert.ok(catTab, 'renders category tab');
+        for (const l of catTab._listeners.filter((item) => item.type === 'click')) l.fn();
+        let tag = market.querySelector('.nd-wb-market__tag');
+        assert.equal(tag.childNodes[0].textContent, '温柔');
+        assert.equal(tag.childNodes[1].textContent, 'gentle expression');
+        const sceneField = ctx.root.querySelectorAll('.nd-field').find((field) =>
+            field.querySelector('.nd-field__label')?.textContent === '场景 · 正面');
+        const scene = sceneField.querySelector('textarea');
+        scene.value = 'base';
+        scene.selectionStart = scene.selectionEnd = 0;
+        scene.setRangeText = (value, start, end) => { scene.value = scene.value.slice(0, start) + value + scene.value.slice(end); };
+        scene.setSelectionRange = (start, end) => { scene.selectionStart = start; scene.selectionEnd = end; };
+        scene.dispatchEvent = () => {};
+        for (const l of tag._listeners.filter((item) => item.type === 'click')) l.fn();
+        assert.equal(scene.value, 'base, gentle expression', 'no caret inserts at the end of scene positive');
+        tag = market.querySelector('.nd-wb-market__tag');
+        assert.equal(tag.getAttribute('aria-pressed'), 'true');
+        assert.equal(ctx.toasts.some((entry) => entry[1].includes('先将光标')), false);
+        for (const l of tag._listeners.filter((item) => item.type === 'click')) l.fn();
+        assert.equal(scene.value, 'base', 'a second click removes the unchanged insertion');
+        scene.selectionStart = scene.selectionEnd = 4;
+        document.activeElement = scene;
+        tag = market.querySelector('.nd-wb-market__tag');
+        for (const l of tag._listeners.filter((item) => item.type === 'click')) l.fn();
+        assert.equal(scene.value, 'base, gentle expression');
+        tag = market.querySelector('.nd-wb-market__tag');
+        for (const l of tag._listeners.filter((item) => item.type === 'click')) l.fn();
+        assert.equal(scene.value, 'base', 'focused caret insertion still toggles off safely');
+        ctx.handle.destroy();
+    });
+
+    it('keeps all category rows visible and shows direct leaves alongside deeper categories', async () => {
+        const catalog = {
+            schemaVersion: 1,
+            kind: 'tag',
+            libraries: [{ id: 'lib-1', name: 'ignored library name' }],
+            entries: [
+                { id: 'root-leaf', libraryId: 'lib-1', key: '一级·根级标签', value: 'root_tag' },
+                { id: 'level-two-leaf', libraryId: 'lib-1', key: '一级·二级·二级直属标签', value: 'level_two_tag' },
+                { id: 'level-three-leaf', libraryId: 'lib-1', key: '一级·二级·三级·三级直属标签', value: 'level_three_tag' },
+                { id: 'deep-leaf', libraryId: 'lib-1', key: '一级·二级·三级·四级·五级·六级·七级·八级·深层标签', value: 'deep_tag' },
+                { id: 'other-leaf', libraryId: 'lib-1', key: '另一个·支线·额外标签', value: 'other_tag' },
+            ],
+        };
+        const ctx = mount({ deps: { marketCatalogStore: {
+            async load() { return { ok: true, value: catalog }; },
+            async replace(data) { return { ok: true, value: data }; },
+        } } });
+        await new Promise((r) => setTimeout(r, 0));
+        const market = ctx.root.querySelector('.nd-wb-market');
+        const clickCategory = (label) => {
+            const button = market.querySelectorAll('.nd-wb-market__tab').find((item) => item.textContent === label);
+            assert.ok(button, `category ${label} is visible`);
+            for (const listener of button._listeners || []) {
+                if (listener.type === 'click') listener.fn();
+            }
+        };
+        const hasTag = (label) => market.querySelectorAll('.nd-wb-market__tag')
+            .some((tag) => tag.childNodes[0]?.textContent === label);
+
+        assert.equal(market.querySelectorAll('.nd-wb-market__level-row').length, 2);
+        assert.equal(market.querySelector('.nd-wb-market__level-row').childNodes[0].textContent, '一级');
+        assert.equal(market.querySelector('.nd-wb-market__level-row').querySelectorAll('.nd-wb-market__tab')
+            .some((button) => button.textContent === '全部'), false);
+        for (const leaf of ['根级标签', '二级直属标签', '三级直属标签', '深层标签']) {
+            assert.equal(hasTag(leaf), true, `the first root category shows ${leaf}`);
+        }
+        assert.equal(hasTag('额外标签'), false, 'other root categories are hidden by default');
+        assert.equal(market.querySelectorAll('.nd-wb-market__level-row')[1].childNodes[0].textContent, '全部');
+        assert.equal(market.querySelectorAll('.nd-wb-market__level-row')[1].childNodes[0].getAttribute('aria-pressed'), 'true');
+        assert.equal(hasTag('根级标签'), true);
+        assert.equal(hasTag('深层标签'), true);
+        assert.equal(market.querySelector('.nd-wb-market__empty').hidden, true);
+
+        clickCategory('二级');
+        assert.equal(market.querySelectorAll('.nd-wb-market__level-row').length, 3);
+        assert.equal(market.querySelectorAll('.nd-wb-market__level-row')[2].childNodes[0].getAttribute('aria-pressed'), 'true');
+        assert.equal(hasTag('根级标签'), false);
+        assert.equal(hasTag('二级直属标签'), true);
+        assert.equal(hasTag('深层标签'), true);
+
+        clickCategory('三级');
+        assert.equal(market.querySelectorAll('.nd-wb-market__level-row').length, 4);
+        assert.equal(hasTag('三级直属标签'), true, 'a terminal tag remains visible while a deeper branch is present');
+        assert.equal(market.querySelector('.nd-wb-market__empty').hidden, true);
+
+        for (const label of ['四级', '五级', '六级', '七级', '八级']) clickCategory(label);
+        assert.equal(market.querySelectorAll('.nd-wb-market__level-row').length, 8);
+        assert.equal(hasTag('深层标签'), true);
+        assert.equal(market.querySelector('.nd-wb-market__empty').hidden, true);
+        const rows = market.querySelectorAll('.nd-wb-market__level-row');
+        for (let depth = 1; depth <= 8; depth += 1) {
+            const active = rows[depth - 1].querySelectorAll('.nd-wb-market__tab')
+                .find((button) => button.classList.contains('is-active'));
+            assert.ok(active, `ancestor row ${depth} keeps an active category`);
+            if (depth > 1) assert.equal(rows[depth - 1].childNodes[0].textContent, '全部');
+        }
+
+        const levelTwoAll = rows[1].childNodes[0];
+        for (const listener of levelTwoAll._listeners.filter((item) => item.type === 'click')) listener.fn();
+        assert.equal(hasTag('根级标签'), true, 'level All restores its branch leaves');
+        clickCategory('另一个');
+        assert.equal(hasTag('额外标签'), true, 'another root category has its own All view');
+        assert.equal(hasTag('根级标签'), false);
+        clickCategory('一级');
+        assert.equal(hasTag('深层标签'), true);
+        assert.equal(hasTag('额外标签'), false);
+
+        const header = market.querySelector('.nd-wb-market__header');
+        assert.equal(header.childNodes[0].textContent, '标签超市');
+        assert.equal(header.childNodes[1].classList.contains('nd-wb-market__actions'), true);
+        assert.equal(ctx.root.querySelector('.nd-wb-caption-toolbar'), null, 'paste button is removed from the workbench');
+        ctx.handle.destroy();
+    });
+
+    it('uses the compact workbench parameter presentation without changing the shared default form', () => {
+        const workbenchRoot = document.createElement('div');
+        const workbenchForm = createNaiParamsForm(defaultNaiParams(), { presentation: 'workbench' });
+        workbenchRoot.appendChild(workbenchForm.el);
+        assert.equal(workbenchRoot.querySelectorAll('.nd-field-group__title').length, 0);
+        const groups = workbenchRoot.querySelectorAll('.nd-field-group');
+        const workbenchPresetControls = groups[2].childNodes;
+        assert.equal(workbenchPresetControls[0].querySelector('.nd-field__label').textContent, '官方负面预设');
+        assert.equal(workbenchPresetControls[1].querySelector('.nd-toggle-row__text').childNodes[0].textContent, '官方质量词');
+        workbenchForm.destroy();
+
+        const defaultRoot = document.createElement('div');
+        const defaultForm = createNaiParamsForm(defaultNaiParams());
+        defaultRoot.appendChild(defaultForm.el);
+        assert.deepEqual(
+            defaultRoot.querySelectorAll('.nd-field-group__title').map((title) => title.textContent),
+            ['模型与尺寸', '采样', '官方预设与开关'],
+        );
+        const defaultPresetControls = defaultRoot.querySelectorAll('.nd-field-group')[2].childNodes;
+        assert.equal(defaultPresetControls[1].querySelector('.nd-toggle-row__text').childNodes[0].textContent, '官方质量词');
+        assert.equal(defaultPresetControls[2].querySelector('.nd-field__label').textContent, '官方负面预设');
+        defaultForm.destroy();
+    });
 });
 
 /**
@@ -857,10 +884,7 @@ function readCaptionFromEditor(root) {
                     return p.includes('nd-field__label') && c.textContent === label;
                 });
                 if (lab) {
-                    const control = (node.childNodes || []).find((c) => (
-                        c.tagName === 'TEXTAREA' || c.tagName === 'INPUT'
-                    ));
-                    return control;
+                    return node.querySelector('textarea') || node.querySelector('input');
                 }
             }
             if (Array.isArray(node.childNodes)) {

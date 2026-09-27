@@ -327,6 +327,23 @@ describe('workbench', () => {
         assert.equal(r.value.caption.v4_prompt.caption.base_caption, 'one garden shot');
     });
 
+    it('workbench artist override keeps positive and negative strings separate', async () => {
+        const p = buildPipeline();
+        const result = await p.workbench.generateImage({
+            caption: makeCaption('garden'),
+            replaceCharacterKeywords: false,
+            artist: {
+                id: 'artist-session', name: 'Session', sequence: 1,
+                positivePrompt: 'artist-session-positive',
+                negativePrompt: 'artist-session-negative',
+            },
+        });
+        assert.equal(isOk(result), true, result.ok ? '' : result.error?.message);
+        const payload = p.naiCalls.at(-1).payload;
+        assert.ok(JSON.stringify(payload).includes('artist-session-positive'));
+        assert.ok(JSON.stringify(payload).includes('artist-session-negative'));
+    });
+
     it('generateImage passes explicit replaceCharacterKeywords through', async () => {
         const p = buildPipeline();
         const rFalse = await p.workbench.generateImage({

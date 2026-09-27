@@ -96,7 +96,9 @@ describe('D61 components.css harden coverage', () => {
         assert.match(css, /\.nd-input[\s\S]*?padding:\s*0 12px\s*!important/);
         assert.match(css, /\.nd-range\s*\{[^}]*height:\s*5px\s*!important/s);
         assert.match(css, /\.nd-range\s*\{[^}]*padding:\s*0\s*!important/s);
-        assert.match(css, /\.nd-textarea\s*\{[^}]*height:\s*auto\s*!important/s);
+        assert.match(css, /\.nd-textarea\s*\{[^}]*height:\s*auto\s*;/s);
+        assert.doesNotMatch(css, /\.nd-textarea\s*\{[^}]*height:\s*auto\s*!important/s,
+            'native vertical resizing must override the initial height');
         assert.match(css, /\.nd-textarea\s*\{[^}]*min-height:\s*88px\s*!important/s);
         assert.match(css, /\.nd-textarea\s*\{[^}]*resize:\s*vertical/s);
     });

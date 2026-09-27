@@ -313,6 +313,7 @@ export function buildWritePromptInput(opts) {
  * @param {NaiCaption} opts.caption
  * @param {boolean} opts.replaceCharacterKeywords 仅来自页面开关
  * @param {Partial<NaiParams>} [opts.params]
+ * @param {import('../../domain/model/artist.js').ArtistString|null|undefined} [opts.artist]
  * @param {AbortSignal} [opts.signal]
  * @param {string} [opts.traceId]
  */
@@ -322,6 +323,7 @@ export function buildGenerateImageInput(opts) {
     }
     return {
         caption: cloneCaption(opts.caption),
+        artist: opts?.artist,
         replaceCharacterKeywords: opts.replaceCharacterKeywords,
         params: opts?.params,
         signal: opts?.signal,
