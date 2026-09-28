@@ -935,18 +935,14 @@ export function createSillyTavernHost(deps) {
             }
 
             try {
-                if (typeof ctx.callGenericPopup === 'function' && ctx.POPUP_TYPE) {
-                    await ctx.callGenericPopup(
-                        content,
-                        ctx.POPUP_TYPE.DISPLAY,
-                        '',
-                        popupOpts,
-                    );
+                if (typeof ctx.Popup === 'function' && ctx.POPUP_TYPE) {
+                    const popup = new ctx.Popup(content, ctx.POPUP_TYPE.DISPLAY, '', popupOpts);
+                    popup.dlg?.classList?.add(ND_ROOT_CLASS, 'nd-popup');
+                    await popup.show();
                     return;
                 }
-                if (ctx.Popup && ctx.POPUP_TYPE) {
-                    const popup = new ctx.Popup(content, ctx.POPUP_TYPE.DISPLAY, '', popupOpts);
-                    await popup.show();
+                if (typeof ctx.callGenericPopup === 'function' && ctx.POPUP_TYPE) {
+                    await ctx.callGenericPopup(content, ctx.POPUP_TYPE.DISPLAY, '', popupOpts);
                 }
             } catch {
                 // 弹窗能力缺失时静默降级
