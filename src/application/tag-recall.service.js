@@ -12,7 +12,7 @@ import { createLogger } from '../infra/logger.js';
 import { createBlockSet, setBlock } from '../domain/blocks/block-set.js';
 import { VARIABLE_NAMES } from '../domain/template/variable-map.js';
 import { renderPreset } from '../domain/template/preset-renderer.js';
-import { recordParseFailure } from './parse-debug-log.js';
+import { recordLatestGeneration, recordParseFailure } from './parse-debug-log.js';
 import { formatRecallCandidateLines, reconcileRecalledIds } from '../domain/matching/tag-recall.js';
 import { findAnchorInsertIndex } from '../domain/slot/slot-placer.js';
 import {
@@ -321,6 +321,12 @@ export function createTagRecallService(deps) {
             }
 
             if (positions.length === 0) {
+                recordParseFailure({
+                    stage: '召回',
+                    code: 'RECALL_ALL_POSITIONS_DISCARDED',
+                    message: '召回的全部生成点都无法在目标楼正文中匹配',
+                    rawText: recallRawText,
+                });
                 return Err(contractError({
                     code: 'RECALL_ALL_POSITIONS_DISCARDED',
                     message: '召回的全部生成点都无法在目标楼正文中匹配',
@@ -340,6 +346,12 @@ export function createTagRecallService(deps) {
                 positions[i].slotId = ids[i];
             }
 
+            recordLatestGeneration({
+                stage: '召回',
+                ok: true,
+                message: '已生成',
+                rawText: recallRawText,
+            });
             return Ok({
                 positions,
                 unmatchedKeys,

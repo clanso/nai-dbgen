@@ -1,10 +1,14 @@
 /**
- * L5 UI · 解析调试：召回 / 生图解析失败时留下的原文。
+ * L5 UI · 解析调试：最近一次召回 / 生图原文，以及解析失败记录。
  */
 
 import { createButton } from '../../common/controls.js';
 import { el, setText } from '../_lib/panel-kit.js';
-import { clearParseFailures, listParseFailures } from '../../../application/parse-debug-log.js';
+import {
+    clearParseFailures,
+    listLatestGenerations,
+    listParseFailures,
+} from '../../../application/parse-debug-log.js';
 
 /**
  * @param {Element} root
@@ -22,7 +26,7 @@ export function mountDebugPanel(root) {
     const title = el('h3', 'nd-field-group__title');
     setText(title, '解析调试');
     const hint = el('p', 'nd-muted');
-    setText(hint, '这里是解析失败那一刻模型返回的原文，不会事后改写。刷新页面后清空。');
+    setText(hint, '上面固定留着最近一次召回和最近一次生图的原文，成功也会留。下面是解析失败记录。刷新页面后清空。');
     head.append(
         title,
         createButton({
@@ -36,10 +40,45 @@ export function mountDebugPanel(root) {
     );
     shell.append(head, hint);
 
+    const latestTitle = el('h4', 'nd-field-group__title');
+    setText(latestTitle, '最近一次');
+    const latestList = el('div', 'nd-debug-list');
+    const failTitle = el('h4', 'nd-field-group__title');
+    setText(failTitle, '解析失败');
     const list = el('div', 'nd-debug-list');
-    shell.appendChild(list);
+    shell.append(latestTitle, latestList, failTitle, list);
+
+    /**
+     * @param {HTMLElement} host
+     * @param {{ stage: string, code?: string, message?: string, at: string, rawText: string, ok?: boolean }} row
+     */
+    function appendCard(host, row) {
+        const card = el('article', 'nd-debug-card');
+        const meta = el('p', 'nd-debug-card__meta');
+        const status = row.ok === true ? '成功' : (row.code || '失败');
+        setText(meta, `${row.stage} · ${status} · ${row.at}`);
+        const message = el('p', 'nd-debug-card__text');
+        setText(message, row.message || '');
+        const box = document.createElement('textarea');
+        box.className = 'nd-debug-raw';
+        box.readOnly = true;
+        box.value = row.rawText;
+        box.spellcheck = false;
+        card.append(meta, message, box);
+        host.appendChild(card);
+    }
 
     function paint() {
+        latestList.replaceChildren();
+        const latest = listLatestGenerations();
+        if (!latest.length) {
+            const empty = el('p', 'nd-muted');
+            setText(empty, '还没有召回或生图调用。');
+            latestList.appendChild(empty);
+        } else {
+            for (const row of latest) appendCard(latestList, row);
+        }
+
         list.replaceChildren();
         const rows = listParseFailures();
         if (!rows.length) {
@@ -48,20 +87,7 @@ export function mountDebugPanel(root) {
             list.appendChild(empty);
             return;
         }
-        for (const row of rows) {
-            const card = el('article', 'nd-debug-card');
-            const meta = el('p', 'nd-debug-card__meta');
-            setText(meta, `${row.stage} · ${row.code} · ${row.at}`);
-            const message = el('p');
-            setText(message, row.message);
-            const box = document.createElement('textarea');
-            box.className = 'nd-debug-raw';
-            box.readOnly = true;
-            box.value = row.rawText;
-            box.spellcheck = false;
-            card.append(meta, message, box);
-            list.appendChild(card);
-        }
+        for (const row of rows) appendCard(list, row);
     }
 
     paint();

@@ -430,7 +430,7 @@ export function buildPipeline(overrides = {}) {
         },
     ];
 
-    const presetRepo = createMemoryRepo([
+    const presetRepo = createMemoryRepo(overrides.presets ?? [
         makePreset('preset-recall', 'recall', 'ctx={{当前上下文}}\nkeys={{候选 key}}\nuser={{用户描述}}'),
         makePreset(
             'preset-imagegen',

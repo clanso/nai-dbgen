@@ -11,6 +11,7 @@ import {
     createFakeHost,
     baseSettings,
     makeCaption,
+    makePreset,
 } from './_fakes.js';
 
 describe('context-collector', () => {
@@ -289,7 +290,28 @@ describe('workbench', () => {
     });
 
     it('floor mode puts the user text in {{用户描述}} for both presets', async () => {
+        const recall = makePreset('preset-recall', 'recall', 'ctx={{当前上下文}}\nkeys={{候选 key}}\nuser={{用户描述}}');
+        const imagegen = makePreset(
+            'preset-imagegen',
+            'imagegen',
+            'W={{世界书}} C={{当前上下文}} R={{角色库}} T={{构图标签}} F={{特征参考}} K={{常驻标签}} Recent={{近期生图记录}} U={{用户描述}}',
+        );
+        for (const preset of [recall, imagegen]) {
+            preset.prompts.push({
+                identifier: 'wb',
+                name: 'wb',
+                role: 'system',
+                content: '工作台专用段',
+                enabled: true,
+                workbenchOnly: true,
+                injection_position: 0,
+                injection_depth: 0,
+                injection_order: 1,
+            });
+            preset.prompt_order.push({ identifier: 'wb', enabled: true });
+        }
         const p = buildPipeline({
+            presets: [recall, imagegen],
             llmComplete: async (req) => {
                 const joined = req.messages.map((m) => m.content).join('\n');
                 if (joined.includes('keys=')) {
@@ -318,12 +340,11 @@ describe('workbench', () => {
         assert.equal(p.naiCalls.length, 0);
         const recallJoined = p.llmCalls[0].messages.map((m) => m.content).join('\n');
         assert.ok(recallJoined.includes('user=只要花园这一张'));
-        assert.equal(recallJoined.includes('用户对这一张的拍摄要求'), false);
-        assert.equal(recallJoined.includes('不要另起一场戏'), false);
+        assert.ok(recallJoined.includes('工作台专用段'));
         const imageJoined = p.llmCalls[1].messages.map((m) => m.content).join('\n');
         assert.ok(imageJoined.includes('flower garden'));
         assert.ok(imageJoined.includes('U=只要花园这一张'));
-        assert.equal(imageJoined.includes('当前楼层剧情的一次绘制'), false);
+        assert.ok(imageJoined.includes('工作台专用段'));
         assert.equal(r.value.caption.v4_prompt.caption.base_caption, 'one garden shot');
     });
 

@@ -5,6 +5,7 @@
  * 裁决 D13：工作台提示词为结构化 NaiCaption（base_caption + char_captions）。
  * 勾选条目：不跑召回，只把勾中条目交给生图预设。
  * 楼内流程：用户输入只通过 {{用户描述}} 进入召回预设和生图预设，再只要一张图回填工作台。
+ * 这是工作台调用，预设里勾了「工作台专用」的段会带上。悬浮球双击楼内生图不走这里。
  * 只传 libraryIds、不传 entryIds 时仍按整库已启用条目注入（旧调用）。
  */
 
@@ -25,7 +26,7 @@ import { renderPreset } from '../domain/template/preset-renderer.js';
 import { validateNaiCaption, emptyNaiCaption } from '../domain/model/nai-params.js';
 import { parseFlatSingleCaption, parseFlatSlotPlans } from '../domain/model/flat-imagegen.js';
 import { slotCaptionFromLlmItem } from '../domain/model/slot.js';
-import { recordParseFailure } from './parse-debug-log.js';
+import { recordLatestGeneration, recordParseFailure } from './parse-debug-log.js';
 import { parseSizeSpec } from '../domain/model/size-spec.js';
 import {
     abortErrIfNeeded,
@@ -74,14 +75,13 @@ async function writeFloorPrompt(deps, input, traceId) {
     }
     const mes = deps.host.getMessage(vpR.value.messageId);
     const targetFloorText = String(mes?.text ?? '');
-    const includeWorkbenchOnly = input?.includeWorkbenchOnly === true;
     const tagR = await deps.tagRecall.recall({
         contextText: vpR.value.contextText,
         targetFloorText,
         traceId,
         signal: input.signal,
         userDesc: nl,
-        omitWorkbenchOnly: !includeWorkbenchOnly,
+        omitWorkbenchOnly: false,
     });
     if (!tagR.ok) {
         return attachTraceId(tagR, traceId);
@@ -151,7 +151,7 @@ async function writeFloorPrompt(deps, input, traceId) {
     }
     const messages = renderPreset(presetR.value, blocks, {
         runHostMacros: deps.runHostMacros,
-        omitWorkbenchOnly: input?.includeWorkbenchOnly !== true,
+        omitWorkbenchOnly: false,
     });
     const aborted = abortErrIfNeeded(input?.signal, traceId);
     if (aborted) {
@@ -216,6 +216,12 @@ async function writeFloorPrompt(deps, input, traceId) {
             result.height = sizeR.value.height;
         }
     }
+    recordLatestGeneration({
+        stage: '生图',
+        ok: true,
+        message: '已生成',
+        rawText: imagegenRawText,
+    });
     return Ok(result);
 }
 
@@ -250,7 +256,7 @@ async function writeFloorPrompt(deps, input, traceId) {
  * @property {string[]} [libraryIds] 只传库 id、不传 entryIds 时，纳入这些库里已启用的全部条目
  * @property {string[]} [entryIds] 本次勾选的条目。传入后只发送这些条目，库开关和条目开关都不再扩大范围
  * @property {'entries'|'floor'} [mode] floor=楼内召回后只取一张交给生图预设
- * @property {boolean} [includeWorkbenchOnly] 对外接口为 true：楼内变量照旧，但带上工作台专用段
+ * @property {boolean} [includeWorkbenchOnly] 已无作用。工作台楼内流程始终带上工作台专用段
  * @property {number} [messageId] 楼内流程的视点楼；缺省为最新 AI 楼
  * @property {AbortSignal} [signal]
  * @property {string} [traceId]
@@ -497,6 +503,12 @@ export function createWorkbenchService(deps) {
                     result.height = sizeR.value.height;
                 }
             }
+            recordLatestGeneration({
+                stage: '生图',
+                ok: true,
+                message: '已生成',
+                rawText: imagegenRawText,
+            });
             return Ok(result);
         },
 

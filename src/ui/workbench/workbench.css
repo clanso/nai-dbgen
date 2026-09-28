@@ -458,9 +458,15 @@ dialog.nd-popup.nd-root.nd-workbench-popup.large_dialogue_popup {
 }
 :is(#nai-dbgen-root, .nd-root) .nd-wb-market__tab {
     width: auto !important;
+    max-width: 100%;
+    height: auto !important;
     min-height: var(--nd-h-micro) !important;
     padding: 4px 9px !important;
     font-size: var(--nd-fs-sm) !important;
+    white-space: normal !important;
+    overflow-wrap: anywhere;
+    word-break: break-word;
+    line-height: 1.35 !important;
 }
 :is(#nai-dbgen-root, .nd-root) .nd-wb-market__tab.is-active {
     color: var(--nd-on-accent) !important;
@@ -475,7 +481,8 @@ dialog.nd-popup.nd-root.nd-workbench-popup.large_dialogue_popup {
 }
 :is(#nai-dbgen-root, .nd-root) .nd-wb-market__tag {
     min-width: 0;
-    height: 60px !important;
+    height: auto !important;
+    min-height: 60px;
     padding: 8px 10px !important;
     display: flex;
     flex-direction: column;
@@ -489,9 +496,11 @@ dialog.nd-popup.nd-root.nd-workbench-popup.large_dialogue_popup {
 :is(#nai-dbgen-root, .nd-root) .nd-wb-market__tag small {
     display: block;
     width: 100%;
-    overflow: hidden;
-    white-space: nowrap;
-    text-overflow: ellipsis;
+    min-width: 0;
+    overflow: visible;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+    word-break: break-word;
 }
 :is(#nai-dbgen-root, .nd-root) .nd-wb-market__tag small { color: var(--nd-muted); font-size: var(--nd-fs-xs); }
 :is(#nai-dbgen-root, .nd-root) .nd-wb-market__tag.is-selected {

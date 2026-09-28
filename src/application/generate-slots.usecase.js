@@ -24,7 +24,7 @@ import { renderPreset } from '../domain/template/preset-renderer.js';
 import { placeSlots } from '../domain/slot/slot-placer.js';
 import { createSlotRecord, slotCaptionFromLlmItem } from '../domain/model/slot.js';
 import { parseFlatSlotPlans } from '../domain/model/flat-imagegen.js';
-import { recordParseFailure } from './parse-debug-log.js';
+import { recordLatestGeneration, recordParseFailure } from './parse-debug-log.js';
 import {
     abortErrIfNeeded,
     attachTraceId,
@@ -383,6 +383,13 @@ export function createGenerateSlotsUseCase(deps) {
                     },
                 }));
             }
+
+            recordLatestGeneration({
+                stage: '生图',
+                ok: true,
+                message: '已生成',
+                rawText: imagegenRawText,
+            });
 
             if (extraSlotIds.length > 0 || missingSlotIds.length > 0) {
                 log.warn('slot plan slotid mismatch', {
