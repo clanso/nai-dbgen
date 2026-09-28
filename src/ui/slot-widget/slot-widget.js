@@ -554,8 +554,8 @@ export function mountSlotWidget(rootEl, messageId, deps) {
             btn.setAttribute('aria-busy', view.busy ? 'true' : 'false');
         }
 
-        statusEl.textContent = view.busy
-            ? (appHasPendingWrite() && !appIsRendering() ? '写入中…' : '生图中…')
+        statusEl.textContent = view.busy && appHasPendingWrite() && !appIsRendering()
+            ? '写入中…'
             : (view.state === 'beyond_retain' ? '已超出保留范围' : '');
         setBlockShown(statusEl, statusEl.textContent.length > 0);
 

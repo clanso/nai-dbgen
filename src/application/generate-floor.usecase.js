@@ -56,8 +56,8 @@ export const FLOOR_EVENTS = Object.freeze({
 /**
  * @typedef {object} GenerateFloorOptions
  * @property {AbortSignal} [signal]
- * @property {boolean} [manual] Require a warning before manually regenerating existing images.
- * @property {boolean} [force] Regenerate existing images; automatic callers leave this unset.
+ * @property {boolean} [manual] 已有图时先警告；确认后清楼并从写提示词重跑。
+ * @property {boolean} [force] 只重出已有提示词的图；悬浮球确认后不走这条。
  */
 
 /**
@@ -197,6 +197,7 @@ export function createGenerateFloorUseCase(deps) {
         if (deps.host.getCurrentChatId() !== chatIdAtStart) {
             return Err(domainError({ code: 'CHAT_CHANGED', message: '会话已切换，请重新启动生图' }));
         }
+        let rewritePrompts = false;
         if (opts?.manual && records.some((record) => latestSlotImage(record) != null)) {
             const fingerprint = JSON.stringify([chatIdAtStart, messageId, records]);
             if (armed !== fingerprint) {
@@ -204,20 +205,19 @@ export function createGenerateFloorUseCase(deps) {
                 return Ok({ ...summary, confirmationRequired: true });
             }
             armed = null;
-            opts = { ...opts, force: true };
+            rewritePrompts = true;
         } else if (opts?.manual) {
             armed = null;
         }
 
-        if (records.length > 0 && !opts?.manual && !opts?.force) {
+        if (records.length > 0 && (rewritePrompts || (!opts?.manual && !opts?.force))) {
             const cleared = await clearFloorForRerun(deps, messageId, signal);
             if (!cleared.ok) {
                 return cleared;
             }
         }
 
-        // Preserve the upstream full-rerun API; the floating-ball entry reuses prompts and history.
-        if (records.length === 0 || (!opts?.manual && !opts?.force)) {
+        if (records.length === 0 || rewritePrompts || (!opts?.manual && !opts?.force)) {
             const genR = await deps.generateSlots.execute(messageId, { signal });
             if (!genR.ok) {
                 return genR;
@@ -250,7 +250,7 @@ export function createGenerateFloorUseCase(deps) {
                 return;
             }
             const r = await deps.renderSlot.execute(messageId, slotId, {
-                signal, force: opts?.force === true, deferPersist: true,
+                signal, force: opts?.force === true,
             });
             if (r.ok && r.value?.deferred) {
                 deferred.push(r.value.deferred);

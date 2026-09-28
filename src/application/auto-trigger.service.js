@@ -130,7 +130,7 @@ export function createAutoTriggerService(deps) {
          */
         async function renderOne(record) {
             if (deps.host.getCurrentChatId() !== chatIdAtStart) return;
-            const r = await deps.renderSlot.execute(messageId, record.slotId, { deferPersist: true });
+            const r = await deps.renderSlot.execute(messageId, record.slotId);
             if (r.ok && r.value?.deferred) {
                 deferred.push(r.value.deferred);
                 return;

@@ -42,16 +42,31 @@ export function placeSlots(messageText, plans) {
         const found = findAnchorInsertIndex(text, anchor);
 
         if (found.index >= 0) {
-            text = text.slice(0, found.index) + token + text.slice(found.index);
+            text = insertTokenOnOwnLine(text, found.index, token);
             placements.push({ slotId, placed: true, mode: found.mode });
         } else {
-            // 全失败：追加段末并告警（mode=append-warn）
-            text = text + token;
+            // 全失败：另起一行追加段末并告警（mode=append-warn）
+            text = insertTokenOnOwnLine(text, text.length, token);
             placements.push({ slotId, placed: false, mode: 'append-warn' });
         }
     }
 
     return { text, placements };
+}
+
+/**
+ * 标记独占一行：前面、后面都换行，已有换行不重复加。
+ * @param {string} text
+ * @param {number} index
+ * @param {string} token
+ * @returns {string}
+ */
+function insertTokenOnOwnLine(text, index, token) {
+    const before = text.slice(0, index);
+    const after = text.slice(index);
+    const lead = before.length === 0 || before.endsWith('\n') ? '' : '\n';
+    const trail = after.length === 0 || after.startsWith('\n') ? '' : '\n';
+    return before + lead + token + trail + after;
 }
 
 /**

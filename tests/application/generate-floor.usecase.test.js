@@ -8,16 +8,22 @@ import { Ok, Err, isOk, isErr } from '../../src/infra/result.js';
 import { domainError, hostError } from '../../src/infra/errors.js';
 import { createGenerateFloorUseCase } from '../../src/application/generate-floor.usecase.js';
 
-it('悬浮球首次轻提示，第二次重生成，下一轮仍先提示', async () => {
+it('悬浮球首次轻提示，第二次从写提示词重跑，下一轮仍先提示', async () => {
     const f = createFakes({ records: [makeRecord({ images: [{ imageRef: 'old' }] })] });
     const useCase = createGenerateFloorUseCase(f);
     assert.equal((await useCase.execute(5, { manual: true })).value.confirmationRequired, true);
     assert.equal(f.renderSlot.callCount, 0);
-    assert.equal((await useCase.execute(5, { manual: true })).ok, true);
-    assert.equal(f.renderSlot.callCount, 1);
     assert.equal(f.generateSlots.callCount, 0);
+    const second = await useCase.execute(5, { manual: true });
+    assert.equal(second.ok, true);
+    assert.equal(second.value.wroteSlots, true);
+    assert.equal(f.generateSlots.callCount, 1);
+    assert.equal(f.removedMessageId, 5);
+    assert.equal(f.renderSlot.callCount, 2);
+    assert.deepEqual(f.renderSlot.forceFlags, [false, false]);
     assert.equal((await useCase.execute(5, { manual: true })).value.confirmationRequired, true);
-    assert.equal(f.renderSlot.callCount, 1);
+    assert.equal(f.generateSlots.callCount, 1);
+    assert.equal(f.renderSlot.callCount, 2);
 });
 
 it('manual first warning is scoped to the originating chat', async () => {

@@ -30,7 +30,7 @@ import { openSlotEditor, bindSlotEditorGesture, removeDeletedSlotElements } from
 const log = createLogger('bootstrap/lifecycle');
 
 /** @type {string} */
-export const PLUGIN_VERSION = '0.2.11';
+export const PLUGIN_VERSION = '0.2.14';
 
 /** @type {string} */
 export const PUBLIC_API_NAME = 'NaiDbGen';

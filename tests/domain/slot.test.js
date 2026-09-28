@@ -68,7 +68,6 @@ describe('slot-placer', () => {
             { slotId: 2, anchorSentence: 'BBB。' },
         ]);
         assert.equal(placements.every((p) => p.placed && p.mode === 'exact'), true);
-        assert.ok(text.includes('<IMG>\n1\n</IMG>'));
-        assert.ok(text.includes('<IMG>\n2\n</IMG>'));
+        assert.equal(text, 'AAA。\n<IMG>\n1\n</IMG>\nBBB。\n<IMG>\n2\n</IMG>');
     });
 });

@@ -154,7 +154,7 @@ function createPaletteIcon() {
  */
 export function formatGenerateFloorToast(summary) {
     if (summary?.confirmationRequired) return {
-        level: 'warning', message: '本楼已有图片，再次启动将重新生图并消耗额度',
+        level: 'warning', message: '本楼已有图片，再次启动将从写提示词重跑并消耗额度',
     };
     const floor = Number(summary?.messageId);
     const floorLabel = Number.isFinite(floor) ? String(floor) : '?';
