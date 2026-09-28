@@ -103,6 +103,59 @@ export const NAI_UC_PRESET_OPTIONS = Object.freeze([
 export const UC_PRESET_NONE = 4;
 
 /**
+ * 官方质量词。出处：桌面端 `Rd`。插件只有开/关，开对应 standard，关对应 none。
+ * 写在正向提示词末尾，不作为请求字段生效。
+ */
+export const OFFICIAL_QUALITY_TAGS = 'very aesthetic, masterpiece, no text';
+
+/** @type {readonly string[]} 与 NAI_UC_PRESET_OPTIONS 下标对齐。 */
+const UC_PRESET_KEYS = Object.freeze(['heavy', 'light', 'furryFocus', 'humanFocus', 'none']);
+
+/**
+ * 官方负面预设正文。出处：桌面端 `Nd`。不附加 nsfw。
+ * 4.5 与 V4 用 4.5 词表，V5 用 5.0 词表。
+ * @type {Readonly<Record<'v45'|'v5', Record<string, string>>>}
+ */
+const OFFICIAL_UC_TEXT = Object.freeze({
+    v45: Object.freeze({
+        heavy: 'lowres, artistic error, film grain, scan artifacts, worst quality, bad quality, jpeg artifacts, very displeasing, chromatic aberration, dithering, halftone, screentone, multiple views, logo, too many watermarks, negative space, blank page',
+        light: 'lowres, artistic error, scan artifacts, worst quality, bad quality, jpeg artifacts, multiple views, very displeasing, too many watermarks, negative space, blank page',
+        furryFocus: '{worst quality}, distracting watermark, unfinished, bad quality, {widescreen}, upscale, {sequence}, {{grandfathered content}}, blurred foreground, chromatic aberration, sketch, everyone, [sketch background], simple, [flat colors], ych (character), outline, multiple scenes, [[horror (theme)]], comic',
+        humanFocus: 'lowres, artistic error, film grain, scan artifacts, worst quality, bad quality, jpeg artifacts, very displeasing, chromatic aberration, dithering, halftone, screentone, multiple views, logo, too many watermarks, negative space, blank page, @_@, mismatched pupils, glowing eyes, bad anatomy',
+        none: '',
+    }),
+    v5: Object.freeze({
+        heavy: 'lowres, artistic error, film grain, scan artifacts, worst quality, bad quality, jpeg artifacts, very displeasing, chromatic aberration, dithering, halftone, screentone, multiple views, logo, too many watermarks, negative space, blank page',
+        light: 'lowres, bad hands, bad anatomy, artistic error, sepia, white haze, worst quality, very displeasing, jpeg artifacts, 0::ai-generated::',
+        furryFocus: '{worst quality}, distracting watermark, unfinished, bad quality, {widescreen}, upscale, {sequence}, {{grandfathered content}}, blurred foreground, chromatic aberration, sketch, everyone, [sketch background], simple, [flat colors], ych (character), outline, multiple scenes, [[horror (theme)]], comic',
+        humanFocus: 'lowres, artistic error, film grain, scan artifacts, worst quality, bad quality, jpeg artifacts, very displeasing, chromatic aberration, dithering, halftone, screentone, multiple views, logo, too many watermarks, negative space, blank page, @_@, mismatched pupils, glowing eyes, bad anatomy',
+        none: '',
+    }),
+});
+
+/**
+ * @param {boolean} qualityOn
+ * @returns {string}
+ */
+export function officialQualityTags(qualityOn) {
+    return qualityOn ? OFFICIAL_QUALITY_TAGS : '';
+}
+
+/**
+ * @param {string} model
+ * @param {number} ucPreset
+ * @returns {string}
+ */
+export function officialUndesiredContent(model, ucPreset) {
+    const family = classifyNaiModel(model) === 'v5' ? 'v5' : 'v45';
+    const index = Number(ucPreset);
+    const key = Number.isInteger(index) && index >= 0 && index < UC_PRESET_KEYS.length
+        ? UC_PRESET_KEYS[index]
+        : 'heavy';
+    return OFFICIAL_UC_TEXT[family][key] ?? '';
+}
+
+/**
  * 尺寸预设。出处：`app/public/index.html` .size-presets（竖/横/方）。
  * @type {readonly SizePreset[]}
  */
@@ -236,7 +289,7 @@ export function supportsNoiseScheduleSelect(model) {
 }
 
 /**
- * 透明底：app 仅 V5 追加 transparent background；本插件走字段对。
+ * 透明底只对 V5 生效。请求里靠正向提示词里的 transparent background，不是单独的布尔字段。
  * @param {string} model
  * @returns {boolean}
  */

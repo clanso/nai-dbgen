@@ -20,6 +20,8 @@ import {
     isMultipleOf64,
     matchSizePresetId,
     mergeNaiParamsForGenerate,
+    officialQualityTags,
+    officialUndesiredContent,
     noiseSchedulesForModel,
     reconcileParamsForModel,
     smeaFlagsFromMode,
@@ -229,9 +231,96 @@ describe('paired field expand + assemble', () => {
         assert.equal(result.parameters.tag_hint_uc_preset, true);
         assert.equal(result.parameters.skip_cfg_above_sigma, 58);
         assert.equal('sm' in result.parameters, false);
-        // 4.5 不支持透明底 → 关
+        // 4.5 不支持透明底 → 关，也不改提示词
         assert.equal(result.parameters.straight_alpha, false);
         assert.equal(result.parameters.tag_hint_transparent_background, false);
+        assert.equal(result.input.includes('transparent background'), false);
+    });
+
+    it('V5 transparent switch prepends the prompt tag', () => {
+        const result = assembleNaiPayload({
+            caption: {
+                ...emptyNaiCaption(),
+                v4_prompt: {
+                    caption: {
+                        base_caption: '1girl, classroom',
+                        char_captions: [],
+                    },
+                },
+            },
+            params: {
+                ...defaultNaiParams(),
+                model: 'nai-diffusion-5-full',
+                straight_alpha: true,
+            },
+            artist: null,
+            replaceCharacterKeywords: false,
+        });
+        assert.equal(
+            result.input,
+            `transparent background, 1girl, classroom, ${officialQualityTags(true)}`,
+        );
+        assert.equal(result.parameters.v4_prompt.caption.base_caption, result.input);
+        const again = assembleNaiPayload({
+            caption: {
+                ...emptyNaiCaption(),
+                v4_prompt: {
+                    caption: {
+                        base_caption: 'transparent background, already',
+                        char_captions: [],
+                    },
+                },
+            },
+            params: {
+                ...defaultNaiParams(),
+                model: 'nai-diffusion-5-full',
+                tag_hint_transparent_background: true,
+            },
+            artist: null,
+            replaceCharacterKeywords: false,
+        });
+        assert.equal(again.input, `transparent background, already, ${officialQualityTags(true)}`);
+    });
+
+    it('writes official quality tags and UC text, without an nsfw prefix', () => {
+        const off = assembleNaiPayload({
+            caption: {
+                ...emptyNaiCaption(),
+                v4_prompt: { caption: { base_caption: 'scene', char_captions: [] } },
+                v4_negative_prompt: { caption: { base_caption: 'bad hands', char_captions: [] } },
+            },
+            params: {
+                ...defaultNaiParams(),
+                qualityToggle: false,
+                ucPreset: 4,
+            },
+            artist: null,
+            replaceCharacterKeywords: false,
+        });
+        assert.equal(off.input, 'scene');
+        assert.equal(off.negative_prompt, 'bad hands');
+
+        const light = assembleNaiPayload({
+            caption: {
+                ...emptyNaiCaption(),
+                v4_prompt: { caption: { base_caption: 'scene', char_captions: [] } },
+                v4_negative_prompt: { caption: { base_caption: 'bad hands', char_captions: [] } },
+            },
+            params: {
+                ...defaultNaiParams(),
+                model: 'nai-diffusion-5-full',
+                qualityToggle: true,
+                ucPreset: 1,
+            },
+            artist: null,
+            replaceCharacterKeywords: false,
+        });
+        const uc = officialUndesiredContent('nai-diffusion-5-full', 1);
+        assert.equal(light.input, `scene, ${officialQualityTags(true)}`);
+        assert.equal(light.negative_prompt, `${uc}, bad hands`);
+        assert.equal(light.negative_prompt.includes('nsfw'), false);
+        assert.equal(uc.includes('bad hands'), true);
+        assert.equal(officialUndesiredContent('nai-diffusion-4-5-full', 1).includes('bad hands'), false);
     });
 
     it('smea mode helpers', () => {

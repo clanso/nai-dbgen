@@ -13,7 +13,12 @@
 
 import { FIXED_STRUCTURE } from '../model/nai-params.js';
 import { prefixArtist } from './artist-prefix.js';
-import { expandNaiParamFields } from './param-options.js';
+import {
+    expandNaiParamFields,
+    officialQualityTags,
+    officialUndesiredContent,
+    supportsTransparentBackground,
+} from './param-options.js';
 import { substituteCharacterKeywords } from './keyword-substitution.js';
 
 /**
@@ -95,6 +100,9 @@ export function assembleNaiPayload(input) {
     // 4.13：成对字段展开 + Variety 按尺寸计算（参数合法性由 UI / mergeNaiParamsForGenerate 先保证）
     const expanded = expandNaiParamFields({ ...input.params, ...overrides });
     const model = String(expanded.model ?? '');
+    const withQuality = joinPromptParts(posBase, officialQualityTags(expanded.qualityToggle !== false));
+    const promptBase = withTransparentBackgroundTag(withQuality, expanded, model);
+    const negativeBase = joinPromptParts(officialUndesiredContent(model, expanded.ucPreset), negBase);
 
     // 4. 结构开关 + caption
     const posChars = cloneCharCaptions(caption.v4_prompt.caption.char_captions);
@@ -105,7 +113,7 @@ export function assembleNaiPayload(input) {
     const useCoords = posChars.length > 0;
     const v4Prompt = {
         caption: {
-            base_caption: posBase,
+            base_caption: promptBase,
             char_captions: posChars,
         },
         use_coords: useCoords,
@@ -113,7 +121,7 @@ export function assembleNaiPayload(input) {
     };
     const v4Negative = {
         caption: {
-            base_caption: negBase,
+            base_caption: negativeBase,
             char_captions: negChars,
         },
         ...FIXED_STRUCTURE.v4_negative_prompt,
@@ -141,7 +149,7 @@ export function assembleNaiPayload(input) {
         tag_hint_uc_preset: expanded.tag_hint_uc_preset === true,
         straight_alpha: expanded.straight_alpha === true,
         tag_hint_transparent_background: expanded.tag_hint_transparent_background === true,
-        negative_prompt: negBase,
+        negative_prompt: negativeBase,
         use_coords: useCoords,
         v4_prompt: v4Prompt,
         v4_negative_prompt: v4Negative,
@@ -192,8 +200,8 @@ export function assembleNaiPayload(input) {
 
     /** @type {NaiRequest} */
     const request = {
-        input: posBase,
-        negative_prompt: negBase,
+        input: promptBase,
+        negative_prompt: negativeBase,
         model,
         parameters,
     };
@@ -207,6 +215,38 @@ export function assembleNaiPayload(input) {
  * @param {NaiCaption} caption
  * @returns {NaiCaption}
  */
+/**
+ * V5 透明底没有独立请求字段。官方文档和桌面端都是把 `transparent background` 写进正向提示词。
+ * @param {string} prompt
+ * @param {Record<string, unknown>} params
+ * @param {string} model
+ * @returns {string}
+ */
+/**
+ * @param {string} left
+ * @param {string} right
+ * @returns {string}
+ */
+function joinPromptParts(left, right) {
+    const a = String(left ?? '').trim();
+    const b = String(right ?? '').trim();
+    if (!a) return b;
+    if (!b) return a;
+    return `${a}, ${b}`;
+}
+
+function withTransparentBackgroundTag(prompt, params, model) {
+    const on = params.straight_alpha === true || params.tag_hint_transparent_background === true;
+    if (!on || !supportsTransparentBackground(model)) {
+        return prompt;
+    }
+    if (/\btransparent background\b/i.test(prompt)) {
+        return prompt;
+    }
+    const body = prompt.trim();
+    return body ? `transparent background, ${body}` : 'transparent background';
+}
+
 function cloneCaptionShallow(caption) {
     return {
         v4_prompt: {

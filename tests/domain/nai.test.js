@@ -6,6 +6,7 @@ import {
     substituteKeywordsInText,
 } from '../../src/domain/nai/keyword-substitution.js';
 import { assembleNaiPayload } from '../../src/domain/nai/payload-assembler.js';
+import { officialQualityTags, officialUndesiredContent } from '../../src/domain/nai/param-options.js';
 import { defaultNaiParams, emptyNaiCaption, FIXED_STRUCTURE } from '../../src/domain/model/nai-params.js';
 
 const GLOBALS = { caseSensitive: false, matchWholeWords: false };
@@ -106,9 +107,13 @@ describe('assembleNaiPayload', () => {
             matchGlobals: GLOBALS,
         });
 
-        assert.equal(result.input, 'art+, 黑发 scene');
-        assert.equal(result.negative_prompt, 'art-, uc');
-        assert.equal(result.parameters.v4_prompt.caption.base_caption, 'art+, 黑发 scene');
+        const quality = officialQualityTags(true);
+        const uc = officialUndesiredContent(params.model, params.ucPreset);
+        assert.equal(result.input, `art+, 黑发 scene, ${quality}`);
+        assert.equal(result.negative_prompt, `${uc}, art-, uc`);
+        assert.equal(result.negative_prompt.startsWith('nsfw'), false);
+        assert.equal(result.parameters.v4_prompt.caption.base_caption, result.input);
+        assert.equal(result.parameters.v4_negative_prompt.caption.base_caption, result.negative_prompt);
         assert.deepEqual(
             {
                 use_coords: result.parameters.v4_prompt.use_coords,
@@ -171,7 +176,7 @@ describe('assembleNaiPayload', () => {
             }],
             paramOverrides: { steps: 20, custom_field: 1 },
         });
-        assert.equal(result.input, '张三');
+        assert.equal(result.input, `张三, ${officialQualityTags(true)}`);
         assert.equal(result.parameters.steps, 20);
         assert.equal(result.parameters.custom_field, 1);
     });
