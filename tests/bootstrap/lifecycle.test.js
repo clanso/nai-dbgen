@@ -175,6 +175,9 @@ describe('bootstrap/lifecycle', () => {
         assert.equal(typeof globalThis[GENERATE_INTERCEPTOR_GLOBAL_NAME], 'function');
         assert.ok(ctx._slashRegistry.includes('naigen'));
         assert.ok(ctx._slashRegistry.includes('naiwb'));
+        assert.ok(ctx._slashRegistry.includes('naimgr'));
+        assert.ok(ctx._slashRegistry.includes('naifloor'));
+        assert.ok(ctx._slashRegistry.includes('naiartist'));
     });
 
     it('/naiwb wires the shared artist picker and releases it when the dialog closes', async () => {

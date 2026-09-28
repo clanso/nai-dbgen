@@ -887,6 +887,10 @@ export function mountFloatingBall(root, deps) {
 
     return {
         closePanels,
+        openArtistPanel() {
+            if (destroyed) return;
+            void openArtistPanel();
+        },
         destroy() {
             if (destroyed) return;
             destroyed = true;

@@ -20,17 +20,19 @@ import { createLogger } from '../infra/logger.js';
 import { setLoadBanner } from './load-banner.js';
 import { createSlotMountObserver, findSlotInMessage } from '../adapters/host/slot-mount.observer.js';
 import { GENERATE_INTERCEPTOR_GLOBAL_NAME } from '../adapters/host/generate-interceptor.js';
-import { mountFloatingBall } from '../ui/floating-ball/floating-ball.js';
+import { mountFloatingBall, formatGenerateFloorToast } from '../ui/floating-ball/floating-ball.js';
+import { isOk } from '../infra/result.js';
 import { openPanelShell } from '../ui/panels/shell.js';
 import { mountWorkbench } from '../ui/workbench/workbench.js';
 import { mountSlotWidget } from '../ui/slot-widget/slot-widget.js';
 import { openModal } from '../ui/common/modal.js';
 import { openSlotEditor, bindSlotEditorGesture, removeDeletedSlotElements } from '../ui/slot-editor/slot-editor.js';
+import { installQuickReplyEntry } from './quick-reply-entry.js';
 
 const log = createLogger('bootstrap/lifecycle');
 
 /** @type {string} */
-export const PLUGIN_VERSION = '0.2.14';
+export const PLUGIN_VERSION = '0.2.20';
 
 /** @type {string} */
 export const PUBLIC_API_NAME = 'NaiDbGen';
@@ -482,6 +484,47 @@ function registerSlashCommands(host) {
     });
 
     host.registerSlashCommand({
+        name: 'naimgr',
+        aliases: ['nai-panel'],
+        helpString: '打开酒馆数据库生图',
+        callback: async () => {
+            const container = liveContainer();
+            if (!container) {
+                safeToast(null, 'warning', '酒馆数据库生图未成功加载');
+                return '';
+            }
+            await openManagementUi(container);
+            return '';
+        },
+    });
+
+    host.registerSlashCommand({
+        name: 'naifloor',
+        aliases: ['nai-floor'],
+        helpString: '对本楼生图，和悬浮球双击相同',
+        callback: () => runManualFloorFromEntry(),
+    });
+
+    host.registerSlashCommand({
+        name: 'naiartist',
+        aliases: ['nai-artist'],
+        helpString: '打开画师串选择，和悬浮球长按相同',
+        callback: async () => {
+            const container = liveContainer();
+            if (!container) {
+                safeToast(null, 'warning', '酒馆数据库生图未成功加载');
+                return '';
+            }
+            if (typeof runtime.floatingBallHandle?.openArtistPanel === 'function') {
+                runtime.floatingBallHandle.openArtistPanel();
+                return '';
+            }
+            await openManagementUi(container, 'artist');
+            return '';
+        },
+    });
+
+    host.registerSlashCommand({
         name: 'naiwb',
         aliases: ['nai-workbench'],
         helpString: '打开酒馆数据库生图 · 生成工作台',
@@ -764,6 +807,13 @@ function mountFloatingBallUi() {
 
     runtime.floatingBallRoot = root;
     runtime.floatingBallHandle = {
+        openArtistPanel() {
+            try {
+                handle.openArtistPanel();
+            } catch {
+                // ignore
+            }
+        },
         destroy() {
             try {
                 handle.destroy();
@@ -777,6 +827,42 @@ function mountFloatingBallUi() {
             }
         },
     };
+}
+
+/**
+ * 和悬浮球双击同一条路：已有图先警告，确认后从写提示词重跑再出图。
+ * @returns {Promise<string>}
+ */
+async function runManualFloorFromEntry() {
+    const container = liveContainer();
+    if (!container) {
+        safeToast(null, 'warning', '酒馆数据库生图未成功加载');
+        return '';
+    }
+    const floor = container.useCases.generateFloor;
+    if (typeof floor?.isRunning === 'function' && floor.isRunning()) {
+        safeToast(container.host, 'info', '本楼正在生图，请稍候…');
+        return '';
+    }
+    /** @type {any} */
+    let result;
+    try {
+        result = await floor.execute(undefined, { manual: true });
+    } catch (err) {
+        safeToast(container.host, 'error', formatUserMessage(err));
+        return '';
+    }
+    if (result == null || (typeof result === 'object' && !('ok' in result))) {
+        safeToast(container.host, 'error', '本楼生图失败，请重试');
+        return '';
+    }
+    if (isOk(result)) {
+        const toast = formatGenerateFloorToast(result.value);
+        safeToast(container.host, toast.level, toast.message);
+    } else {
+        safeToast(container.host, 'error', formatUserMessage(result.error));
+    }
+    return '';
 }
 
 /**
@@ -1361,6 +1447,7 @@ export async function activate(opts = {}) {
 
         // D56：斜杠放在所有可能失败步骤之后；回调仍活查 container 防 dispose 僵尸
         registerSlashCommands(container.host);
+        installQuickReplyEntry();
 
         // 悬浮球：放在可能失败步骤之后；仍挂 rollback 防后续扩展踩坑
         mountFloatingBallUi();
