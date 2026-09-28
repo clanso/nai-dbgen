@@ -5,7 +5,7 @@
 
 import { isOk, isErr } from '../../infra/result.js';
 import { mergePluginSettings } from '../../domain/model/plugin-settings.js';
-import { createButton, createEmptyState } from '../common/controls.js';
+import { createButton, createEmptyState, createToggle } from '../common/controls.js';
 import { paintSafeCover } from '../common/safe-url.js';
 import { mountDrawer } from '../drawer/drawer.js';
 import {
@@ -292,6 +292,8 @@ export function mountFloatingBall(root, deps) {
     let openPanel = 'none';
     /** @type {{ destroy: () => void }|null} */
     let drawerHandle = null;
+    /** @type {{ destroy: () => void }|null} */
+    let hideBallToggle = null;
     /** @type {HTMLElement|null} */
     let panelEl = null;
     /** @type {Map<string, string|null>} itemId → 已过白名单的 src（或 null 占位） */
@@ -348,6 +350,28 @@ export function mountFloatingBall(root, deps) {
     applyBallPos();
 
     /**
+     * @returns {boolean}
+     */
+    function readBallHidden() {
+        try {
+            return deps.loadSettings?.()?.hideFloatingBall === true;
+        } catch {
+            return false;
+        }
+    }
+
+    /**
+     * @param {boolean} hidden
+     */
+    function applyBallHidden(hidden) {
+        ball.classList.toggle('nd-fab--hidden', hidden);
+        ball.setAttribute('aria-hidden', hidden ? 'true' : 'false');
+        ball.tabIndex = hidden ? -1 : 0;
+    }
+
+    applyBallHidden(readBallHidden());
+
+    /**
      * @param {boolean} busy
      */
     function setBusyVisual(busy) {
@@ -387,6 +411,14 @@ export function mountFloatingBall(root, deps) {
      * @returns {void}
      */
     function closePanels() {
+        if (hideBallToggle) {
+            try {
+                hideBallToggle.destroy();
+            } catch {
+                // ignore
+            }
+            hideBallToggle = null;
+        }
         if (drawerHandle) {
             try {
                 drawerHandle.destroy();
@@ -408,7 +440,14 @@ export function mountFloatingBall(root, deps) {
      */
     function placePanel(panel) {
         const { w: vw, h: vh } = viewportSize();
-        const br = readRect(ball);
+        const br = ball.classList.contains('nd-fab--hidden')
+            ? {
+                left: pos.x,
+                top: pos.y,
+                right: pos.x + FAB_SIZE_PX,
+                bottom: pos.y + FAB_SIZE_PX,
+            }
+            : readRect(ball);
         const placed = computePanelPlacement({
             ballLeft: br.left,
             ballTop: br.top,
@@ -487,10 +526,21 @@ export function mountFloatingBall(root, deps) {
                 }
             },
         });
-        footer.append(managementBtn, workbenchBtn);
+        const hideToggle = createToggle({
+            label: '隐藏悬浮球',
+            hint: '关掉后从快捷回复栏进入',
+            checked: readBallHidden(),
+            onChange: (on) => {
+                const current = deps.loadSettings();
+                deps.saveSettings(mergePluginSettings(current, { hideFloatingBall: on }));
+                applyBallHidden(on);
+            },
+        });
+        footer.append(hideToggle.el, managementBtn, workbenchBtn);
 
         panel.append(head, body, footer);
         openOverlay('config', panel);
+        hideBallToggle = hideToggle;
 
         drawerHandle = mountDrawer(body, {
             loadSettings: deps.loadSettings,
@@ -890,6 +940,10 @@ export function mountFloatingBall(root, deps) {
         openArtistPanel() {
             if (destroyed) return;
             void openArtistPanel();
+        },
+        openConfigPanel() {
+            if (destroyed) return;
+            toggleConfigPanel();
         },
         destroy() {
             if (destroyed) return;

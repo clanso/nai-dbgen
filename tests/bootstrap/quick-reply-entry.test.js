@@ -90,7 +90,7 @@ describe('quick reply entry', () => {
         assert.deepEqual(result, { ok: false, reason: 'missing' });
     });
 
-    it('第一次挂上和悬浮球同等的四个按钮', async () => {
+    it('第一次只挂本楼生图和配置面板', async () => {
         const api = fakeApi();
         const result = await ensureQuickReplyEntry(api);
         assert.equal(result.ok, true);
@@ -124,20 +124,29 @@ describe('quick reply entry', () => {
         assert.equal(api.getQrByLabel(QR_SET_NAME, '本楼生图').message, '/naifloor');
     });
 
-    it('删掉只会打开管理台的旧按钮', async () => {
+    it('删掉多出来的工作台、管理台、画师串', async () => {
         const set = {
             name: QR_SET_NAME,
             disableSend: false,
             placeBeforeInput: false,
             injectInput: false,
-            buttons: [{ label: '数据库生图', message: '/naimgr' }],
+            buttons: [
+                { label: '数据库生图', message: '/naimgr' },
+                { label: '本楼生图', message: '/naifloor' },
+                { label: '工作台', message: '/naiwb' },
+                { label: '管理台', message: '/naimgr' },
+                { label: '画师串', message: '/naiartist' },
+            ],
         };
         const api = fakeApi({ set, linked: true });
         await ensureQuickReplyEntry(api);
-        assert.equal(api.calls.deleteQuickReply, 1);
+        assert.equal(api.calls.deleteQuickReply, 4);
         assert.equal(api.getQrByLabel(QR_SET_NAME, '数据库生图'), undefined);
+        assert.equal(api.getQrByLabel(QR_SET_NAME, '工作台'), undefined);
+        assert.equal(api.getQrByLabel(QR_SET_NAME, '管理台'), undefined);
+        assert.equal(api.getQrByLabel(QR_SET_NAME, '画师串'), undefined);
         assert.equal(api.getQrByLabel(QR_SET_NAME, '本楼生图').message, '/naifloor');
-        assert.equal(api.getQrByLabel(QR_SET_NAME, '画师串').message, '/naiartist');
+        assert.equal(api.getQrByLabel(QR_SET_NAME, '配置').message, '/naicfg');
     });
 
     it('设置面板没挂上时仍然调用挂到全局栏', async () => {

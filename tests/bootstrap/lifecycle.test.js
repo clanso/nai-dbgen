@@ -177,6 +177,7 @@ describe('bootstrap/lifecycle', () => {
         assert.ok(ctx._slashRegistry.includes('naiwb'));
         assert.ok(ctx._slashRegistry.includes('naimgr'));
         assert.ok(ctx._slashRegistry.includes('naifloor'));
+        assert.ok(ctx._slashRegistry.includes('naicfg'));
         assert.ok(ctx._slashRegistry.includes('naiartist'));
     });
 

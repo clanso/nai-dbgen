@@ -32,7 +32,7 @@ import { installQuickReplyEntry } from './quick-reply-entry.js';
 const log = createLogger('bootstrap/lifecycle');
 
 /** @type {string} */
-export const PLUGIN_VERSION = '0.2.20';
+export const PLUGIN_VERSION = '0.2.22';
 
 /** @type {string} */
 export const PUBLIC_API_NAME = 'NaiDbGen';
@@ -506,6 +506,20 @@ function registerSlashCommands(host) {
     });
 
     host.registerSlashCommand({
+        name: 'naicfg',
+        aliases: ['nai-config'],
+        helpString: '打开配置面板，和单击悬浮球相同',
+        callback: async () => {
+            if (typeof runtime.floatingBallHandle?.openConfigPanel !== 'function') {
+                safeToast(null, 'warning', '酒馆数据库生图未成功加载');
+                return '';
+            }
+            runtime.floatingBallHandle.openConfigPanel();
+            return '';
+        },
+    });
+
+    host.registerSlashCommand({
         name: 'naiartist',
         aliases: ['nai-artist'],
         helpString: '打开画师串选择，和悬浮球长按相同',
@@ -810,6 +824,13 @@ function mountFloatingBallUi() {
         openArtistPanel() {
             try {
                 handle.openArtistPanel();
+            } catch {
+                // ignore
+            }
+        },
+        openConfigPanel() {
+            try {
+                handle.openConfigPanel();
             } catch {
                 // ignore
             }

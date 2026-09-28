@@ -29,6 +29,12 @@
 }
 
 /* —— 球：必须压过 `.nd-root button` 的浅色方角硬化 —— */
+:is(#nai-dbgen-root, .nd-root) button.nd-fab.nd-fab--hidden,
+button.nd-fab.nd-fab.nd-fab--hidden {
+    display: none !important;
+    pointer-events: none !important;
+}
+
 :is(#nai-dbgen-root, .nd-root) button.nd-fab,
 button.nd-fab.nd-fab {
     position: fixed;
@@ -225,6 +231,10 @@ button.nd-fab.nd-fab.nd-fab--busy {
     gap: 8px;
     padding-top: 8px;
     border-top: 1px solid #f4e1e9;
+}
+
+.nd-root.nd-fab-panel .nd-fab-panel__footer > .nd-toggle-row {
+    grid-column: 1 / -1;
 }
 
 .nd-root.nd-fab-panel .nd-fab-panel__footer--single {

@@ -59,8 +59,9 @@ export const PLUGIN_SETTINGS_SCHEMA_VERSION = 1;
  * @property {boolean} autoWriteSlots
  *   自动写 slot：新 AI 楼落定后走步骤 4–5（需求 4.12）。默认 false。
  * @property {boolean} autoRenderSlots
- * @property {boolean} naiParallel 同时请求多张。默认关，一张完成再请求下一张。
  *   自动出图：slot 写好后对尚未生图编号走出图（需求 4.12）。默认 false。已生图的不自动再出。
+ * @property {boolean} naiParallel 同时请求多张。默认关，一张完成再请求下一张。
+ * @property {boolean} hideFloatingBall 隐藏悬浮球。默认关。快捷回复栏仍可进配置和本楼生图。
  * @property {MatchDefaults} matchDefaults
  *   角色关键字匹配的全局默认。
  * @property {import('./nai-params.js').NaiParams} naiParams
@@ -88,6 +89,7 @@ export function defaultPluginSettings() {
         autoWriteSlots: false,
         autoRenderSlots: false,
         naiParallel: false,
+        hideFloatingBall: false,
         matchDefaults: {
             caseSensitive: false,
             matchWholeWords: false,
@@ -158,6 +160,7 @@ export function normalizePluginSettings(obj) {
         autoWriteSlots: obj.autoWriteSlots === true,
         autoRenderSlots: obj.autoRenderSlots === true,
         naiParallel: obj.naiParallel === true,
+        hideFloatingBall: obj.hideFloatingBall === true,
         matchDefaults: normalizeMatchDefaults(obj.matchDefaults),
         naiParams: naiResult.ok ? naiResult.value : defaultNaiParams(),
     };

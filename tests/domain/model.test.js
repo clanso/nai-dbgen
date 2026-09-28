@@ -276,6 +276,7 @@ describe('model/plugin-settings', () => {
         assert.equal(d.floorImageScale, 100);
         assert.equal(d.matchDefaults.caseSensitive, false);
         assert.equal(d.autoWriteSlots, false);
+        assert.equal(d.hideFloatingBall, false);
         assert.equal(d.activeSingleRecallPresetId, null);
         assert.equal(d.activeSingleImagegenPresetId, null);
         assert.equal(validatePluginSettings(d).ok, true);

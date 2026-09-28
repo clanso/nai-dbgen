@@ -19,11 +19,19 @@ function trace(step, detail) {
 /** 快捷回复预设名，出现在酒馆的快捷回复设置里。 */
 export const QR_SET_NAME = '酒馆数据库生图';
 
-/** 上一版只打开管理台的按钮，升级时删掉。 */
-const RETIRED_BUTTON_LABEL = '数据库生图';
+/**
+ * 曾经单独挂过、现在不该出现在栏上的按钮。只删我们写过的命令。
+ * @type {ReadonlyArray<{ label: string, message: string }>}
+ */
+const RETIRED_BUTTONS = Object.freeze([
+    { label: '数据库生图', message: '/naimgr' },
+    { label: '工作台', message: '/naiwb' },
+    { label: '管理台', message: '/naimgr' },
+    { label: '画师串', message: '/naiartist' },
+]);
 
 /**
- * 和悬浮球对应：双击本楼生图、单击里的工作台和管理台、长按画师串。
+ * 只留两个：双击悬浮球的本楼生图，单击悬浮球的配置面板。
  * @type {ReadonlyArray<{ label: string, message: string, title: string, icon: string }>}
  */
 export const QR_BUTTONS = Object.freeze([
@@ -34,22 +42,10 @@ export const QR_BUTTONS = Object.freeze([
         icon: 'fa-image',
     },
     {
-        label: '工作台',
-        message: '/naiwb',
-        title: '打开生成工作台',
-        icon: 'fa-pen-to-square',
-    },
-    {
-        label: '管理台',
-        message: '/naimgr',
-        title: '打开酒馆数据库生图',
+        label: '配置',
+        message: '/naicfg',
+        title: '打开配置面板，和单击悬浮球相同',
         icon: 'fa-sliders',
-    },
-    {
-        label: '画师串',
-        message: '/naiartist',
-        title: '切换画师串，和悬浮球长按相同',
-        icon: 'fa-palette',
     },
 ]);
 
@@ -88,11 +84,14 @@ export async function ensureQuickReplyEntry(api) {
         });
     }
 
-    const retired = typeof qr.getQrByLabel === 'function'
-        ? qr.getQrByLabel(QR_SET_NAME, RETIRED_BUTTON_LABEL)
-        : null;
-    if (retired && retired.message === '/naimgr' && typeof qr.deleteQuickReply === 'function') {
-        qr.deleteQuickReply(QR_SET_NAME, RETIRED_BUTTON_LABEL);
+    if (typeof qr.getQrByLabel === 'function' && typeof qr.deleteQuickReply === 'function') {
+        for (const retired of RETIRED_BUTTONS) {
+            const existing = qr.getQrByLabel(QR_SET_NAME, retired.label);
+            if (existing && existing.message === retired.message) {
+                trace('delete retired', retired.label);
+                qr.deleteQuickReply(QR_SET_NAME, retired.label);
+            }
+        }
     }
 
     for (const button of QR_BUTTONS) {

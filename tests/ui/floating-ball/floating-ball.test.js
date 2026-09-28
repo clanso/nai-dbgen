@@ -522,4 +522,52 @@ describe('ui/floating-ball/floating-ball', () => {
         assert.equal(root.childNodes.length, 0);
         assert.doesNotThrow(() => api.destroy());
     });
+
+    it('配置里打开隐藏悬浮球后球隐藏，再次挂上仍隐藏', async () => {
+        const root = document.createElement('div');
+        document.body.appendChild(root);
+        /** @type {ReturnType<typeof defaultPluginSettings>} */
+        let settings = { ...defaultPluginSettings() };
+        const deps = {
+            loadSettings: () => settings,
+            saveSettings: (next) => {
+                settings = next;
+            },
+            subscribeSettings: () => () => {},
+            openManagement: () => {},
+            openWorkbench: () => {},
+            repos: {},
+            generateFloor: async () => ({
+                ok: true,
+                value: {
+                    messageId: 1,
+                    wroteSlots: false,
+                    rendered: [],
+                    skipped: [],
+                    failed: [],
+                },
+            }),
+            toast: () => {},
+            formatError: () => 'err',
+            storage: { getItem: () => null, setItem: () => {} },
+        };
+        const api = mountFloatingBall(root, deps);
+        const ball = root.childNodes[0];
+        assert.equal(ball.classList.contains('nd-fab--hidden'), false);
+
+        api.openConfigPanel();
+
+        const labelText = findNode(root, (n) => n.textContent === '隐藏悬浮球');
+        assert.ok(labelText, '配置面板里应有隐藏悬浮球');
+        const input = labelText.closest('label').querySelector('input');
+        input.checked = true;
+        fire(input, 'change');
+        assert.equal(settings.hideFloatingBall, true);
+        assert.equal(ball.classList.contains('nd-fab--hidden'), true);
+        api.destroy();
+
+        const again = mountFloatingBall(root, deps);
+        assert.equal(root.childNodes[0].classList.contains('nd-fab--hidden'), true);
+        again.destroy();
+    });
 });
