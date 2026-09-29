@@ -209,11 +209,15 @@ export function applyNdPopupChrome(dlg, opts = {}) {
  * 保留 contentRoot（.nd-modal-root）的 header + scroll 结构，不拆散子树。
  * @param {HTMLElement} contentRoot 已是 .nd-root.nd-modal-root
  * @param {string} title
+ * @param {string|undefined} dialogClass
  * @returns {{ destroy: () => void, dialog: HTMLDialogElement }}
  */
-function openNativeDialog(contentRoot, title) {
+function openNativeDialog(contentRoot, title, dialogClass) {
     const dlg = document.createElement('dialog');
     dlg.className = 'nd-native-dialog nd-root nd-popup';
+    if (dialogClass) {
+        dlg.classList.add(dialogClass);
+    }
     dlg.setAttribute('aria-label', title || t('modal.fallbackTitle'));
 
     const shell = document.createElement('div');
@@ -258,7 +262,7 @@ function openNativeDialog(contentRoot, title) {
 /**
  * @param {object} deps
  * @param {import('../../ports/host.port.js').HostPort} deps.host
- * @param {{ title: string, element: Element, wide?: boolean, large?: boolean, allowVerticalScrolling?: boolean }} opts
+ * @param {{ title: string, element: Element, wide?: boolean, large?: boolean, allowVerticalScrolling?: boolean, dialogClass?: string }} opts
  * @returns {Promise<{ destroy: () => void }>}
  */
 export async function openModal(deps, opts) {
@@ -271,10 +275,25 @@ export async function openModal(deps, opts) {
 
     // 自建头部（标题 + 关闭槽）；宿主只挂节点，不再套裸 h3
     const wrap = buildRoot({ title, element });
+    const dialogClass = opts?.dialogClass;
+    /** @type {HTMLDialogElement|null} */
+    let preparedDialog = null;
+    /** @param {HTMLDialogElement} dlg */
+    const prepareDialog = (dlg) => {
+        if (preparedDialog === dlg) return;
+        if (title && typeof dlg.setAttribute === 'function') {
+            dlg.setAttribute('aria-label', title);
+        }
+        if (dialogClass) {
+            dlg.classList.add(dialogClass);
+        }
+        applyNdPopupChrome(dlg);
+        preparedDialog = dlg;
+    };
 
     if (host && typeof host.openModal === 'function') {
-        /** @type {{ title: string, element: Element, wide?: boolean, large?: boolean, allowVerticalScrolling?: boolean }} */
-        const hostOpts = { title: '', element: wrap };
+        /** @type {{ title: string, element: Element, wide?: boolean, large?: boolean, allowVerticalScrolling?: boolean, prepareDialog: (dlg: HTMLDialogElement) => void }} */
+        const hostOpts = { title: '', element: wrap, prepareDialog };
         // 裁决 D20：透传，不吞、不写死
         if (opts && Object.prototype.hasOwnProperty.call(opts, 'wide')) {
             hostOpts.wide = opts.wide;
@@ -309,17 +328,16 @@ export async function openModal(deps, opts) {
         Promise.resolve(pending).catch(() => {});
 
         if (!ownedDialog) {
-            const native = openNativeDialog(wrap, title);
+            const native = openNativeDialog(wrap, title, dialogClass);
             ownedDialog = native.dialog;
             return { destroy: native.destroy };
         }
 
-        if (title && typeof ownedDialog.setAttribute === 'function') {
-            ownedDialog.setAttribute('aria-label', title);
+        if (preparedDialog !== ownedDialog) {
+            prepareDialog(ownedDialog);
         }
-        applyNdPopupChrome(ownedDialog, { isNative: false });
         return { destroy };
     }
 
-    return openNativeDialog(wrap, title);
+    return openNativeDialog(wrap, title, dialogClass);
 }

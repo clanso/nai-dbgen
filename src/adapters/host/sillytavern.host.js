@@ -938,6 +938,9 @@ export function createSillyTavernHost(deps) {
                 if (typeof ctx.Popup === 'function' && ctx.POPUP_TYPE) {
                     const popup = new ctx.Popup(content, ctx.POPUP_TYPE.DISPLAY, '', popupOpts);
                     popup.dlg?.classList?.add(ND_ROOT_CLASS, 'nd-popup');
+                    if (popup.dlg) {
+                        opts?.prepareDialog?.(popup.dlg);
+                    }
                     await popup.show();
                     return;
                 }
