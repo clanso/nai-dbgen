@@ -243,4 +243,56 @@ describe('ui/common/import-export commitImport (D44)', () => {
         assert.equal(winConfirm, 0);
         handle2.destroy();
     });
+
+    function allText(root) {
+        const parts = [];
+        /**
+         * @param {any} node
+         */
+        function walk(node) {
+            if (!node) return;
+            if (node._text) parts.push(String(node._text));
+            for (const c of node.childNodes || []) walk(c);
+        }
+        walk(root);
+        return parts.join('\n');
+    }
+
+    it('import mode has no export controls', () => {
+        const root = document.createElement('div');
+        document.body.appendChild(root);
+        const handle = mountImportExport(root, {
+            importJson: async () => ({}),
+            exportJson: async () => ({}),
+        });
+        const text = allText(root);
+        assert.match(text, /拖入资料文件/);
+        assert.match(text, /导入已勾选/);
+        assert.equal(text.includes('导出已勾选'), false);
+        assert.equal(text.includes('载入当前库'), false);
+        handle.destroy();
+    });
+
+    it('export mode lists the current library and has no import controls', async () => {
+        const root = document.createElement('div');
+        document.body.appendChild(root);
+        const handle = mountImportExport(root, {
+            mode: 'export',
+            importJson: async () => ({}),
+            exportJson: async () => ({
+                presets: [
+                    { id: 'a', name: '一', kind: 'imagegen' },
+                    { id: 'b', name: '二', kind: 'imagegen' },
+                ],
+            }),
+        });
+        await new Promise((r) => setTimeout(r, 0));
+        const text = allText(root);
+        assert.match(text, /当前库 2 条/);
+        assert.match(text, /导出已勾选/);
+        assert.equal(text.includes('导入已勾选'), false);
+        assert.equal(text.includes('拖入资料文件'), false);
+        assert.equal(text.includes('覆盖已有'), false);
+        handle.destroy();
+    });
 });

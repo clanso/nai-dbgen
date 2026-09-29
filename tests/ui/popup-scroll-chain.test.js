@@ -44,6 +44,15 @@ describe('popup scroll chain (management / modal)', () => {
             componentsCss,
             /\.nd-button--primary\s*\{[^}]*height:/s,
         );
+        // 普通弹层必须能滚。flex: 0 0 auto 会让 overflow:hidden 把超出部分裁掉。
+        assert.doesNotMatch(
+            componentsCss,
+            /:not\(\.large_dialogue_popup\)\s+\.popup-body[\s\S]{0,180}?flex:\s*0\s+0\s+auto/,
+        );
+        assert.match(
+            componentsCss,
+            /:not\(\.large_dialogue_popup\):not\(\.nd-popup--compact\):not\(:has\(\.nd-confirm\)\)\s+\.nd-popup-scroll[\s\S]*?overflow:\s*auto\s*!important/,
+        );
     });
 
     it('management shell: body does not scroll; library scroller does', () => {

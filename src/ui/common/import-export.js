@@ -391,6 +391,7 @@ async function resolveOverwriteConfirm(count, custom) {
  * @param {(data: object, strategy: string) => Promise<object>} deps.importJson
  * @param {() => Promise<object>} deps.exportJson
  * @param {(count: number) => boolean|Promise<boolean>} [deps.confirmOverwrite] D53：面板注入异步确认（confirmAsk）；未传则拒绝覆盖
+ * @param {'import'|'export'} [deps.mode] 导入和导出分窗。默认 import。
  * @returns {{ destroy: () => void }}
  */
 export function mountImportExport(root, deps) {
@@ -403,9 +404,12 @@ export function mountImportExport(root, deps) {
         ? deps.confirmOverwrite
         : null;
     const replaceOnly = deps?.replaceOnly === true;
+    const mode = deps?.mode === 'export' ? 'export' : 'import';
 
     const shell = document.createElement('div');
-    shell.className = replaceOnly ? 'nd-import nd-import--replace-only' : 'nd-import';
+    shell.className = replaceOnly
+        ? 'nd-import nd-import--replace-only'
+        : (mode === 'export' ? 'nd-import nd-import--export' : 'nd-import');
 
     const grid = document.createElement('div');
     grid.className = 'nd-import__grid';
@@ -449,30 +453,7 @@ export function mountImportExport(root, deps) {
     });
 
     drop.append(icon, dropTitle, dropHint, fileInput, pickBtn, paste, parseBtn);
-
-    const exportPanel = document.createElement('section');
-    exportPanel.className = 'nd-import__export';
-    const exportTitle = document.createElement('h3');
-    exportTitle.textContent = t('import.exportTitle');
-    const exportHint = document.createElement('p');
-    exportHint.textContent = t('import.exportHint');
-    const exportBtn = createButton({
-        label: t('import.exportButton'),
-        variant: 'ghost',
-        onClick: async () => {
-            if (!exportJson) return;
-            try {
-                const data = await exportJson();
-                showPreview(data ?? {}, '当前库');
-            } catch (err) {
-                setError(err instanceof Error ? err.message : String(err));
-            }
-        },
-    });
-    exportPanel.append(exportTitle, exportHint, exportBtn);
-
-    if (replaceOnly) grid.appendChild(drop);
-    else grid.append(drop, exportPanel);
+    if (mode === 'import') grid.appendChild(drop);
 
     const preview = document.createElement('section');
     preview.className = 'nd-import-preview nd-hidden';
@@ -482,7 +463,7 @@ export function mountImportExport(root, deps) {
 
     const toolbarCopy = document.createElement('div');
     const previewTitle = document.createElement('h3');
-    previewTitle.textContent = t('import.previewTitle');
+    previewTitle.textContent = mode === 'export' ? t('import.exportTitle') : t('import.previewTitle');
     const summary = document.createElement('p');
     toolbarCopy.append(previewTitle, summary);
 
@@ -526,7 +507,13 @@ export function mountImportExport(root, deps) {
     statusEl.setAttribute('aria-live', 'polite');
 
     if (replaceOnly) commitBtn.textContent = '替换当前超市';
-    toolbar.append(toolbarCopy, ...(replaceOnly ? [] : [strategyLabel, exportSelectedBtn]), commitBtn, statusEl);
+    if (mode === 'export') {
+        toolbar.append(toolbarCopy, exportSelectedBtn, statusEl);
+    } else if (replaceOnly) {
+        toolbar.append(toolbarCopy, commitBtn, statusEl);
+    } else {
+        toolbar.append(toolbarCopy, strategyLabel, commitBtn, statusEl);
+    }
 
     const tableWrap = document.createElement('div');
     tableWrap.className = 'nd-table-scroll';
@@ -552,7 +539,11 @@ export function mountImportExport(root, deps) {
     errorBox.setAttribute('aria-live', 'polite');
 
     preview.append(toolbar, tableWrap);
-    shell.append(grid, errorBox, preview);
+    const loadingEl = document.createElement('p');
+    loadingEl.className = 'nd-muted';
+    loadingEl.textContent = '正在读取当前库…';
+    if (mode === 'import') shell.append(grid, errorBox, preview);
+    else shell.append(loadingEl, errorBox, preview);
     root.appendChild(shell);
 
     /** @type {object|null} */
@@ -577,8 +568,11 @@ export function mountImportExport(root, deps) {
         pendingData = data;
         const rows = extractPreviewRows(data);
         previewRows = rows.map((item) => ({ item, checked: true }));
-        summary.textContent = t('import.summary', { count: previewRows.length })
-            + (sourceLabel ? ` · ${sourceLabel}` : '');
+        summary.textContent = mode === 'export'
+            ? `当前库 ${previewRows.length} 条`
+            : t('import.summary', { count: previewRows.length })
+                + (sourceLabel ? ` · ${sourceLabel}` : '');
+        loadingEl.remove();
 
         tbody.replaceChildren();
         if (!previewRows.length) {
@@ -705,7 +699,7 @@ export function mountImportExport(root, deps) {
 
     function exportChecked() {
         if (!pendingData) {
-            setError('先载入当前库或解析文件');
+            setError(mode === 'export' ? '当前库还没读出来' : '先解析文件');
             return;
         }
         const checked = previewRows.map((row) => Boolean(row.checked));
@@ -838,6 +832,20 @@ export function mountImportExport(root, deps) {
     drop.addEventListener('dragover', onDragOver);
     drop.addEventListener('dragleave', onDragLeave);
     drop.addEventListener('drop', onDrop);
+
+    if (mode === 'export' && exportJson) {
+        void (async () => {
+            try {
+                const data = await exportJson();
+                if (destroyed) return;
+                showPreview(data ?? {}, '');
+            } catch (err) {
+                if (destroyed) return;
+                loadingEl.remove();
+                setError(err instanceof Error ? err.message : String(err));
+            }
+        })();
+    }
 
     return {
         destroy() {

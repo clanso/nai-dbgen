@@ -245,6 +245,7 @@ export async function confirmDanger(deps, message) {
  *   onCancelIo?: () => void,
  *   autoImport?: { data: object|object[], strategy?: string },
  *   replaceOnly?: boolean,
+ *   mode?: 'import'|'export',
  * }} [opts]
  * @returns {Promise<{ destroy: () => void }>}
  */
@@ -264,12 +265,17 @@ export async function openImportExportModal(deps, title, expectedKind, importJso
         const inline = root.querySelector('.nd-import-status');
         if (!p) {
             setText(progressEl, '');
+            if (inline instanceof HTMLElement && inline.dataset.ndProgress === '1') {
+                setText(inline, '');
+                delete inline.dataset.ndProgress;
+            }
             return;
         }
         const name = p.name ? ` · ${p.name}` : '';
         const line = `进度 ${p.index}/${p.total}${name}`;
         setText(progressEl, line);
         if (inline) {
+            if (inline instanceof HTMLElement) inline.dataset.ndProgress = '1';
             setText(inline, line);
         }
     }
@@ -306,9 +312,10 @@ export async function openImportExportModal(deps, title, expectedKind, importJso
         }
     }
 
+    const ioMode = opts?.mode === 'export' ? 'export' : 'import';
     const handle = mountImportExport(root, {
+        mode: ioMode,
         exportJson: async () => {
-            setProgress({ index: 0, total: 0, name: '导出中' });
             try {
                 return await exportJson({
                     onProgress: (p) => setProgress(p),
@@ -332,7 +339,7 @@ export async function openImportExportModal(deps, title, expectedKind, importJso
 
     if (typeof opts?.onCancelIo === 'function') {
         const cancelBtn = createButton({
-            label: '取消进行中的导入/导出',
+            label: ioMode === 'export' ? '取消进行中的导出' : '取消进行中的导入',
             variant: 'ghost',
             onClick: () => opts.onCancelIo(),
         });

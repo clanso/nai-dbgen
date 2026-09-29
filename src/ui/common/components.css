@@ -1382,6 +1382,10 @@
     background: var(--nd-surface);
 }
 
+:is(#nai-dbgen-root, .nd-root) .nd-import-preview.nd-hidden {
+    display: none;
+}
+
 :is(#nai-dbgen-root, .nd-root) .nd-import-preview__toolbar {
     display: flex;
     flex-wrap: wrap;
@@ -1460,6 +1464,23 @@
     font-size: inherit !important;
     line-height: 1 !important;
     cursor: pointer;
+    display: inline-grid;
+    place-content: center;
+}
+
+:is(#nai-dbgen-root, .nd-root) .nd-table-scroll input[type="checkbox"]::before,
+:is(#nai-dbgen-root, .nd-root) .nd-import input[type="checkbox"]::before {
+    content: "";
+    width: 0.65em;
+    height: 0.65em;
+    transform: scale(0);
+    box-shadow: inset 1em 1em var(--nd-accent);
+    clip-path: polygon(14% 44%, 0 65%, 50% 100%, 100% 16%, 80% 0%, 43% 62%);
+}
+
+:is(#nai-dbgen-root, .nd-root) .nd-table-scroll input[type="checkbox"]:checked::before,
+:is(#nai-dbgen-root, .nd-root) .nd-import input[type="checkbox"]:checked::before {
+    transform: scale(1);
 }
 
 /* —— 虚拟列表 —— */
@@ -1606,22 +1627,26 @@ dialog.nd-native-dialog.nd-root.large_dialogue_popup {
     min-height: 0 !important;
 }
 
-/* 大面板才撑满定高。确认框和普通表单按内容收缩，不吃掉 max-height。 */
+/* 大面板撑满定高，内部列表才能滚动。确认框另走 table，不吃这条。 */
 dialog.nd-popup.nd-root.large_dialogue_popup :is(#nai-dbgen-root, .nd-root).nd-modal-root,
 dialog.nd-native-dialog.nd-root.large_dialogue_popup :is(#nai-dbgen-root, .nd-root).nd-modal-root,
 dialog.nd-native-dialog.nd-root.large_dialogue_popup :is(#nai-dbgen-root, .nd-root) .nd-native-dialog__shell,
 dialog.nd-native-dialog.nd-root.large_dialogue_popup :is(#nai-dbgen-root, .nd-root) .nd-native-dialog__card {
     height: 100%;
     flex: 1 1 auto;
+    min-height: 0;
 }
 
-dialog.nd-popup.nd-root:not(.large_dialogue_popup) .popup-body,
-dialog.nd-popup.nd-root:not(.large_dialogue_popup) .popup-content,
-dialog.nd-popup.nd-root:not(.large_dialogue_popup) .popup-content > .nd-root,
-dialog.nd-native-dialog.nd-root:not(.large_dialogue_popup) .nd-native-dialog__shell,
-dialog.nd-native-dialog.nd-root:not(.large_dialogue_popup) .nd-native-dialog__card {
-    flex: 0 0 auto;
-    height: auto;
+/*
+ * 普通弹层没有定高。禁止 flex: 0 0 auto：弹层 overflow:hidden 会把超出 max-height 的内容裁掉，滚轮没有可滚的盒子。
+ * .nd-popup-scroll 自己限高并滚动。管理台 / 工作台自管内部滚动，不套这一层。
+ */
+dialog.nd-popup.nd-root:not(.large_dialogue_popup):not(.nd-popup--compact):not(:has(.nd-confirm)) .nd-popup-scroll,
+dialog.nd-native-dialog.nd-root:not(.large_dialogue_popup):not(.nd-popup--compact):not(:has(.nd-confirm)) .nd-popup-scroll {
+    flex: 1 1 auto;
+    min-height: 0;
+    max-height: min(72vh, 680px);
+    overflow: auto !important;
 }
 
 /*

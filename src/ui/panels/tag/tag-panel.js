@@ -88,8 +88,8 @@ export function mountTagPanel(root, deps) {
         searchPlaceholder: '搜索库或条目',
         onSearch: (q) => store.set((s) => ({ ...s, query: q })),
         onCreate: () => void openLibraryEditor(null),
-        onImport: () => void openImport(),
-        onExport: () => void openImport(),
+        onImport: () => void openImport('import'),
+        onExport: () => void openImport('export'),
         extra: (() => {
             const wrap = el('label', 'nd-checkbox-row');
             const input = document.createElement('input');
@@ -484,10 +484,13 @@ export function mountTagPanel(root, deps) {
         form.appendChild(actions);
     }
 
-    async function openImport() {
+    /**
+     * @param {'import'|'export'} [mode]
+     */
+    async function openImport(mode = 'import') {
         await openImportExportModal(
             deps,
-            '导入标签库',
+            mode === 'export' ? '导出标签库' : '导入标签库',
             'tag',
             async (data, strategy, progress) => {
                 const r = await repo.importJson(data, {
@@ -503,6 +506,7 @@ export function mountTagPanel(root, deps) {
                 return r.value;
             },
             () => void refresh(),
+            { mode },
         );
     }
 

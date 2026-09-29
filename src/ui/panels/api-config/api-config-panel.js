@@ -130,8 +130,8 @@ export function mountApiConfigPanel(root, deps) {
                 onCreate: () => void openLlmEditor(null),
                 onEdit: (item) => void openLlmEditor(item),
                 onDelete: (idList) => void removeLlm(idList),
-                onImport: () => void openImport(llmRepo, 'llm-config', '导入 LLM API', () => view?.refresh()),
-                onExport: () => void openImport(llmRepo, 'llm-config', '导入 LLM API', () => view?.refresh()),
+                onImport: () => void openImport(llmRepo, 'llm-config', '导入 LLM API', () => view?.refresh(), 'import'),
+                onExport: () => void openImport(llmRepo, 'llm-config', '导出 LLM API', () => view?.refresh(), 'export'),
             }, {
                 cover: false,
                 searchKeys: ['name', 'model', 'baseUrl'],
@@ -158,8 +158,8 @@ export function mountApiConfigPanel(root, deps) {
                 onCreate: () => void openNaiEditor(null),
                 onEdit: (item) => void openNaiEditor(item),
                 onDelete: (idList) => void removeNai(idList),
-                onImport: () => void openImport(naiRepo, 'nai-config', '导入 NAI API', () => view?.refresh()),
-                onExport: () => void openImport(naiRepo, 'nai-config', '导入 NAI API', () => view?.refresh()),
+                onImport: () => void openImport(naiRepo, 'nai-config', '导入 NAI API', () => view?.refresh(), 'import'),
+                onExport: () => void openImport(naiRepo, 'nai-config', '导出 NAI API', () => view?.refresh(), 'export'),
             }, {
                 cover: false,
                 searchKeys: ['name', 'baseUrl'],
@@ -184,8 +184,9 @@ export function mountApiConfigPanel(root, deps) {
      * @param {string} expectedKind
      * @param {string} title
      * @param {() => void} onDone
+     * @param {'import'|'export'} [mode]
      */
-    async function openImport(repo, expectedKind, title, onDone) {
+    async function openImport(repo, expectedKind, title, onDone, mode = 'import') {
         await openImportExportModal(
             deps,
             title,
@@ -204,6 +205,7 @@ export function mountApiConfigPanel(root, deps) {
                 return r.value;
             },
             onDone,
+            { mode },
         );
     }
 

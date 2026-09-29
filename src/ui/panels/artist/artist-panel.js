@@ -108,8 +108,8 @@ export function mountArtistPanel(root, deps) {
         onCreate: () => void openEditor(null),
         onEdit: (item) => void openEditor(item),
         onDelete: (idsToDelete) => void removeItems(idsToDelete),
-        onImport: () => void openImport(),
-        onExport: () => void openImport(),
+        onImport: () => void openImport('import'),
+        onExport: () => void openImport('export'),
         onCoverClick: (item) => void openFullImage(item),
     }, {
         cover: true,
@@ -318,12 +318,15 @@ export function mountArtistPanel(root, deps) {
         form.appendChild(actions);
     }
 
-    async function openImport() {
+    /**
+     * @param {'import'|'export'} [mode]
+     */
+    async function openImport(mode = 'import') {
         /** @type {AbortController|null} */
         let ioAbort = null;
         await openImportExportModal(
             deps,
-            '导入画师串',
+            mode === 'export' ? '导出画师串' : '导入画师串',
             'artist',
             async (data, strategy, progress) => {
                 ioAbort = new AbortController();
@@ -351,6 +354,7 @@ export function mountArtistPanel(root, deps) {
             },
             () => void view?.refresh(),
             {
+                mode,
                 allowBareArray: true,
                 onCancelIo: () => {
                     ioAbort?.abort();

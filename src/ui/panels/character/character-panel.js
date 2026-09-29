@@ -56,7 +56,7 @@ export function mountCharacterPanel(root, deps) {
         searchPlaceholder: '搜索组或角色',
         onSearch: (q) => store.set((s) => ({ ...s, query: q })),
         onCreate: () => void openGroupEditor(null),
-        onImport: () => void openImport(),
+        onImport: () => void openImport('import'),
         onExport: () => void doExport(),
         extra: (() => {
             const wrap = el('label', 'nd-checkbox-row');
@@ -371,10 +371,13 @@ export function mountCharacterPanel(root, deps) {
         form.appendChild(actions);
     }
 
-    async function openImport() {
+    /**
+     * @param {'import'|'export'} [mode]
+     */
+    async function openImport(mode = 'import') {
         await openImportExportModal(
             deps,
-            '导入角色库',
+            mode === 'export' ? '导出角色库' : '导入角色库',
             'character',
             async (data, strategy, progress) => {
                 const r = await repo.importJson(data, {
@@ -390,11 +393,12 @@ export function mountCharacterPanel(root, deps) {
                 return r.value;
             },
             () => void refresh(),
+            { mode },
         );
     }
 
     async function doExport() {
-        await openImport();
+        await openImport('export');
     }
 
     if (typeof repo.onChanged === 'function') {

@@ -107,8 +107,8 @@ export function mountPresetPanel(root, deps) {
         onCreate: () => void openEditor(null),
         onEdit: (item) => void openEditor(item),
         onDelete: (idList) => void removeItems(idList),
-        onImport: () => void openImport(),
-        onExport: () => void openImport(),
+        onImport: () => void openImport('import'),
+        onExport: () => void openImport('export'),
     }, {
         cover: false,
         searchKeys: ['name', 'kind'],
@@ -470,10 +470,13 @@ export function mountPresetPanel(root, deps) {
         }
     }
 
-    async function openImport() {
+    /**
+     * @param {'import'|'export'} [mode]
+     */
+    async function openImport(mode = 'import') {
         await openImportExportModal(
             deps,
-            '导入预设',
+            mode === 'export' ? '导出预设' : '导入预设',
             'preset',
             async (data, strategy, progress) => {
                 const r = await repo.importJson(data, {
@@ -489,6 +492,7 @@ export function mountPresetPanel(root, deps) {
                 return r.value;
             },
             () => void view.refresh(),
+            { mode },
         );
     }
 
