@@ -103,9 +103,9 @@ import { requireArg } from '../infra/validate.js';
  * @property {(element: Element) => void} mountSettingsPanel
  *   挂到 #extensions_settings2。基线 §11。
  *
- * @property {(opts: { title: string, element: Element, wide?: boolean, large?: boolean, allowVerticalScrolling?: boolean }) => Promise<void>} openModal
+ * @property {(opts: { title: string, element: Element, wide?: boolean, large?: boolean, allowVerticalScrolling?: boolean, prepareDialog?: (dialog: HTMLDialogElement) => void }) => Promise<void>} openModal
  *   包一层酒馆 Popup（基线 §11）。必须透传 `wide` / `large` / `allowVerticalScrolling`（裁决 D20），
- *   不得写死一档——管理台要 large，小确认框不要。
+ *   不得写死一档——管理台要 large，小确认框不要。`prepareDialog` 在宿主首次显示前同步调用。
  *
  * @property {(spec: object) => void} registerSlashCommand
  *

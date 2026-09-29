@@ -292,6 +292,59 @@ describe('sillytavern.host HostPort', () => {
         globalThis.document = prevDoc;
     });
 
+    it('openModal prepares the host popup before its first show', async () => {
+        const order = [];
+        const dlg = {
+            classList: {
+                add(...names) {
+                    order.push(`classes:${names.join(',')}`);
+                },
+            },
+        };
+        const ctx = makeFakeContext();
+        ctx.POPUP_TYPE = { DISPLAY: 4 };
+        ctx.Popup = class {
+            constructor() {
+                order.push('construct');
+                this.dlg = dlg;
+            }
+
+            async show() {
+                order.push('show');
+            }
+        };
+
+        const prevDoc = globalThis.document;
+        globalThis.document = {
+            createElement() {
+                return {
+                    classList: { add() {} },
+                    appendChild() {},
+                };
+            },
+        };
+        const host = createSillyTavernHost({ getContext: () => ctx });
+        try {
+            await host.openModal({
+                title: 'Popup prep',
+                element: { nodeType: 1 },
+                prepareDialog(prepared) {
+                    assert.equal(prepared, dlg);
+                    order.push('prepare');
+                },
+            });
+            assert.deepEqual(order, [
+                'construct',
+                `classes:${ND_ROOT_CLASS},nd-popup`,
+                'prepare',
+                'show',
+            ]);
+        } finally {
+            host.dispose();
+            globalThis.document = prevDoc;
+        }
+    });
+
     it('D28 dispose 移除设置抽屉；斜杠同名幂等覆盖', () => {
         const commands = {};
         const ctx = makeFakeContext();

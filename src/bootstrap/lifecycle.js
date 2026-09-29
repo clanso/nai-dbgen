@@ -409,13 +409,13 @@ async function openWorkbenchUi(container) {
         {
             title: '生成工作台',
             element: root,
+            dialogClass: 'nd-workbench-popup',
             wide: true,
             large: true,
             allowVerticalScrolling: true,
         },
     );
     const dialog = root.closest('dialog');
-    dialog?.classList.add('nd-workbench-popup');
     const onClose = () => handle.destroy();
     dialog?.addEventListener('close', onClose, { once: true });
     runtime.workbenchModal = {

@@ -132,6 +132,49 @@ describe('ui/common/modal nd-root (D52)', () => {
         assert.equal(closed, realDlg);
     });
 
+    it('host popup chrome and workbench layout are prepared before first show', async () => {
+        const dlg = document.createElement('dialog');
+        dlg.className = 'popup large_dialogue_popup';
+        const hostClose = document.createElement('button');
+        hostClose.className = 'popup-button-close';
+        hostClose.style.display = 'block';
+        dlg.appendChild(hostClose);
+
+        let firstShow = null;
+        const host = {
+            async openModal(opts) {
+                dlg.appendChild(opts.element);
+                document.body.appendChild(dlg);
+                opts.prepareDialog(dlg);
+                firstShow = {
+                    open: dlg.getAttribute('open') !== null,
+                    title: dlg.getAttribute('aria-label'),
+                    workbenchClass: dlg.classList.contains('nd-workbench-popup'),
+                    customClose: !!dlg.querySelector('.nd-native-dialog__close'),
+                    hostCloseHidden: hostClose.style.display === 'none',
+                };
+                dlg.setAttribute('open', '');
+            },
+        };
+        const content = document.createElement('div');
+        const handle = await openModal({ host }, {
+            title: '生成工作台',
+            element: content,
+            dialogClass: 'nd-workbench-popup',
+            large: true,
+        });
+
+        assert.deepEqual(firstShow, {
+            open: false,
+            title: '生成工作台',
+            workbenchClass: true,
+            customClose: true,
+            hostCloseHidden: true,
+        });
+        assert.equal(handle.destroy instanceof Function, true);
+        dlg.remove();
+    });
+
     it('source has no getElementById call for nai-dbgen-root', () => {
         const src = readFileSync(join(here, '../../src/ui/common/modal.js'), 'utf8');
         // strip block comments then assert
