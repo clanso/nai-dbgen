@@ -34,8 +34,9 @@
     --nd-radius-pill: 999px;
     --nd-h-micro: 28px;
     --nd-h-icon: 32px;
+    /* 同一行的按钮、输入、下拉共用这一档。主按钮只换颜色，不再另起高度。 */
     --nd-h: 36px;
-    --nd-h-primary: 40px;
+    --nd-h-primary: var(--nd-h);
 
     /* 弹层/面板内边距与纵向节奏（管理台 / 工作台 / 浮层共用） */
     --nd-space-panel: 20px;

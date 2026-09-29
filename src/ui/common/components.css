@@ -156,8 +156,6 @@
 }
 
 :is(#nai-dbgen-root, .nd-root) .nd-button--primary {
-    height: var(--nd-h-primary) !important;
-    min-height: var(--nd-h-primary) !important;
     background: var(--nd-accent) !important;
     border-color: var(--nd-accent) !important;
     color: var(--nd-on-accent) !important;
@@ -754,8 +752,8 @@
     display: flex;
     align-items: center;
     gap: 8px;
-    height: 38px !important;
-    min-height: 38px !important;
+    height: var(--nd-h) !important;
+    min-height: var(--nd-h) !important;
     padding: 0 11px;
     border: 1px solid #edd3df;
     border-radius: var(--nd-radius-sm);
@@ -783,21 +781,21 @@
     /* 库卡固定列宽 150–180px，不随容器 1fr 拉伸；~960px 约 5 列 */
     grid-template-columns: repeat(auto-fill, minmax(150px, 180px));
     justify-content: start;
-    align-items: start;
+    align-items: stretch;
     gap: 16px;
 }
 
 /* 无图类型：紧凑文字列表卡，不要 4:5 封面栅格 */
 :is(#nai-dbgen-root, .nd-root) .nd-style-grid--text {
     grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
-    align-items: start;
+    align-items: stretch;
 }
 
 :is(#nai-dbgen-root, .nd-root) .nd-style-card {
     position: relative;
     min-height: 0;
     height: auto;
-    align-self: start;
+    align-self: stretch;
     display: flex;
     flex-direction: column;
     overflow: hidden;
@@ -1022,6 +1020,7 @@
     display: grid;
     grid-template-columns: repeat(2, minmax(0, 1fr));
     gap: 4px;
+    margin-top: auto;
     padding: 8px 12px 12px;
     border-top: 1px solid #f4e1e9;
 }
@@ -1503,7 +1502,7 @@
     width: 100%;
     min-width: 0;
     min-height: 0;
-    height: 100%;
+    height: auto;
     max-height: 100%;
     padding: var(--nd-space-panel);
     box-sizing: border-box;
@@ -1607,6 +1606,40 @@ dialog.nd-native-dialog.nd-root.large_dialogue_popup {
     min-height: 0 !important;
 }
 
+/* 大面板才撑满定高。确认框和普通表单按内容收缩，不吃掉 max-height。 */
+dialog.nd-popup.nd-root.large_dialogue_popup :is(#nai-dbgen-root, .nd-root).nd-modal-root,
+dialog.nd-native-dialog.nd-root.large_dialogue_popup :is(#nai-dbgen-root, .nd-root).nd-modal-root,
+dialog.nd-native-dialog.nd-root.large_dialogue_popup :is(#nai-dbgen-root, .nd-root) .nd-native-dialog__shell,
+dialog.nd-native-dialog.nd-root.large_dialogue_popup :is(#nai-dbgen-root, .nd-root) .nd-native-dialog__card {
+    height: 100%;
+    flex: 1 1 auto;
+}
+
+dialog.nd-popup.nd-root:not(.large_dialogue_popup) .popup-body,
+dialog.nd-popup.nd-root:not(.large_dialogue_popup) .popup-content,
+dialog.nd-popup.nd-root:not(.large_dialogue_popup) .popup-content > .nd-root,
+dialog.nd-native-dialog.nd-root:not(.large_dialogue_popup) .nd-native-dialog__shell,
+dialog.nd-native-dialog.nd-root:not(.large_dialogue_popup) .nd-native-dialog__card {
+    flex: 0 0 auto;
+    height: auto;
+}
+
+/*
+ * 确认框跟内容走。用 table 收缩：flex / max-content 会把中文收成一个字，或把框收成边框。
+ */
+dialog.nd-popup.nd-root:has(.nd-confirm),
+dialog.nd-native-dialog.nd-root:has(.nd-confirm),
+dialog.nd-popup.nd-root.nd-popup--compact,
+dialog.nd-native-dialog.nd-root.nd-popup--compact {
+    display: table !important;
+    width: auto !important;
+    min-width: 0 !important;
+    max-width: min(36em, calc(100vw - 48px)) !important;
+    height: auto !important;
+    min-height: 0 !important;
+    max-height: none !important;
+}
+
 dialog.nd-popup.nd-root::backdrop,
 dialog.nd-native-dialog.nd-root::backdrop {
     background: rgba(52, 24, 38, 0.45);
@@ -1643,6 +1676,52 @@ dialog.nd-popup.nd-root .popup-content > .nd-root {
     min-height: 0;
 }
 
+dialog.nd-popup.nd-root:has(.nd-confirm) .popup-body,
+dialog.nd-popup.nd-root:has(.nd-confirm) .popup-content,
+dialog.nd-native-dialog.nd-root:has(.nd-confirm) .nd-native-dialog__shell,
+dialog.nd-native-dialog.nd-root:has(.nd-confirm) .nd-native-dialog__card {
+    display: contents !important;
+}
+
+dialog.nd-popup.nd-root:has(.nd-confirm) .nd-modal-root,
+dialog.nd-native-dialog.nd-root:has(.nd-confirm) .nd-modal-root {
+    display: table !important;
+    width: auto !important;
+    max-width: min(36em, calc(100vw - 48px)) !important;
+    height: auto !important;
+    min-height: 0 !important;
+    max-height: none !important;
+    overflow: visible !important;
+}
+
+dialog.nd-popup.nd-root:has(.nd-confirm) .nd-popup-scroll,
+dialog.nd-native-dialog.nd-root:has(.nd-confirm) .nd-popup-scroll {
+    display: block !important;
+    flex: none !important;
+    width: auto !important;
+    max-width: none !important;
+    height: auto !important;
+    min-height: 0 !important;
+    max-height: none !important;
+    overflow: visible !important;
+}
+
+dialog.nd-popup.nd-root:has(.nd-confirm) .nd-popup-header,
+dialog.nd-native-dialog.nd-root:has(.nd-confirm) .nd-popup-header {
+    flex: none !important;
+    width: auto !important;
+    min-width: max-content !important;
+    max-width: none !important;
+}
+
+dialog.nd-popup.nd-root:has(.nd-confirm) .nd-modal-title,
+dialog.nd-native-dialog.nd-root:has(.nd-confirm) .nd-modal-title {
+    flex: none !important;
+    width: auto !important;
+    min-width: max-content !important;
+    white-space: nowrap !important;
+}
+
 dialog.nd-popup.nd-root .popup-controls {
     display: none;
 }
@@ -1666,7 +1745,7 @@ dialog.nd-native-dialog.nd-root .nd-root {
     display: flex;
     flex-direction: column;
     width: 100%;
-    height: 100%;
+    height: auto;
     min-height: 0;
     border-radius: 0;
     overflow: hidden;

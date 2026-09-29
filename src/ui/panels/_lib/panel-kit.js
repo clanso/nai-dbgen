@@ -202,7 +202,7 @@ export async function confirmAsk(deps, opts) {
     try {
         modal = await openModal(
             { host },
-            { title, element: body },
+            { title, element: body, dialogClass: 'nd-popup--compact' },
         );
         // D50：关窗立即 settle(false)，不用长超时
         unwatch = watchModalDismiss(body, () => settle(false));

@@ -250,7 +250,12 @@
 :is(#nai-dbgen-root, .nd-root) .nd-confirm {
     display: grid;
     gap: 12px;
-    max-width: 420px;
+    width: max-content;
+    max-width: min(32em, calc(100vw - 88px));
+}
+
+:is(#nai-dbgen-root, .nd-root) .nd-confirm p {
+    margin: 0;
 }
 
 :is(#nai-dbgen-root, .nd-root) .nd-var-features,

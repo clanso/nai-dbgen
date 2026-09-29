@@ -32,6 +32,18 @@ describe('popup scroll chain (management / modal)', () => {
             componentsCss,
             /min-height:\s*fit-content|宿主 `min-height: fit-content`/,
         );
+        assert.match(
+            componentsCss,
+            /dialog\.nd-popup\.nd-root:has\(\.nd-confirm\)[\s\S]*?height:\s*auto\s*!important/,
+        );
+        assert.match(
+            componentsCss,
+            /dialog\.nd-popup\.nd-root:has\(\.nd-confirm\) \.nd-modal-title[\s\S]*?white-space:\s*nowrap\s*!important/,
+        );
+        assert.doesNotMatch(
+            componentsCss,
+            /\.nd-button--primary\s*\{[^}]*height:/s,
+        );
     });
 
     it('management shell: body does not scroll; library scroller does', () => {

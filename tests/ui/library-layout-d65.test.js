@@ -34,6 +34,10 @@ describe('D68 library layout (artist card + radius tokens)', () => {
             /\.nd-style-grid\s*\{[^}]*minmax\(150px,\s*180px\)/s,
         );
         assert.match(css, /\.nd-style-grid\s*\{[^}]*justify-content:\s*start/s);
+        assert.match(css, /\.nd-style-grid\s*\{[^}]*align-items:\s*stretch/s);
+        assert.match(css, /\.nd-style-grid--text\s*\{[^}]*align-items:\s*stretch/s);
+        assert.match(css, /\.nd-style-card\s*\{[^}]*align-self:\s*stretch/s);
+        assert.match(css, /\.nd-style-card__actions\s*\{[^}]*margin-top:\s*auto/s);
         assert.match(css, /\.nd-style-grid\s*\{[^}]*gap:\s*16px/s);
         assert.match(css, /\.nd-style-card\s*\{[^}]*min-height:\s*0/s);
         assert.match(tokens, /--nd-radius-lg:\s*16px/);

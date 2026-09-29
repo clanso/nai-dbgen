@@ -229,11 +229,11 @@ describe('style card chrome regression', () => {
         );
         assert.match(
             componentsCss,
-            /\.nd-style-grid\s*\{[^}]*align-items:\s*start/s,
+            /\.nd-style-grid\s*\{[^}]*align-items:\s*stretch/s,
         );
         assert.match(
             componentsCss,
-            /\.nd-style-grid--text\s*\{[^}]*align-items:\s*start/s,
+            /\.nd-style-grid--text\s*\{[^}]*align-items:\s*stretch/s,
         );
         assert.doesNotMatch(
             componentsCss,
