@@ -293,6 +293,39 @@ describe('session slot repo', () => {
 });
 
 describe('image repo D22 / slot cache', () => {
+    it('覆盖同一 id 后 getUrl 换成新图', async () => {
+        const prevUrl = globalThis.URL;
+        const revoked = [];
+        let n = 0;
+        globalThis.URL = {
+            createObjectURL() {
+                n += 1;
+                return `blob:artist-${n}`;
+            },
+            revokeObjectURL(url) {
+                revoked.push(url);
+            },
+        };
+        try {
+            const db = createMemoryIdb();
+            const images = createImageRepo({ db });
+            const id = 'artist-card:demo';
+            assert.equal((await images.put(new Blob(['old'], { type: 'image/png' }), { id })).ok, true);
+            const first = await images.getUrl(id);
+            assert.equal(first.ok, true);
+            assert.equal(first.value, 'blob:artist-1');
+            assert.equal((await images.put(new Blob(['new-preview'], { type: 'image/png' }), { id })).ok, true);
+            const second = await images.getUrl(id);
+            assert.equal(second.ok, true);
+            assert.equal(second.value, 'blob:artist-2');
+            assert.equal(revoked.includes('blob:artist-1'), true);
+            const again = await images.getUrl(id);
+            assert.equal(again.value, 'blob:artist-2');
+        } finally {
+            globalThis.URL = prevUrl;
+        }
+    });
+
     it('gc([]) and gc(undefined) return Err and keep all blobs', async () => {
         const db = createMemoryIdb();
         const images = createImageRepo({ db });

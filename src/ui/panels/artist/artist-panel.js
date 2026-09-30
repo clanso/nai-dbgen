@@ -251,7 +251,7 @@ export function mountArtistPanel(root, deps) {
                             ...draft,
                             referenceImageRef: result.value?.referenceImageRef ?? draft.referenceImageRef,
                             cardImageRef: result.value?.cardImageRef ?? draft.cardImageRef,
-                            updatedAt: draft.updatedAt,
+                            updatedAt: ids.now(),
                         };
                         const url = await resolveFileUrl(item.cardImageRef, item.updatedAt);
                         if (url) paintSafeCover(coverBox, url, draft.name, { emptyVariant: 'label' });

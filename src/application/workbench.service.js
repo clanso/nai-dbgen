@@ -24,6 +24,7 @@ import { activateCharacters } from '../domain/matching/activation.js';
 import { normalizeTagLibraryKind } from '../domain/model/tag.js';
 import { renderPreset } from '../domain/template/preset-renderer.js';
 import { validateNaiCaption, emptyNaiCaption } from '../domain/model/nai-params.js';
+import { attachReferenceImage } from '../domain/llm/reverse-prompt.js';
 import { parseFlatSingleCaption, parseFlatSlotPlans } from '../domain/model/flat-imagegen.js';
 import { slotCaptionFromLlmItem } from '../domain/model/slot.js';
 import { recordLatestGeneration, recordParseFailure } from './parse-debug-log.js';
@@ -158,7 +159,7 @@ async function writeFloorPrompt(deps, input, traceId) {
         return aborted;
     }
     const llmR = await deps.llm.complete({
-        messages,
+        messages: input?.imageDataUrl ? attachReferenceImage(messages, input.imageDataUrl) : messages,
         config: llmCfgR.value,
         signal: input.signal,
         traceId,
@@ -260,6 +261,7 @@ async function writeFloorPrompt(deps, input, traceId) {
  * @property {number} [messageId] 楼内流程的视点楼；缺省为最新 AI 楼
  * @property {AbortSignal} [signal]
  * @property {string} [traceId]
+ * @property {string} [imageDataUrl] 反推时附上的参考图。没有则只按自然语言写提示词
  */
 
 /**
@@ -280,6 +282,8 @@ async function writeFloorPrompt(deps, input, traceId) {
  * @property {Partial<NaiParams>} [params]
  * @property {AbortSignal} [signal]
  * @property {string} [traceId]
+ * @property {{ image: string, strength?: number, noise?: number }} [img2img]
+ *   仅图生图按钮传入。反推重绘不传。
  */
 
 /**
@@ -302,7 +306,10 @@ export function createWorkbenchService(deps) {
                 return aborted;
             }
 
-            if (input?.mode === 'floor') {
+            const hasReferenceImage = String(input?.imageDataUrl ?? '').startsWith('data:image/');
+            const nlEmpty = !String(input?.naturalLanguage ?? '').trim();
+            // 反推只传图时不走楼内空文案拦截，直接把图交给生图预设。
+            if (input?.mode === 'floor' && !(hasReferenceImage && nlEmpty)) {
                 return writeFloorPrompt(deps, input, traceId);
             }
 
@@ -451,7 +458,7 @@ export function createWorkbenchService(deps) {
             }
 
             const llmR = await deps.llm.complete({
-                messages,
+                messages: input?.imageDataUrl ? attachReferenceImage(messages, input.imageDataUrl) : messages,
                 config: llmCfgR.value,
                 signal: input.signal,
                 traceId,
@@ -512,10 +519,6 @@ export function createWorkbenchService(deps) {
             return Ok(result);
         },
 
-        /**
-         * 用当前工作台提示词出图；replaceCharacterKeywords 必须由调用方显式传入。
-         * @param {WorkbenchGenerateInput} input
-         */
         async generateImage(input) {
             if (!input || typeof input !== 'object') {
                 throw new Error('invalid argument: input');
@@ -525,14 +528,19 @@ export function createWorkbenchService(deps) {
             }
 
             const traceId = input.traceId ?? newId('trace');
-            return deps.imageGen.generate({
+            /** @type {import('./image-gen.service.js').ImageGenRequest} */
+            const request = {
                 caption: input.caption,
                 params: input.params,
                 artist: input.artist,
                 replaceCharacterKeywords: input.replaceCharacterKeywords,
                 signal: input.signal,
                 traceId,
-            });
+            };
+            if (input.img2img) {
+                request.img2img = input.img2img;
+            }
+            return deps.imageGen.generate(request);
         },
     };
 }

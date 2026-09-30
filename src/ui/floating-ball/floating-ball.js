@@ -574,9 +574,11 @@ export function mountFloatingBall(root, deps) {
      * @returns {string|null}
      */
     function resolveCover(item) {
-        const id = item?.id != null ? String(item.id) : '';
-        const cacheKey = id
-            || `${String(item?.cardImageRef ?? '')}::${String(item?.updatedAt ?? '')}`;
+        const cacheKey = [
+            item?.id != null ? String(item.id) : '',
+            item?.cardImageRef != null ? String(item.cardImageRef) : '',
+            item?.updatedAt != null ? String(item.updatedAt) : '',
+        ].join('::');
         if (coverUrlCache.has(cacheKey)) {
             return coverUrlCache.get(cacheKey) ?? null;
         }

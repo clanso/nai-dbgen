@@ -12,6 +12,7 @@ import { Ok, Err } from '../infra/result.js';
 import { configError, domainError } from '../infra/errors.js';
 import { createNaiRequestPool, selectNaiPoolConfigs } from './nai-request-pool.js';
 import { assembleNaiPayload } from '../domain/nai/payload-assembler.js';
+import { applyImg2Img } from '../domain/nai/img2img.js';
 import { mergeNaiParamsForGenerate } from '../domain/nai/param-options.js';
 import {
     abortErrIfNeeded,
@@ -42,6 +43,8 @@ import {
  * @property {AbortSignal} [signal]
  * @property {() => boolean} [shouldStart] Recheck chat ownership when a queued request gets a key.
  * @property {string} [traceId] 出图链路 trace；缺省由服务生成
+ * @property {{ image: string, strength?: number, noise?: number }} [img2img]
+ *   有此字段才走 NovelAI 图生图。不调用语言模型，也不读取反推结果。
  */
 
 /**
@@ -170,7 +173,7 @@ export function createImageGenService(deps) {
                 return attachTraceId(mergedR, traceId);
             }
 
-            const payload = assembleNaiPayload({
+            let payload = assembleNaiPayload({
                 caption: req.caption,
                 params: mergedR.value.params,
                 paramOverrides: mergedR.value.extras,
@@ -180,6 +183,13 @@ export function createImageGenService(deps) {
                 characters,
                 matchGlobals: settings.matchDefaults,
             });
+            if (req.img2img) {
+                const imgR = applyImg2Img(payload, req.img2img);
+                if (!imgR.ok) {
+                    return attachTraceId(imgR, traceId);
+                }
+                payload = imgR.value;
+            }
 
             const aborted2 = abortErrIfNeeded(req.signal, traceId);
             if (aborted2) {

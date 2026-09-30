@@ -14,7 +14,8 @@ import { requireArg } from '../infra/validate.js';
 /**
  * @typedef {object} ChatMessage
  * @property {'system'|'user'|'assistant'} role
- * @property {string} content
+ * @property {string|Array<{ type: string, text?: string, image_url?: { url: string } }>} content
+ *   纯文本，或 OpenAI 多模态数组。酒馆 custom 来源会原样转发 messages。
  */
 
 /**

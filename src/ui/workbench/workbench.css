@@ -33,6 +33,72 @@
     column-gap: 0.75em;
 }
 
+:is(#nai-dbgen-root, .nd-root) .nd-wb-source {
+    display: flex;
+    flex-direction: column;
+    align-items: stretch;
+    gap: 0.65em;
+    min-width: 0;
+}
+
+:is(#nai-dbgen-root, .nd-root) .nd-wb-source__pick {
+    width: 100%;
+    min-height: 320px;
+    margin: 0;
+    padding: 0;
+    border: 1px dashed var(--nd-line-strong);
+    border-radius: var(--nd-radius-md);
+    background: var(--nd-surface-2);
+    color: var(--nd-muted);
+    overflow: hidden;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+:is(#nai-dbgen-root, .nd-root) .nd-wb-source__pick img {
+    width: 100%;
+    height: 320px;
+    object-fit: contain;
+    background: var(--nd-surface-2);
+}
+
+:is(#nai-dbgen-root, .nd-root) .nd-wb-source__pick img[hidden],
+:is(#nai-dbgen-root, .nd-root) .nd-wb-source__empty[hidden] {
+    display: none !important;
+}
+
+:is(#nai-dbgen-root, .nd-root) .nd-wb-source__empty {
+    font-size: var(--nd-fs-base);
+    line-height: 1.4;
+    white-space: nowrap;
+}
+
+:is(#nai-dbgen-root, .nd-root) .nd-wb-source__actions {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: flex-end;
+    justify-content: center;
+    gap: 0.5em;
+    min-width: 0;
+}
+
+:is(#nai-dbgen-root, .nd-root) .nd-wb-source__actions > .nd-button {
+    margin: 0;
+}
+
+:is(#nai-dbgen-root, .nd-root) .nd-wb-redraw__field {
+    display: grid;
+    gap: 0.2em;
+    min-width: 6.5em;
+}
+
+:is(#nai-dbgen-root, .nd-root) .nd-wb-redraw__field .nd-input {
+    width: 6.5em;
+    height: var(--nd-h);
+}
+
 :is(#nai-dbgen-root, .nd-root) .nd-wb-artist {
     display: grid;
     gap: 0.35em;

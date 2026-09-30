@@ -59,7 +59,7 @@ export function createImageRepo(deps) {
         throw new Error('createImageRepo requires deps.db');
     }
 
-    /** @type {Map<string, string>} imageRef → objectURL */
+    /** @type {Map<string, { url: string, stamp: string }>} imageRef → 当前 blob 的 objectURL */
     const urlCache = new Map();
 
     /**
@@ -76,7 +76,8 @@ export function createImageRepo(deps) {
      * @param {string} ref
      */
     function revokeCached(ref) {
-        const url = urlCache.get(ref);
+        const cached = urlCache.get(ref);
+        const url = cached?.url;
         if (url && typeof URL !== 'undefined' && typeof URL.revokeObjectURL === 'function') {
             try {
                 URL.revokeObjectURL(url);
@@ -108,6 +109,8 @@ export function createImageRepo(deps) {
                     createdAt: nowIso(),
                     pinned: opts?.pinned === true,
                 };
+                // 画师串预览按名称覆盖同一 id。旧 objectURL 还指着上一张图。
+                if (stableId) revokeCached(stableId);
                 await db.put(
                     stableId ? IDB_STORES.ARTIST_IMAGES : IDB_STORES.IMAGES,
                     record,
@@ -146,19 +149,23 @@ export function createImageRepo(deps) {
             }
             const key = String(ref);
             return catchToResult(async () => {
-                if (urlCache.has(key)) {
-                    return urlCache.get(key) || null;
-                }
                 const row = await db.get(IDB_STORES.IMAGES, key)
                     || await db.get(IDB_STORES.ARTIST_IMAGES, key);
                 if (!row || !row.blob) {
+                    revokeCached(key);
                     return null;
                 }
+                const stamp = row.createdAt != null ? String(row.createdAt) : '';
+                const cached = urlCache.get(key);
+                if (cached && cached.stamp === stamp) {
+                    return cached.url;
+                }
+                revokeCached(key);
                 if (typeof URL === 'undefined' || typeof URL.createObjectURL !== 'function') {
                     return null;
                 }
                 const url = URL.createObjectURL(row.blob);
-                urlCache.set(key, url);
+                urlCache.set(key, { url, stamp });
                 return url;
             }, mapErr, Ok, Err);
         },

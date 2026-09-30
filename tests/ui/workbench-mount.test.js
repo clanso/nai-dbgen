@@ -366,6 +366,23 @@ describe('ui/workbench mountWorkbench', () => {
         ctx.handle.destroy();
     });
 
+    it('反推重绘和图生图分成两个按钮', () => {
+        const ctx = mount();
+        const reverse = findButton(ctx.root, '反推重绘');
+        const img2img = findButton(ctx.root, '图生图');
+        const gen = findButton(ctx.root, '出图');
+        assert.ok(reverse);
+        assert.ok(img2img);
+        assert.notEqual(reverse, img2img);
+        assert.notEqual(reverse.parentNode, gen.parentNode);
+        assert.match(reverse.title, /没有也可以/);
+        assert.match(reverse.title, /不自动出图/);
+        assert.equal(reverse.closest('.nd-wb-column--right'), null);
+        assert.ok(reverse.closest('.nd-wb-source'));
+        assert.match(img2img.title, /不先反推/);
+        ctx.handle.destroy();
+    });
+
     it('出图只调 generateImage；replaceCharacterKeywords 来自开关', async () => {
         const ctx = mount();
         await clickButton(ctx.root, '出图');

@@ -89,6 +89,7 @@ export const ARTIST_PREVIEW_SIZE = Object.freeze({
  * @property {string} negative_prompt
  * @property {object} parameters 含 v4_prompt / v4_negative_prompt 与采样字段
  * @property {string} [model]
+ * @property {'generate'|'img2img'} [action] 缺省文生图。图生图由 applyImg2Img 写入
  * @property {Record<string, unknown>} [extra] 调用方多传的 NAI 原生字段
  */
 

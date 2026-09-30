@@ -286,9 +286,11 @@ export function assembleWorkbenchNaiParams(base, form) {
  * @param {'entries'|'floor'} [opts.mode] entries=勾选条目；floor=楼内召回后交给生图预设
  * @param {AbortSignal} [opts.signal]
  * @param {string} [opts.traceId]
+ * @param {string} [opts.imageDataUrl] 反推参考图。不传则只写自然语言
  */
 export function buildWritePromptInput(opts) {
-    return {
+    /** @type {Record<string, unknown>} */
+    const input = {
         naturalLanguage: String(opts?.naturalLanguage ?? ''),
         libraryIds: Array.isArray(opts?.libraryIds)
             ? opts.libraryIds.map((id) => String(id))
@@ -300,6 +302,11 @@ export function buildWritePromptInput(opts) {
         signal: opts?.signal,
         traceId: opts?.traceId,
     };
+    const imageDataUrl = String(opts?.imageDataUrl ?? '');
+    if (imageDataUrl.startsWith('data:image/')) {
+        input.imageDataUrl = imageDataUrl;
+    }
+    return input;
 }
 
 /**
@@ -316,12 +323,14 @@ export function buildWritePromptInput(opts) {
  * @param {import('../../domain/model/artist.js').ArtistString|null|undefined} [opts.artist]
  * @param {AbortSignal} [opts.signal]
  * @param {string} [opts.traceId]
+ * @param {{ image: string, strength?: number, noise?: number }} [opts.img2img]
  */
 export function buildGenerateImageInput(opts) {
     if (typeof opts?.replaceCharacterKeywords !== 'boolean') {
         throw new Error('replaceCharacterKeywords must be a boolean from the UI toggle');
     }
-    return {
+    /** @type {Record<string, unknown>} */
+    const input = {
         caption: cloneCaption(opts.caption),
         artist: opts?.artist,
         replaceCharacterKeywords: opts.replaceCharacterKeywords,
@@ -329,6 +338,10 @@ export function buildGenerateImageInput(opts) {
         signal: opts?.signal,
         traceId: opts?.traceId,
     };
+    if (opts?.img2img) {
+        input.img2img = opts.img2img;
+    }
+    return input;
 }
 
 /**

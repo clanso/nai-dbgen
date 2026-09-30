@@ -16,6 +16,40 @@ const BASE_BACKOFF_MS = 2000;
 const MAX_BACKOFF_MS = 60000;
 
 /**
+ * @param {unknown} body
+ * @returns {string}
+ */
+function readUpstreamNote(body) {
+    let bytes = null;
+    if (body instanceof ArrayBuffer) {
+        bytes = new Uint8Array(body);
+    } else if (ArrayBuffer.isView(body)) {
+        bytes = new Uint8Array(body.buffer, body.byteOffset, body.byteLength);
+    }
+    if (!bytes || bytes.length === 0) return '';
+    if (bytes.length >= 2 && bytes[0] === 0x50 && bytes[1] === 0x4b) return '';
+    let text = '';
+    try {
+        text = new TextDecoder('utf-8', { fatal: false }).decode(bytes);
+    } catch {
+        return '';
+    }
+    text = text.replace(/\s+/g, ' ').trim();
+    if (!text || /[\u0000-\u0008]/.test(text)) return '';
+    let note = text;
+    try {
+        const json = JSON.parse(text);
+        const msg = json?.message ?? json?.error ?? json?.detail;
+        if (typeof msg === 'string') note = msg;
+    } catch {
+        /* 纯文本 */
+    }
+    note = String(note).replace(/\s+/g, ' ').trim();
+    if (!note) return '';
+    return note.length > 160 ? `${note.slice(0, 160)}…` : note;
+}
+
+/**
  * @typedef {import('../../ports/image-gen.port.js').NaiGatewayDeps} NaiGatewayDeps
  */
 
@@ -117,9 +151,11 @@ export function createNaiGateway(deps) {
                 }
 
                 const retryAfterSec = parseRetryAfterSec(response.headers);
+                const upstreamNote = status === 400 ? readUpstreamNote(response.body) : '';
                 const upstreamErr = upstreamFromHttpStatus(status, {
                     traceId,
                     cause: null,
+                    message: upstreamNote ? `请求不被上游接受（HTTP 400）：${upstreamNote}` : undefined,
                     context: {
                         transport: transportName,
                         ...(retryAfterSec != null ? { retryAfterSec } : {}),
@@ -311,7 +347,7 @@ function toWirePayload(req) {
     const wire = {
         input: req.input,
         model: req.model,
-        action: 'generate',
+        action: req.action === 'img2img' ? 'img2img' : 'generate',
         parameters,
     };
     // 顶层 negative_prompt 仅作领域镜像；上游以 parameters.negative_prompt 为准

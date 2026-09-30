@@ -30,6 +30,7 @@ import {
 } from '../common/prompt-text.js';
 import { openSlotImageViewer } from '../common/image-viewer.js';
 import { emptyNaiCaption } from '../../domain/model/nai-params.js';
+import { defaultImg2ImgNoise, defaultImg2ImgStrength } from '../../domain/nai/img2img.js';
 import { normalizeTagLibraryKind } from '../../domain/model/tag.js';
 import { parseCompositionKey } from '../../domain/model/composition-key.js';
 import { mountCaptionEditor } from './caption-editor.js';
@@ -107,6 +108,134 @@ function toast(host, level, message) {
     if (host && typeof host.toast === 'function') {
         host.toast(level, message);
     }
+}
+
+const REDRAW_IMAGE_BYTES = 8 * 1024 * 1024;
+
+/**
+ * @param {string} labelText
+ * @param {number} value
+ * @param {number} min
+ * @param {number} max
+ */
+function redrawNumberField(labelText, value, min, max) {
+    const field = el('label', 'nd-wb-redraw__field');
+    const label = el('span', 'nd-field__label');
+    setText(label, labelText);
+    const input = document.createElement('input');
+    input.type = 'number';
+    input.className = 'nd-input';
+    input.min = String(min);
+    input.max = String(max);
+    input.step = '0.05';
+    input.value = String(value);
+    field.append(label, input);
+    return { el: field, input };
+}
+
+/**
+ * @param {object} host
+ * @returns {Promise<string|null>}
+ */
+async function readRedrawImage(host) {
+    const file = await pickRedrawImage();
+    if (!file) return null;
+    if (file.size > REDRAW_IMAGE_BYTES) {
+        toast(host, 'warning', '图片超过 8MB，请换一张小一点的');
+        return null;
+    }
+    if (file.type && !file.type.startsWith('image/')) {
+        toast(host, 'warning', '请选择图片文件');
+        return null;
+    }
+    try {
+        const dataUrl = await readFileDataUrl(file);
+        if (!dataUrl.startsWith('data:image/')) {
+            toast(host, 'warning', '这张图读不出来');
+            return null;
+        }
+        return dataUrl;
+    } catch {
+        toast(host, 'error', '读取图片失败');
+        return null;
+    }
+}
+
+/**
+ * @returns {Promise<File|null>}
+ */
+function pickRedrawImage() {
+    return new Promise((resolve) => {
+        const input = document.createElement('input');
+        input.type = 'file';
+        input.accept = 'image/png,image/jpeg,image/webp,image/gif';
+        let settled = false;
+        const finish = (file) => {
+            if (settled) return;
+            settled = true;
+            resolve(file);
+        };
+        input.addEventListener('change', () => {
+            finish(input.files && input.files[0] ? input.files[0] : null);
+        });
+        input.addEventListener('cancel', () => finish(null));
+        input.click();
+    });
+}
+
+/**
+ * @param {Blob} file
+ * @returns {Promise<string>}
+ */
+/**
+ * 图生图的图必须和本次宽高一样大，原比例放进画布，空处铺白，输出 PNG。
+ * @param {string} dataUrl
+ * @param {number} width
+ * @param {number} height
+ * @returns {Promise<string>}
+ */
+function fitImg2ImgCanvas(dataUrl, width, height) {
+    const w = Math.max(64, Math.round(Number(width) / 64) * 64);
+    const h = Math.max(64, Math.round(Number(height) / 64) * 64);
+    return new Promise((resolve, reject) => {
+        const image = new Image();
+        image.onload = () => {
+            const canvas = document.createElement('canvas');
+            canvas.width = w;
+            canvas.height = h;
+            const ctx = canvas.getContext('2d', { alpha: false });
+            if (!ctx) {
+                reject(new Error('canvas'));
+                return;
+            }
+            ctx.fillStyle = '#ffffff';
+            ctx.fillRect(0, 0, w, h);
+            const naturalWidth = image.naturalWidth || image.width;
+            const naturalHeight = image.naturalHeight || image.height;
+            const ratio = Math.min(w / naturalWidth, h / naturalHeight);
+            const drawWidth = naturalWidth * ratio;
+            const drawHeight = naturalHeight * ratio;
+            ctx.drawImage(
+                image,
+                (w - drawWidth) / 2,
+                (h - drawHeight) / 2,
+                drawWidth,
+                drawHeight,
+            );
+            resolve(canvas.toDataURL('image/png'));
+        };
+        image.onerror = () => reject(new Error('image'));
+        image.src = dataUrl;
+    });
+}
+
+function readFileDataUrl(file) {
+    return new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(String(reader.result || ''));
+        reader.onerror = () => reject(reader.error || new Error('read failed'));
+        reader.readAsDataURL(file);
+    });
 }
 
 /**
@@ -1241,6 +1370,20 @@ export function mountWorkbench(root, deps) {
             persistWorkbenchDraft();
         },
     });
+    const reverseBtn = createButton({
+        label: '反推重绘',
+        variant: 'ghost',
+        onClick: () => { void onReverseRedraw(); },
+    });
+    reverseBtn.title = '用这张图写成下面的生图提示词。自然语言有就一起用，没有也可以。不自动出图。';
+    const img2imgBtn = createButton({
+        label: '图生图',
+        variant: 'ghost',
+        onClick: () => { void onImg2Img(); },
+    });
+    img2imgBtn.title = '把这张图和当前提示词交给 NovelAI 图生图。不先反推。';
+    const strengthField = redrawNumberField('重绘强度', defaultImg2ImgStrength(sessionParams.model), 0.01, 0.99);
+    const noiseField = redrawNumberField('噪声', defaultImg2ImgNoise(sessionParams.model), 0, 1);
 
     function setUnmatched(keys) {
         const text = formatUnmatchedKeys(keys);
@@ -1339,6 +1482,7 @@ export function mountWorkbench(root, deps) {
     function setWritingUi(on) {
         writing = on;
         writeBtn.disabled = on;
+        reverseBtn.disabled = on || generating;
         writeCancelBtn.disabled = !on;
         if (on) {
             statusPill.setStatus('online');
@@ -1353,6 +1497,8 @@ export function mountWorkbench(root, deps) {
         generating = on;
         // 进行中禁按钮，防重复计费
         genBtn.disabled = !canSubmitGenerate(on);
+        reverseBtn.disabled = !canSubmitGenerate(on);
+        img2imgBtn.disabled = !canSubmitGenerate(on);
         genCancelBtn.disabled = !on;
         if (on) {
             statusPill.setStatus('online');
@@ -1363,12 +1509,19 @@ export function mountWorkbench(root, deps) {
         }
     }
 
-    async function onWritePrompt() {
+    /**
+     * @param {string} [imageDataUrl] 反推参考图。不传则只按自然语言写提示词
+     */
+    async function onWritePrompt(imageDataUrl) {
         if (writing) return;
+        const reversing = typeof imageDataUrl === 'string' && imageDataUrl.startsWith('data:image/');
         writeErr.clear();
         setUnmatched([]);
         writeAbort = typeof AbortController !== 'undefined' ? new AbortController() : null;
         setWritingUi(true);
+        if (reversing) {
+            statusPill.setLabel('正在反推…');
+        }
         try {
             const entryIds = [];
             const libraryIds = [];
@@ -1383,6 +1536,7 @@ export function mountWorkbench(root, deps) {
                 libraryIds,
                 entryIds,
                 mode: floorToggle.getValue() ? 'floor' : 'entries',
+                imageDataUrl: reversing ? imageDataUrl : undefined,
                 signal: writeAbort?.signal,
             });
             // 只走 writePrompt；createDecoupledWorkbenchApi 保证不碰 generateImage
@@ -1395,7 +1549,7 @@ export function mountWorkbench(root, deps) {
                 const msg = workbenchErrorMessage(result);
                 writeErr.setMessage(msg);
                 statusPill.setStatus('error');
-                statusPill.setLabel('写提示词失败');
+                statusPill.setLabel(reversing ? '反推失败' : '写提示词失败');
                 toast(host, 'error', msg);
                 return;
             }
@@ -1414,7 +1568,7 @@ export function mountWorkbench(root, deps) {
             if (Array.isArray(result.value.unmatchedKeys) && result.value.unmatchedKeys.length > 0) {
                 toast(host, 'warning', formatUnmatchedKeys(result.value.unmatchedKeys));
             } else {
-                toast(host, 'success', '提示词已填入工作台');
+                toast(host, 'success', reversing ? '生图提示词已填入，可以出图' : '提示词已填入工作台');
             }
             persistWorkbenchDraft();
         } catch (err) {
@@ -1428,12 +1582,18 @@ export function mountWorkbench(root, deps) {
         }
     }
 
-    async function onGenerateImage() {
+    /**
+     * @param {{ img2img?: { image: string, strength?: number, noise?: number }, statusLabel?: string }} [redraw]
+     */
+    async function onGenerateImage(redraw) {
         // 重复提交门禁：进行中直接忽略
         if (!canSubmitGenerate(generating)) return;
         genErr.clear();
         genAbort = typeof AbortController !== 'undefined' ? new AbortController() : null;
         setGeneratingUi(true);
+        if (redraw?.statusLabel) {
+            statusPill.setLabel(redraw.statusLabel);
+        }
         try {
             await restoreReady;
             await waitForArtistSelection();
@@ -1465,6 +1625,7 @@ export function mountWorkbench(root, deps) {
                 artist,
                 replaceCharacterKeywords: replaceToggle.getValue(),
                 params: readParams(),
+                img2img: redraw?.img2img,
                 signal: genAbort?.signal,
             });
             // 只走 generateImage；不经 LLM / writePrompt
@@ -1494,6 +1655,63 @@ export function mountWorkbench(root, deps) {
             genAbort = null;
             setGeneratingUi(false);
         }
+    }
+
+    /** @type {string} */
+    let sourceDataUrl = '';
+
+    const sourcePick = /** @type {HTMLButtonElement} */ (el('button', 'nd-wb-source__pick'));
+    sourcePick.type = 'button';
+    const sourceImg = document.createElement('img');
+    sourceImg.alt = '';
+    sourceImg.hidden = true;
+    const sourceEmpty = el('span', 'nd-wb-source__empty');
+    setText(sourceEmpty, '上传图片');
+    sourcePick.append(sourceEmpty, sourceImg);
+    sourcePick.addEventListener('click', () => { void pickSourceImage(); });
+
+    async function pickSourceImage() {
+        const dataUrl = await readRedrawImage(host);
+        if (!dataUrl) return;
+        sourceDataUrl = dataUrl;
+        sourceImg.src = dataUrl;
+        sourceImg.hidden = false;
+        sourceEmpty.hidden = true;
+    }
+
+    function requireSourceImage() {
+        if (sourceDataUrl) return sourceDataUrl;
+        toast(host, 'warning', '请先上传图片');
+        return '';
+    }
+
+    async function onReverseRedraw() {
+        if (writing || !canSubmitGenerate(generating)) return;
+        const dataUrl = requireSourceImage();
+        if (!dataUrl) return;
+        await onWritePrompt(dataUrl);
+    }
+
+    async function onImg2Img() {
+        if (!canSubmitGenerate(generating)) return;
+        const dataUrl = requireSourceImage();
+        if (!dataUrl) return;
+        const size = readParams();
+        let fitted = dataUrl;
+        try {
+            fitted = await fitImg2ImgCanvas(dataUrl, size.width, size.height);
+        } catch {
+            toast(host, 'error', '这张图没法按出图尺寸排好');
+            return;
+        }
+        await onGenerateImage({
+            statusLabel: '正在图生图…',
+            img2img: {
+                image: fitted,
+                strength: Number(strengthField.input.value),
+                noise: Number(noiseField.input.value),
+            },
+        });
     }
 
     async function openArtistSaveModal(mode) {
@@ -1643,6 +1861,10 @@ export function mountWorkbench(root, deps) {
 
     const genActions = el('div', 'nd-wb-actions nd-wb-actions--generate');
     genActions.append(genBtn, downloadActions, genCancelBtn, clearBtn);
+    const sourceBar = el('div', 'nd-wb-source');
+    const sourceActions = el('div', 'nd-wb-source__actions');
+    sourceActions.append(reverseBtn, img2imgBtn, strengthField.el, noiseField.el);
+    sourceBar.append(sourcePick, sourceActions);
 
     /** @type {ReturnType<typeof mountCurrentPicker>|null} */
     let artistPicker = null;
@@ -1731,7 +1953,7 @@ export function mountWorkbench(root, deps) {
     const middleColumn = el('div', 'nd-wb-column nd-wb-column--middle');
     const rightColumn = el('div', 'nd-wb-column nd-wb-column--right');
     leftColumn.append(paramsDetails.el, writeSection.el);
-    middleColumn.append(artistSlot, captionSection.el, market);
+    middleColumn.append(artistSlot, sourceBar, captionSection.el, market);
     rightColumn.append(genSection.el);
     shell.append(leftColumn, middleColumn, rightColumn);
     root.appendChild(shell);
