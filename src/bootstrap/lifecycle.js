@@ -26,13 +26,13 @@ import { openPanelShell } from '../ui/panels/shell.js';
 import { mountWorkbench } from '../ui/workbench/workbench.js';
 import { mountSlotWidget } from '../ui/slot-widget/slot-widget.js';
 import { openModal } from '../ui/common/modal.js';
-import { openSlotEditor, bindSlotEditorGesture, removeDeletedSlotElements } from '../ui/slot-editor/slot-editor.js';
+import { removeDeletedSlotElements } from '../ui/slot-editor/slot-editor.js';
 import { installQuickReplyEntry } from './quick-reply-entry.js';
 
 const log = createLogger('bootstrap/lifecycle');
 
 /** @type {string} */
-export const PLUGIN_VERSION = '0.2.38';
+export const PLUGIN_VERSION = '0.2.40';
 
 /** @type {string} */
 export const PUBLIC_API_NAME = 'NaiDbGen';
@@ -255,9 +255,9 @@ function exposePublicApi(container) {
             return c.services.imageGen.generate(req);
         },
         /**
-         * 对外单图提示词：当前楼的召回预设和生图预设。用户输入只替换 {{用户描述}}。
-         * 算工作台调用：工作台专用段会带上。只返回 caption，不出图、不写 slot。
-         * @param {{ description: string, messageId?: number, signal?: AbortSignal }} req
+         * 对外写提示词：当前楼的召回预设和生图预设。用户输入只替换 {{用户描述}}。
+         * 算工作台调用：工作台专用段会带上。模型回了多份就全部放在 captions 里，caption 仍是第一份。召回到的生成点按 slotId 写在 captions[].anchorSentence 上，没有则不带。不出图、不写 slot。
+         * @param {{ description: string, messageId?: number, signal?: AbortSignal, skipRecall?: boolean }} req
          */
         async generateSinglePrompt(req) {
             const c = liveContainer();
@@ -271,6 +271,7 @@ function exposePublicApi(container) {
                 mode: 'floor',
                 includeWorkbenchOnly: true,
                 naturalLanguage: req.description,
+                ...(req.skipRecall === true && { skipRecall: true }),
                 messageId: req.messageId,
                 signal: req.signal,
             });
@@ -1354,22 +1355,6 @@ export async function activate(opts = {}) {
                 }
             }
         });
-        let editor = null;
-        let openingEditor = false;
-        let editorDisposed = false;
-        const offEditorGesture = bindSlotEditorGesture(document, async (messageId) => {
-            if (openingEditor || editorDisposed) return;
-            openingEditor = true;
-            try {
-                editor?.destroy();
-                editor = await openSlotEditor({ service: container.services.slotEditor, host: container.host }, messageId);
-                if (editorDisposed) editor?.destroy();
-            } catch (error) {
-                safeToast(container.host, 'error', error.message || '无法打开提示词编辑器');
-            } finally {
-                openingEditor = false;
-            }
-        });
         const offEdited = container.bus.on(APP_EVENTS.SLOTS_EDITED, (payload) => {
             if (payload.chatId !== container.host.getCurrentChatId()) return;
             const prefix = `${payload.messageId}::`;
@@ -1385,10 +1370,7 @@ export async function activate(opts = {}) {
             container.host.rerenderMessage?.(payload.messageId);
         });
         runtime.editorCleanup = () => {
-            editorDisposed = true;
-            offEditorGesture();
             offEdited();
-            editor?.destroy();
         };
         rollback.push(() => {
             try {

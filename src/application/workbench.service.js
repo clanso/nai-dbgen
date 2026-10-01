@@ -4,7 +4,7 @@
  *
  * 裁决 D13：工作台提示词为结构化 NaiCaption（base_caption + char_captions）。
  * 勾选条目：不跑召回，只把勾中条目交给生图预设。
- * 楼内流程：用户输入只通过 {{用户描述}} 进入召回预设和生图预设，再只要一张图回填工作台。
+ * 楼内流程：用户输入只通过 {{用户描述}} 进入召回预设和生图预设。模型回了多份就全部留下，工作台编辑框仍显示第一份。
  * 这是工作台调用，预设里勾了「工作台专用」的段会带上。悬浮球双击楼内生图不走这里。
  * 只传 libraryIds、不传 entryIds 时仍按整库已启用条目注入（旧调用）。
  */
@@ -57,7 +57,8 @@ async function writeFloorPrompt(deps, input, traceId) {
             traceId,
         }));
     }
-    if (!deps.viewpointBlocks || !deps.host || typeof deps.tagRecall?.recall !== 'function') {
+    const skipRecall = input?.skipRecall === true;
+    if (!deps.viewpointBlocks || !deps.host || (!skipRecall && typeof deps.tagRecall?.recall !== 'function')) {
         return Err(configError({
             code: 'WORKBENCH_FLOOR_UNAVAILABLE',
             message: '楼内流程未接上',
@@ -76,18 +77,26 @@ async function writeFloorPrompt(deps, input, traceId) {
     }
     const mes = deps.host.getMessage(vpR.value.messageId);
     const targetFloorText = String(mes?.text ?? '');
-    const tagR = await deps.tagRecall.recall({
-        contextText: vpR.value.contextText,
-        targetFloorText,
-        traceId,
-        signal: input.signal,
-        userDesc: nl,
-        omitWorkbenchOnly: false,
-    });
-    if (!tagR.ok) {
-        return attachTraceId(tagR, traceId);
+    /** @type {import('../domain/blocks/composition.block.js').CompositionPosition[]} */
+    let positions = [];
+    /** @type {string[]} */
+    let unmatchedKeys = [];
+    if (!skipRecall) {
+        const tagR = await deps.tagRecall.recall({
+            contextText: vpR.value.contextText,
+            targetFloorText,
+            traceId,
+            signal: input.signal,
+            userDesc: nl,
+            omitWorkbenchOnly: false,
+        });
+        if (!tagR.ok) {
+            return attachTraceId(tagR, traceId);
+        }
+        positions = tagR.value.positions ?? [];
+        unmatchedKeys = tagR.value.unmatchedKeys ?? [];
     }
-    const one = tagR.value.positions[0];
+    const positionIds = new Set(positions.map((pos) => Number(pos && pos.slotId)));
     let recentSlotsText = '';
     if (deps.slotRepo && typeof deps.slotRepo.listRetained === 'function') {
         const retainedR = await deps.slotRepo.listRetained();
@@ -95,7 +104,7 @@ async function writeFloorPrompt(deps, input, traceId) {
             return attachTraceId(retainedR, traceId);
         }
         recentSlotsText = formatRecentSlotsBlock(
-            retainedR.value.filter((row) => row && Number(row.slotId) !== Number(one.slotId)),
+            retainedR.value.filter((row) => row && !positionIds.has(Number(row.slotId))),
         );
     }
 
@@ -103,7 +112,7 @@ async function writeFloorPrompt(deps, input, traceId) {
     blocks = setBlock(blocks, VARIABLE_NAMES.WORLDINFO, vpR.value.worldInfoText);
     blocks = setBlock(blocks, VARIABLE_NAMES.CONTEXT, vpR.value.contextText);
     blocks = setBlock(blocks, VARIABLE_NAMES.CHARACTER, vpR.value.characterText);
-    blocks = setBlock(blocks, VARIABLE_NAMES.COMPOSITION, formatCompositionBlock([one]));
+    blocks = setBlock(blocks, VARIABLE_NAMES.COMPOSITION, formatCompositionBlock(positions));
     blocks = setBlock(blocks, VARIABLE_NAMES.FEATURE, vpR.value.featureText);
     blocks = setBlock(blocks, VARIABLE_NAMES.CONSTANT, vpR.value.constantText);
     blocks = setBlock(blocks, VARIABLE_NAMES.RECENT_SLOTS, recentSlotsText);
@@ -179,43 +188,90 @@ async function writeFloorPrompt(deps, input, traceId) {
     const imagegenRawText = llmR.value.text;
     const plans = parseFlatSlotPlans(imagegenRawText);
     const jsonItems = plans.length > 0 ? plans : extractSlotPlanItems(llmR.value.json);
-    const firstPlan = jsonItems.length > 0 ? slotCaptionFromLlmItem(jsonItems[0]) : null;
-    const flat = firstPlan?.ok
-        ? { caption: firstPlan.value.caption, size: firstPlan.value.size, analysis: firstPlan.value.analysis }
-        : parseFlatSingleCaption(imagegenRawText);
-    const fromWrapped = extractSingleCaption(llmR.value.json);
-    const captionCandidate = flat?.caption ?? (fromWrapped != null ? fromWrapped : llmR.value.json);
-    const capR = validateNaiCaption(captionCandidate ?? emptyNaiCaption());
-    if (!capR.ok) {
-        recordParseFailure({
-            stage: '生图',
-            code: 'WORKBENCH_CAPTION_INVALID',
-            message: '工作台提示词生成结果格式无效',
-            rawText: imagegenRawText,
-        });
-        return Err(contractError({
-            code: 'WORKBENCH_CAPTION_INVALID',
-            message: '工作台提示词生成结果格式无效',
-            hint: '请检查模型是否按生图提示词结构输出',
-            traceId,
-            cause: capR.error,
-            context: { rawText: imagegenRawText, json: llmR.value.json },
-        }));
+    const anchorBySlot = new Map();
+    for (const pos of positions) {
+        const anchor = String(pos && pos.anchorSentence || '').trim();
+        const slotId = Number(pos && pos.slotId);
+        if (anchor && Number.isInteger(slotId)) anchorBySlot.set(slotId, anchor);
     }
+    /** @type {Array<{ slotId: number, caption: import('../domain/model/nai-params.js').NaiCaption, anchorSentence?: string, width?: number, height?: number, analysis?: string }>} */
+    const captions = [];
+    const withAnchor = (entry) => {
+        const anchor = anchorBySlot.get(entry.slotId);
+        if (anchor) entry.anchorSentence = anchor;
+        return entry;
+    };
+    if (jsonItems.length > 0) {
+        for (const item of jsonItems) {
+            const parsed = slotCaptionFromLlmItem(item);
+            if (!parsed.ok) {
+                recordParseFailure({
+                    stage: '生图',
+                    code: parsed.error?.code,
+                    message: parsed.error?.message,
+                    rawText: imagegenRawText,
+                });
+                return attachTraceId(parsed, traceId);
+            }
+            /** @type {{ slotId: number, caption: import('../domain/model/nai-params.js').NaiCaption, anchorSentence?: string, width?: number, height?: number, analysis?: string }} */
+            const entry = withAnchor({ slotId: parsed.value.slotId, caption: parsed.value.caption });
+            if (parsed.value.size) {
+                const sizeR = parseSizeSpec(parsed.value.size);
+                if (sizeR.ok) {
+                    entry.width = sizeR.value.width;
+                    entry.height = sizeR.value.height;
+                }
+            }
+            if (parsed.value.analysis) {
+                entry.analysis = parsed.value.analysis;
+            }
+            captions.push(entry);
+        }
+    }
+    if (captions.length === 0) {
+        const flat = parseFlatSingleCaption(imagegenRawText);
+        const fromWrapped = extractSingleCaption(llmR.value.json);
+        const captionCandidate = flat?.caption ?? (fromWrapped != null ? fromWrapped : llmR.value.json);
+        const capR = validateNaiCaption(captionCandidate ?? emptyNaiCaption());
+        if (!capR.ok) {
+            recordParseFailure({
+                stage: '生图',
+                code: 'WORKBENCH_CAPTION_INVALID',
+                message: '工作台提示词生成结果格式无效',
+                rawText: imagegenRawText,
+            });
+            return Err(contractError({
+                code: 'WORKBENCH_CAPTION_INVALID',
+                message: '工作台提示词生成结果格式无效',
+                hint: '请检查模型是否按生图提示词结构输出',
+                traceId,
+                cause: capR.error,
+                context: { rawText: imagegenRawText, json: llmR.value.json },
+            }));
+        }
+        /** @type {{ slotId: number, caption: import('../domain/model/nai-params.js').NaiCaption, width?: number, height?: number }} */
+        const entry = withAnchor({ slotId: 1, caption: capR.value });
+        if (flat?.size) {
+            const sizeR = parseSizeSpec(flat.size);
+            if (sizeR.ok) {
+                entry.width = sizeR.value.width;
+                entry.height = sizeR.value.height;
+            }
+        }
+        captions.push(entry);
+    }
+    const first = captions[0];
     /** @type {WorkbenchWritePromptResult} */
     const result = {
-        caption: capR.value,
-        unmatchedKeys: tagR.value.unmatchedKeys ?? [],
+        caption: first.caption,
+        captions,
+        unmatchedKeys,
         messageId: vpR.value.messageId,
-        llmCallCount: 2,
+        llmCallCount: skipRecall ? 1 : 2,
     };
-    const sizeText = flat?.size;
-    if (sizeText) {
-        const sizeR = parseSizeSpec(sizeText);
-        if (sizeR.ok) {
-            result.width = sizeR.value.width;
-            result.height = sizeR.value.height;
-        }
+    if (first.width != null && first.height != null) {
+        result.width = first.width;
+        result.height = first.height;
     }
     recordLatestGeneration({
         stage: '生图',
@@ -256,17 +312,19 @@ async function writeFloorPrompt(deps, input, traceId) {
  * @property {string} naturalLanguage
  * @property {string[]} [libraryIds] 只传库 id、不传 entryIds 时，纳入这些库里已启用的全部条目
  * @property {string[]} [entryIds] 本次勾选的条目。传入后只发送这些条目，库开关和条目开关都不再扩大范围
- * @property {'entries'|'floor'} [mode] floor=楼内召回后只取一张交给生图预设
+ * @property {'entries'|'floor'} [mode] floor=楼内召回后按生图预设回写，多份全部保留
  * @property {boolean} [includeWorkbenchOnly] 已无作用。工作台楼内流程始终带上工作台专用段
  * @property {number} [messageId] 楼内流程的视点楼；缺省为最新 AI 楼
  * @property {AbortSignal} [signal]
  * @property {string} [traceId]
  * @property {string} [imageDataUrl] 反推时附上的参考图。没有则只按自然语言写提示词
+ * @property {boolean} [skipRecall] 为 true 时不跑召回，构图标签留空。缺省照旧先召回
  */
 
 /**
  * @typedef {object} WorkbenchWritePromptResult
- * @property {NaiCaption} caption
+ * @property {NaiCaption} caption 第一份。工作台编辑框用这一份
+ * @property {Array<{ slotId: number, caption: NaiCaption, anchorSentence?: string, width?: number, height?: number, analysis?: string }>} [captions] 楼内流程回的全部分。anchorSentence 是召回对上正文的生成点，按 slotId 附上；没有则不带这个字段
  * @property {string[]} unmatchedKeys 勾选条目路径恒为空；楼内流程为召回未对上的编号
  * @property {number} [width] 模型回了合法「尺寸」时填入
  * @property {number} [height]

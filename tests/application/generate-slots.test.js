@@ -346,6 +346,75 @@ describe('workbench', () => {
         assert.ok(imageJoined.includes('U=只要花园这一张'));
         assert.ok(imageJoined.includes('工作台专用段'));
         assert.equal(r.value.caption.v4_prompt.caption.base_caption, 'one garden shot');
+        assert.equal(r.value.captions.length, 1);
+        assert.equal(r.value.captions[0].slotId, 1);
+    });
+
+    it('floor mode skipRecall does not call recall and still writes the imagegen prompt', async () => {
+        const recall = makePreset('preset-recall', 'recall', 'user={{用户描述}}\nkeys={{候选 key}}');
+        const imagegen = makePreset(
+            'preset-imagegen',
+            'imagegen',
+            'T={{构图标签}} U={{用户描述}}',
+        );
+        const p = buildPipeline({
+            presets: [recall, imagegen],
+            llmComplete: async () => Ok({
+                text: 'slotid: 1\nscene: joy\nscene_uc: bad hands\n---\nslotid: 2\nscene: anger\nscene_uc: blur',
+                json: null,
+            }),
+        });
+        const r = await p.workbench.writePrompt({
+            naturalLanguage: '写表情差分',
+            mode: 'floor',
+            skipRecall: true,
+        });
+        assert.equal(isOk(r), true, r.ok ? '' : r.error?.message);
+        assert.equal(p.llmCalls.length, 1);
+        assert.equal(r.value.llmCallCount, 1);
+        const imageJoined = p.llmCalls[0].messages.map((m) => m.content).join('\n');
+        assert.equal(imageJoined.includes('keys='), false);
+        assert.ok(imageJoined.includes('U=写表情差分'));
+        assert.match(imageJoined, /T=\s*U=/);
+        assert.equal(r.value.captions.length, 2);
+    });
+
+    it('floor mode keeps every caption the model returned', async () => {
+        const recall = makePreset('preset-recall', 'recall', 'user={{用户描述}}');
+        const imagegen = makePreset('preset-imagegen', 'imagegen', 'T={{构图标签}}');
+        const p = buildPipeline({
+            presets: [recall, imagegen],
+            llmComplete: async (req) => {
+                const joined = req.messages.map((m) => m.content).join('\n');
+                if (joined.includes('user=')) {
+                    return Ok({
+                        text: '',
+                        json: {
+                            positions: [
+                                { anchor: 'Alice walked into the garden.', key: [1] },
+                            ],
+                        },
+                    });
+                }
+                return Ok({
+                    text: 'slotid: 1\nscene: first shot\nscene_uc: bad hands\n---\nslotid: 2\nscene: second shot\nscene_uc: blur',
+                    json: null,
+                });
+            },
+        });
+        const r = await p.workbench.writePrompt({
+            naturalLanguage: '两个镜头',
+            mode: 'floor',
+        });
+        assert.equal(isOk(r), true, r.ok ? '' : r.error?.message);
+        const imageJoined = p.llmCalls[1].messages.map((m) => m.content).join('\n');
+        assert.ok(imageJoined.includes('slotid: 1'));
+        assert.equal(r.value.captions.length, 2);
+        assert.equal(r.value.caption.v4_prompt.caption.base_caption, 'first shot');
+        assert.deepEqual(r.value.captions.map((item) => item.caption.v4_prompt.caption.base_caption), ['first shot', 'second shot']);
+        assert.deepEqual(r.value.captions.map((item) => item.slotId), [1, 2]);
+        assert.equal(r.value.captions[0].anchorSentence, 'Alice walked into the garden.');
+        assert.equal(r.value.captions[1].anchorSentence, undefined);
     });
 
     it('workbench artist override keeps positive and negative strings separate', async () => {
